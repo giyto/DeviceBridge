@@ -1,6 +1,7 @@
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
+    alias(libs.plugins.kotlin.serialization)
 }
 
 android {
@@ -52,6 +53,13 @@ dependencies {
     androidTestImplementation(libs.androidx.compose.ui.test.junit4)
     androidTestImplementation(libs.androidx.espresso.core)
     androidTestImplementation(libs.androidx.junit)
+    androidTestImplementation(libs.ktor.client.cio)
+    androidTestImplementation(libs.ktor.client.core)
+    androidTestImplementation(libs.ktor.client.websockets)
     debugImplementation(libs.androidx.compose.ui.test.manifest)
     debugImplementation(libs.androidx.compose.ui.tooling)
+    debugImplementation(libs.ktor.server.core)
+    debugImplementation(libs.ktor.server.cio)
+    debugImplementation(libs.ktor.server.websockets)
+    debugImplementation(libs.kotlinx.serialization.json)
 }
