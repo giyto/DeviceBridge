@@ -4,6 +4,82 @@ plugins {
     alias(libs.plugins.kotlin.serialization)
 }
 
+val webRootDirectory = rootProject.layout.projectDirectory.dir("web")
+val webOutputDirectory = layout.projectDirectory.dir("src/main/assets/web")
+val defaultNpmExecutable = if (System.getProperty("os.name").startsWith("Windows", ignoreCase = true)) {
+    "npm.cmd"
+} else {
+    "npm"
+}
+val npmExecutable = providers.gradleProperty("deviceBridgeNpmExecutable")
+    .orElse(defaultNpmExecutable)
+
+val npmCi by tasks.registering(Exec::class) {
+    group = "build"
+    description = "Installs the locked DeviceBridge web build dependencies."
+    workingDir(webRootDirectory)
+    commandLine(npmExecutable.get(), "ci", "--no-audit", "--no-fund")
+
+    inputs.files(
+        webRootDirectory.file("package.json"),
+        webRootDirectory.file("package-lock.json"),
+    ).withPathSensitivity(PathSensitivity.RELATIVE)
+    outputs.dir(webRootDirectory.dir("node_modules"))
+}
+
+val buildWebAssets by tasks.registering(Exec::class) {
+    group = "build"
+    description = "Builds the offline browser shell into Android assets."
+    dependsOn(npmCi)
+    workingDir(webRootDirectory)
+    commandLine(npmExecutable.get(), "run", "build")
+
+    inputs.files(
+        webRootDirectory.file("index.html"),
+        webRootDirectory.file("package.json"),
+        webRootDirectory.file("package-lock.json"),
+        webRootDirectory.file("tsconfig.json"),
+        webRootDirectory.file("vite.config.ts"),
+    ).withPathSensitivity(PathSensitivity.RELATIVE)
+    inputs.dir(webRootDirectory.dir("src"))
+        .withPathSensitivity(PathSensitivity.RELATIVE)
+    outputs.dir(webOutputDirectory)
+
+    doFirst {
+        outputs.files.singleFile.deleteRecursively()
+    }
+
+    doLast {
+        val outputDirectory = outputs.files.singleFile
+        val requiredOutputs = listOf(
+            outputDirectory.resolve("index.html"),
+            outputDirectory.resolve("asset-manifest.json"),
+            outputDirectory.resolve("web-manifest.json"),
+        )
+        val missingOutputs = requiredOutputs.filterNot { it.isFile && it.length() > 0L }
+        val generatedAssets = outputDirectory.resolve("assets")
+            .listFiles()
+            ?.filter { it.isFile }
+            .orEmpty()
+
+        if (missingOutputs.isNotEmpty() || generatedAssets.isEmpty()) {
+            throw GradleException(
+                "Vite web output is incomplete; refusing to package stale Android assets.",
+            )
+        }
+    }
+}
+
+tasks.matching {
+    it.name != "buildWebAssets" &&
+        (
+            it.name.contains("assets", ignoreCase = true) ||
+                it.name.contains("lint", ignoreCase = true)
+        )
+}.configureEach {
+    dependsOn(buildWebAssets)
+}
+
 android {
     namespace = "ru.hznik.devicebridge"
     compileSdk {

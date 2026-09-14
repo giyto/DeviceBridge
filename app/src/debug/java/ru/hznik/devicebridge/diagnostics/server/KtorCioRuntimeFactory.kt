@@ -4,10 +4,14 @@ import io.ktor.server.cio.CIO
 import io.ktor.server.engine.embeddedServer
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.withContext
+import ru.hznik.devicebridge.web.WebAssetProvider
+import ru.hznik.devicebridge.web.installWebRoutes
 
 class KtorCioRuntimeFactory @JvmOverloads constructor(
     private val sdkIntProvider: () -> Int = { 0 },
     private val clockMillis: () -> Long = System::currentTimeMillis,
+    private val webAssetProvider: WebAssetProvider? = null,
+    private val webHostNames: Set<String> = setOf("127.0.0.1", "localhost"),
 ) : DiagnosticServerRuntimeFactory {
 
     override suspend fun start(
@@ -15,10 +19,19 @@ class KtorCioRuntimeFactory @JvmOverloads constructor(
         token: String,
     ): DiagnosticServerRuntime {
         val startedAtMillis = clockMillis()
+        val serverPort = preferredPort.coerceAtLeast(0)
+        if (webAssetProvider != null) {
+            require(serverPort > 0) {
+                "A fixed port is required when debug web routes are enabled."
+            }
+            require(webHostNames.isNotEmpty()) {
+                "At least one debug web host name is required."
+            }
+        }
         val engine = embeddedServer(
             factory = CIO,
             host = BIND_ADDRESS,
-            port = preferredPort.coerceAtLeast(0),
+            port = serverPort,
             module = {
                 installDiagnosticRoutes(
                     token = token,
@@ -26,6 +39,14 @@ class KtorCioRuntimeFactory @JvmOverloads constructor(
                     startedAtMillis = startedAtMillis,
                     clockMillis = clockMillis,
                 )
+                webAssetProvider?.let { provider ->
+                    installWebRoutes(
+                        webAssetProvider = provider,
+                        allowedHosts = webHostNames.mapTo(mutableSetOf()) { hostName ->
+                            "$hostName:$serverPort"
+                        },
+                    )
+                }
             },
         )
 

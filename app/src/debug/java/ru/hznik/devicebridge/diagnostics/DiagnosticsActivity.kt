@@ -55,14 +55,18 @@ import ru.hznik.devicebridge.diagnostics.server.KtorCioRuntimeFactory
 import ru.hznik.devicebridge.diagnostics.server.ManagedEmbeddedServerController
 import ru.hznik.devicebridge.diagnostics.server.ServerState
 import ru.hznik.devicebridge.ui.theme.DeviceBridgeTheme
+import ru.hznik.devicebridge.web.AssetManagerWebAssetProvider
 
 class DiagnosticsActivity : ComponentActivity() {
     private val serverScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-    private val controller = ManagedEmbeddedServerController(
-        runtimeFactory = KtorCioRuntimeFactory(
-            sdkIntProvider = { Build.VERSION.SDK_INT },
-        ),
-    )
+    private val controller by lazy(LazyThreadSafetyMode.NONE) {
+        ManagedEmbeddedServerController(
+            runtimeFactory = KtorCioRuntimeFactory(
+                sdkIntProvider = { Build.VERSION.SDK_INT },
+                webAssetProvider = AssetManagerWebAssetProvider(assets),
+            ),
+        )
+    }
     private val permissionError = mutableStateOf<String?>(null)
 
     private val localNetworkPermissionLauncher = registerForActivityResult(

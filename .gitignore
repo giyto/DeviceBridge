@@ -13,3 +13,7 @@
 .externalNativeBuild
 .cxx
 local.properties
+/web/node_modules/
+/web/.vite/
+/app/src/main/assets/web/*
+!/app/src/main/assets/web/.gitkeep

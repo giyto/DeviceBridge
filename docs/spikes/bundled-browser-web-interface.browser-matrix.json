@@ -1,0 +1,39 @@
+{
+  "targetUrl": "http://127.0.0.1:8787/",
+  "generatedAt": "2026-09-14T15:33:04.394Z",
+  "assertions": {
+    "statusState": "available",
+    "warningVisible": true,
+    "noHorizontalOverflow": true,
+    "keyboardFocusVisible": true,
+    "maximumLoadMs": 5000,
+    "externalRequestCount": 0,
+    "serviceWorkerCount": 0
+  },
+  "browsers": [
+    {
+      "name": "Chrome",
+      "version": "153.0.8010.36",
+      "scenarios": [
+        { "width": 360, "theme": "light", "loadMs": 289 },
+        { "width": 360, "theme": "dark", "loadMs": 244 },
+        { "width": 768, "theme": "light", "loadMs": 163 },
+        { "width": 768, "theme": "dark", "loadMs": 97 },
+        { "width": 1920, "theme": "light", "loadMs": 99 },
+        { "width": 1920, "theme": "dark", "loadMs": 144 }
+      ]
+    },
+    {
+      "name": "Edge",
+      "version": "150.0.4078.105",
+      "scenarios": [
+        { "width": 360, "theme": "light", "loadMs": 240 },
+        { "width": 360, "theme": "dark", "loadMs": 108 },
+        { "width": 768, "theme": "light", "loadMs": 164 },
+        { "width": 768, "theme": "dark", "loadMs": 120 },
+        { "width": 1920, "theme": "light", "loadMs": 114 },
+        { "width": 1920, "theme": "dark", "loadMs": 108 }
+      ]
+    }
+  ]
+}
