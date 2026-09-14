@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="light dark" />
+    <meta
+      name="description"
+      content="Локальный браузерный интерфейс DeviceBridge для связи с Android-устройством."
+    />
+    <title>DeviceBridge — локальная связь</title>
+    <link rel="stylesheet" href="/src/styles.css" />
+  </head>
+  <body>
+    <a class="skip-link" href="#main-content">Перейти к содержимому</a>
+
+    <header class="site-header">
+      <div class="container header-row">
+        <a class="brand" href="/" aria-label="DeviceBridge, главная">
+          <span class="brand-mark" aria-hidden="true">DB</span>
+          <span>DeviceBridge</span>
+        </a>
+        <span class="local-badge">
+          <span class="local-badge__dot" aria-hidden="true"></span>
+          Только локально
+        </span>
+      </div>
+    </header>
+
+    <main id="main-content" class="container shell">
+      <section class="hero" aria-labelledby="page-title">
+        <p class="eyebrow">Телефон и компьютер — рядом</p>
+        <h1 id="page-title">DeviceBridge</h1>
+        <p class="hero__lead">
+          Интерфейс загружен прямо с вашего Android-устройства. Интернет и отдельная
+          программа для компьютера не нужны.
+        </p>
+      </section>
+
+      <section
+        class="status-card"
+        data-role="status"
+        data-state="checking"
+        role="status"
+        aria-live="polite"
+        aria-atomic="true"
+      >
+        <div class="status-card__icon" aria-hidden="true">
+          <span class="status-card__pulse"></span>
+        </div>
+        <div class="status-card__content">
+          <p class="status-card__label">Состояние локальной связи</p>
+          <h2 data-role="status-title">Проверяем DeviceBridge…</h2>
+          <p data-role="status-detail">Это займёт несколько секунд.</p>
+
+          <dl class="version-list" data-role="version-data" hidden>
+            <div>
+              <dt>Протокол</dt>
+              <dd data-role="protocol-version">—</dd>
+            </div>
+            <div>
+              <dt>Web assets</dt>
+              <dd data-role="asset-version">—</dd>
+            </div>
+          </dl>
+
+          <button class="secondary-button" data-action="retry" type="button" hidden>
+            Проверить снова
+          </button>
+        </div>
+      </section>
+
+      <aside class="security-note" data-role="security-warning" role="note">
+        <span class="security-note__icon" aria-hidden="true">!</span>
+        <div>
+          <h2>Используйте только в доверенной сети</h2>
+          <p>
+            Локальный HTTP не шифрует трафик. Не передавайте чувствительные данные в
+            публичном Wi-Fi или чужой сети.
+          </p>
+        </div>
+      </aside>
+
+      <section class="stage-card" aria-labelledby="stage-title">
+        <p class="stage-card__step">Этап 3</p>
+        <h2 id="stage-title">Основа браузерного интерфейса готовится</h2>
+        <p>
+          Подключение и передача появятся позже — после защищённого подтверждения
+          браузера на телефоне.
+        </p>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <div class="container footer-row">
+        <span>DeviceBridge</span>
+        <span>Данные остаются в вашей локальной сети</span>
+      </div>
+    </footer>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

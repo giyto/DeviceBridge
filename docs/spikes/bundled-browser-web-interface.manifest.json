@@ -1,0 +1,67 @@
+{
+  "identical": true,
+  "first": [
+    {
+      "path": ".gitkeep",
+      "bytes": 54,
+      "sha256": "da528a391a461270651de657bebc922d63f380ac49af20f72b9025db8550f44e"
+    },
+    {
+      "path": "asset-manifest.json",
+      "bytes": 185,
+      "sha256": "dd809ae61d8d047e4d3b72c9eaebb0a903dccc296f23bbdc612871379208abf7"
+    },
+    {
+      "path": "assets/index-CA8-tZ9J.css",
+      "bytes": 6801,
+      "sha256": "2dfeee00140609cf9ecc84b8a790340766f1fa7d833e24aede69d05674a9dc4c"
+    },
+    {
+      "path": "assets/index-CL_A0V6F.js",
+      "bytes": 5336,
+      "sha256": "d1107b3e0fb87bd1e0134d151ffe1284e75c7ef8869a92a31c53c294b6e59ac7"
+    },
+    {
+      "path": "index.html",
+      "bytes": 4069,
+      "sha256": "0b7fd1b745ac334e2420c55dc3b2f2eeec7e644b9dba6b5f9d2ec79c9e57bc5a"
+    },
+    {
+      "path": "web-manifest.json",
+      "bytes": 75,
+      "sha256": "c29994963a4829168335b12633db241b2503457d5ef14d2b3066975a55331ea0"
+    }
+  ],
+  "second": [
+    {
+      "path": ".gitkeep",
+      "bytes": 54,
+      "sha256": "da528a391a461270651de657bebc922d63f380ac49af20f72b9025db8550f44e"
+    },
+    {
+      "path": "asset-manifest.json",
+      "bytes": 185,
+      "sha256": "dd809ae61d8d047e4d3b72c9eaebb0a903dccc296f23bbdc612871379208abf7"
+    },
+    {
+      "path": "assets/index-CA8-tZ9J.css",
+      "bytes": 6801,
+      "sha256": "2dfeee00140609cf9ecc84b8a790340766f1fa7d833e24aede69d05674a9dc4c"
+    },
+    {
+      "path": "assets/index-CL_A0V6F.js",
+      "bytes": 5336,
+      "sha256": "d1107b3e0fb87bd1e0134d151ffe1284e75c7ef8869a92a31c53c294b6e59ac7"
+    },
+    {
+      "path": "index.html",
+      "bytes": 4069,
+      "sha256": "0b7fd1b745ac334e2420c55dc3b2f2eeec7e644b9dba6b5f9d2ec79c9e57bc5a"
+    },
+    {
+      "path": "web-manifest.json",
+      "bytes": 75,
+      "sha256": "c29994963a4829168335b12633db241b2503457d5ef14d2b3066975a55331ea0"
+    }
+  ]
+}
