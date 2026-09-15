@@ -18,18 +18,18 @@ import java.util.Locale
 fun Application.installWebRoutes(
     webAssetProvider: WebAssetProvider,
     allowedHosts: Set<String>,
-) {
-    require(allowedHosts.isNotEmpty()) { "At least one web host must be allowed." }
-    val normalizedAllowedHosts = allowedHosts.mapTo(mutableSetOf()) {
-        it.lowercase(Locale.ROOT)
-    }
+) = installWebRoutes(webAssetProvider) { allowedHosts }
 
+fun Application.installWebRoutes(
+    webAssetProvider: WebAssetProvider,
+    allowedHosts: () -> Set<String>,
+) {
     routing {
         get("/") {
             call.respondWebAsset(
                 requestPath = "/",
                 webAssetProvider = webAssetProvider,
-                allowedHosts = normalizedAllowedHosts,
+                allowedHosts = allowedHosts,
                 cacheControl = NO_STORE,
             )
         }
@@ -38,7 +38,7 @@ fun Application.installWebRoutes(
             call.respondWebAsset(
                 requestPath = "/web-manifest.json",
                 webAssetProvider = webAssetProvider,
-                allowedHosts = normalizedAllowedHosts,
+                allowedHosts = allowedHosts,
                 cacheControl = NO_STORE,
             )
         }
@@ -47,7 +47,7 @@ fun Application.installWebRoutes(
             call.respondWebAsset(
                 requestPath = call.request.path(),
                 webAssetProvider = webAssetProvider,
-                allowedHosts = normalizedAllowedHosts,
+                allowedHosts = allowedHosts,
                 cacheControl = IMMUTABLE_ASSET_CACHE,
             )
         }
@@ -57,11 +57,14 @@ fun Application.installWebRoutes(
 private suspend fun ApplicationCall.respondWebAsset(
     requestPath: String,
     webAssetProvider: WebAssetProvider,
-    allowedHosts: Set<String>,
+    allowedHosts: () -> Set<String>,
     cacheControl: String,
 ) {
     addWebSecurityHeaders()
-    if (!isAllowedWebRequest(allowedHosts)) {
+    val normalizedAllowedHosts = allowedHosts().mapTo(mutableSetOf()) {
+        it.lowercase(Locale.ROOT)
+    }
+    if (normalizedAllowedHosts.isEmpty() || !isAllowedWebRequest(normalizedAllowedHosts)) {
         respondText(
             text = "Forbidden",
             contentType = ContentType.Text.Plain,

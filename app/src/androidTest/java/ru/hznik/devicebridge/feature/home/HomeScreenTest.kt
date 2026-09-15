@@ -1,10 +1,26 @@
 package ru.hznik.devicebridge.feature.home
 
+import android.content.ClipboardManager
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.ClipEntry
+import androidx.compose.ui.platform.Clipboard
+import androidx.compose.ui.platform.LocalClipboard
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.assertTextContains
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.unit.Density
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import org.junit.Assert.assertEquals
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -12,25 +28,161 @@ import ru.hznik.devicebridge.ui.theme.DeviceBridgeTheme
 
 @RunWith(AndroidJUnit4::class)
 class HomeScreenTest {
-
     @get:Rule
     val composeRule = createComposeRule()
 
     @Test
-    fun stoppedServerShowsHonestStateAndDisabledTransferActions() {
+    fun lifecycleStatesShowHonestCardsAndBlockConflictingCommands() {
+        var state by mutableStateOf(
+            ServerSessionUiState(status = HomeServerStatus.Starting),
+        )
         composeRule.setContent {
-            DeviceBridgeTheme {
-                HomeScreen(uiState = ServerSessionUiState())
-            }
+            DeviceBridgeTheme { HomeScreen(uiState = state) }
         }
+        composeRule.onNodeWithText("Сервер запускается").assertIsDisplayed()
+        composeRule.onNodeWithText("Запуск…").assertIsNotEnabled()
 
+        composeRule.runOnIdle {
+            state = ServerSessionUiState(status = HomeServerStatus.Stopping)
+        }
+        composeRule.onNodeWithText("Сервер останавливается").assertIsDisplayed()
+        composeRule.onNodeWithText("Остановка…").assertIsNotEnabled()
+
+        composeRule.runOnIdle {
+            state = ServerSessionUiState(
+                status = HomeServerStatus.Error,
+                errorMessage = "Соединение с локальной сетью потеряно.",
+            )
+        }
+        composeRule.onNodeWithText("Нужен повторный запуск").assertIsDisplayed()
+        composeRule.onNodeWithText("Повторить запуск").assertIsEnabled()
+        composeRule.onNodeWithText("Адрес сервера", substring = true)
+            .assertDoesNotExist()
+    }
+
+    @Test
+    fun runningShowsOnlyActualAddressLiveUptimeAndCopiesWithAccessibleAction() {
+        val address = "http://192.168.1.24:49321"
+        val clipboard = RecordingClipboard()
+        setScreen(
+            ServerSessionUiState(
+                status = HomeServerStatus.Running,
+                localAddress = address,
+                uptimeSeconds = 3_661,
+            ),
+            clipboard = clipboard,
+        )
+
+        composeRule.onNodeWithText("Сервер запущен").assertIsDisplayed()
+        composeRule.onNodeWithText(address).assertIsDisplayed()
+        composeRule.onNodeWithText("01:01:01").assertIsDisplayed()
+        composeRule.onNodeWithContentDescription("Скопировать адрес DeviceBridge")
+            .assertIsDisplayed()
+            .performClick()
+
+        composeRule.waitUntil(timeoutMillis = 5_000) {
+            clipboard.clipEntry
+                ?.clipData
+                ?.getItemAt(0)
+                ?.text
+                ?.toString() == address
+        }
+        assertEquals(
+            address,
+            clipboard.clipEntry?.clipData?.getItemAt(0)?.text?.toString(),
+        )
+    }
+
+    @Test
+    fun stoppedAndRunningWithoutPairingKeepTransfersDisabledWithExplanation() {
+        var state by mutableStateOf(ServerSessionUiState())
+        composeRule.setContent {
+            DeviceBridgeTheme { HomeScreen(uiState = state) }
+        }
         composeRule.onNodeWithText("Сервер остановлен").assertIsDisplayed()
+        composeRule.onNodeWithText("Запустить сервер").assertIsEnabled()
+        composeRule.onNodeWithText("Текст").assertIsNotEnabled()
+        composeRule.onNodeWithText("Файлы").assertIsNotEnabled()
+
+        composeRule.runOnIdle {
+            state = ServerSessionUiState(
+                status = HomeServerStatus.Running,
+                localAddress = "http://192.168.1.24:8787",
+            )
+        }
         composeRule.onNodeWithText("Текст").assertIsNotEnabled()
         composeRule.onNodeWithText("Файлы").assertIsNotEnabled()
         composeRule.onNodeWithText(
-            "Сначала запустите сервер, затем подключите браузер.",
-        ).assertIsDisplayed()
-        composeRule.onNodeWithText("Адрес", substring = true).assertDoesNotExist()
-        composeRule.onNodeWithText("Код подключения", substring = true).assertDoesNotExist()
+            "Станут доступны после безопасного подключения браузера на следующем этапе.",
+        ).performScrollTo().assertIsDisplayed()
+    }
+
+    @Test
+    fun permissionAndNotificationMessagesHaveClearActions() {
+        setScreen(
+            ServerSessionUiState(
+                isPermissionExplanationVisible = true,
+                showNotificationWarning = true,
+            ),
+        )
+
+        composeRule.onNodeWithText("Разрешите доступ к локальной сети")
+            .assertIsDisplayed()
+        composeRule.onNodeWithText("Повторить запрос").assertIsEnabled()
+        composeRule.onNodeWithText("Уведомления отключены").assertIsDisplayed()
+    }
+
+    @Test
+    fun darkThemeWithLargeFontKeepsPrimaryInformationVisible() {
+        composeRule.setContent {
+            CompositionLocalProvider(
+                LocalDensity provides Density(density = 1f, fontScale = 2f),
+            ) {
+                DeviceBridgeTheme(darkTheme = true) {
+                    HomeScreen(
+                        uiState = ServerSessionUiState(
+                            status = HomeServerStatus.Running,
+                            localAddress = "http://192.168.1.24:8787",
+                        ),
+                    )
+                }
+            }
+        }
+
+        composeRule.onNodeWithText("DeviceBridge").assertIsDisplayed()
+        composeRule.onNodeWithText("Сервер запущен").assertIsDisplayed()
+        composeRule.onNodeWithText("http://192.168.1.24:8787")
+            .assertTextContains("192.168.1.24", substring = true)
+    }
+
+    private fun setScreen(
+        state: ServerSessionUiState,
+        clipboard: Clipboard? = null,
+    ) {
+        composeRule.setContent {
+            DeviceBridgeTheme {
+                if (clipboard == null) {
+                    HomeScreen(uiState = state)
+                } else {
+                    CompositionLocalProvider(LocalClipboard provides clipboard) {
+                        HomeScreen(uiState = state)
+                    }
+                }
+            }
+        }
+    }
+
+    private class RecordingClipboard : Clipboard {
+        @Volatile
+        var clipEntry: ClipEntry? = null
+
+        override suspend fun getClipEntry(): ClipEntry? = clipEntry
+
+        override suspend fun setClipEntry(clipEntry: ClipEntry?) {
+            this.clipEntry = clipEntry
+        }
+
+        override val nativeClipboard: ClipboardManager
+            get() = error("Native clipboard is not used by this test")
     }
 }
