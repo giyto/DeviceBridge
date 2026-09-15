@@ -11,6 +11,8 @@ import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 import ru.hznik.devicebridge.app.DeviceBridgeApp
+import ru.hznik.devicebridge.feature.home.HomeScreen
+import ru.hznik.devicebridge.feature.home.ServerSessionUiState
 import ru.hznik.devicebridge.ui.theme.DeviceBridgeTheme
 
 @RunWith(AndroidJUnit4::class)
@@ -58,7 +60,9 @@ class SecondaryScreensTest {
     private fun setAppContent() {
         composeRule.setContent {
             DeviceBridgeTheme {
-                DeviceBridgeApp()
+                DeviceBridgeApp(
+                    homeContent = { HomeScreen(ServerSessionUiState()) },
+                )
             }
         }
     }

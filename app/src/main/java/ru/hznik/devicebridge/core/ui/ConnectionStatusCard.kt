@@ -19,6 +19,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
@@ -29,6 +30,8 @@ fun ConnectionStatusCard(
     statusLabel: String,
     supportingText: String,
     modifier: Modifier = Modifier,
+    statusColor: Color = MaterialTheme.colorScheme.error,
+    statusContainerColor: Color = MaterialTheme.colorScheme.errorContainer,
 ) {
     Card(
         modifier = modifier
@@ -49,7 +52,7 @@ fun ConnectionStatusCard(
                 modifier = Modifier
                     .size(44.dp)
                     .background(
-                        color = MaterialTheme.colorScheme.errorContainer,
+                        color = statusContainerColor,
                         shape = CircleShape,
                     ),
                 contentAlignment = Alignment.Center,
@@ -58,7 +61,7 @@ fun ConnectionStatusCard(
                     modifier = Modifier
                         .size(12.dp)
                         .background(
-                            color = MaterialTheme.colorScheme.error,
+                            color = statusColor,
                             shape = CircleShape,
                         ),
                 )

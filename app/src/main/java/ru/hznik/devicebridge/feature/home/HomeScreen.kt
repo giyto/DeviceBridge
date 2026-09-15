@@ -1,22 +1,35 @@
 package ru.hznik.devicebridge.feature.home
 
+import android.content.ClipData
 import android.content.res.Configuration
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalClipboard
+import androidx.compose.ui.platform.toClipEntry
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.launch
 import ru.hznik.devicebridge.core.ui.ConnectionStatusCard
 import ru.hznik.devicebridge.core.ui.QuickActionCard
 import ru.hznik.devicebridge.ui.theme.DeviceBridgeTheme
@@ -25,40 +38,88 @@ import ru.hznik.devicebridge.ui.theme.DeviceBridgeTheme
 fun HomeScreen(
     uiState: ServerSessionUiState,
     modifier: Modifier = Modifier,
+    onAction: (HomeAction) -> Unit = {},
 ) {
+    val clipboard = LocalClipboard.current
+    val coroutineScope = rememberCoroutineScope()
+    val statusContent = statusContent(uiState)
+
     Column(
         modifier = modifier
             .fillMaxSize()
             .verticalScroll(rememberScrollState())
-            .padding(PaddingValues(horizontal = 20.dp, vertical = 28.dp)),
-        verticalArrangement = Arrangement.spacedBy(24.dp),
+            .padding(PaddingValues(horizontal = 20.dp, vertical = 24.dp)),
+        verticalArrangement = Arrangement.spacedBy(18.dp),
     ) {
-        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Text(
                 text = "DeviceBridge",
                 style = MaterialTheme.typography.displaySmall,
                 fontWeight = FontWeight.Bold,
             )
             Text(
-                text = "Передача данных между телефоном и браузером в вашей локальной сети.",
+                text = "Телефон и компьютер — рядом, без облака и внешнего сервера.",
                 style = MaterialTheme.typography.bodyLarge,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
 
         ConnectionStatusCard(
-            statusLabel = "Сервер остановлен",
-            supportingText = "Телефон пока не принимает подключения от компьютера.",
+            statusLabel = statusContent.title,
+            supportingText = statusContent.description,
+            statusColor = statusContent.color,
+            statusContainerColor = statusContent.containerColor,
         )
 
-        Button(
-            onClick = {},
-            enabled = false,
-            modifier = Modifier.fillMaxWidth(),
-            contentPadding = PaddingValues(horizontal = 20.dp, vertical = 16.dp),
+        if (
+            uiState.status == HomeServerStatus.Running &&
+            uiState.localAddress != null
         ) {
-            Text("Запустить сервер")
+            ServerDetailsCard(
+                address = uiState.localAddress,
+                uptimeSeconds = uiState.uptimeSeconds,
+                onCopy = {
+                    coroutineScope.launch {
+                        clipboard.setClipEntry(
+                            ClipData.newPlainText(
+                                "DeviceBridge address",
+                                uiState.localAddress,
+                            ).toClipEntry(),
+                        )
+                    }
+                },
+            )
         }
+
+        if (uiState.isPermissionExplanationVisible) {
+            MessageCard(
+                title = "Разрешите доступ к локальной сети",
+                message = if (uiState.openSettingsForPermission) {
+                    "Без этого разрешения компьютер не увидит телефон. Включите его в настройках приложения."
+                } else {
+                    "DeviceBridge работает только внутри вашей Wi-Fi сети. Разрешение нужно для локального подключения."
+                },
+                actionLabel = if (uiState.openSettingsForPermission) {
+                    "Открыть настройки"
+                } else {
+                    "Повторить запрос"
+                },
+                onAction = { onAction(HomeAction.RetryPermissionClicked) },
+                isWarning = false,
+            )
+        }
+
+        if (uiState.showNotificationWarning) {
+            MessageCard(
+                title = "Уведомления отключены",
+                message = "Сервер может работать, но Android не покажет его состояние в шторке.",
+                actionLabel = "Понятно",
+                onAction = { onAction(HomeAction.NotificationWarningDismissed) },
+                isWarning = true,
+            )
+        }
+
+        LifecycleButton(uiState = uiState, onAction = onAction)
 
         Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Text(
@@ -83,30 +144,202 @@ fun HomeScreen(
         }
 
         Text(
-            text = "Сначала запустите сервер, затем подключите браузер.",
+            text = "Станут доступны после безопасного подключения браузера на следующем этапе.",
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
     }
 }
 
+@Composable
+private fun LifecycleButton(
+    uiState: ServerSessionUiState,
+    onAction: (HomeAction) -> Unit,
+) {
+    when (uiState.status) {
+        HomeServerStatus.Running -> OutlinedButton(
+            onClick = { onAction(HomeAction.StopClicked) },
+            enabled = uiState.canStop,
+            modifier = Modifier.fillMaxWidth(),
+            contentPadding = PaddingValues(vertical = 15.dp),
+        ) { Text("Остановить сервер") }
+
+        HomeServerStatus.Stopping -> OutlinedButton(
+            onClick = {},
+            enabled = false,
+            modifier = Modifier.fillMaxWidth(),
+            contentPadding = PaddingValues(vertical = 15.dp),
+        ) { Text("Остановка…") }
+
+        else -> Button(
+            onClick = { onAction(HomeAction.StartClicked) },
+            enabled = uiState.canStart,
+            modifier = Modifier.fillMaxWidth(),
+            contentPadding = PaddingValues(vertical = 15.dp),
+        ) {
+            Text(
+                when (uiState.status) {
+                    HomeServerStatus.Starting -> "Запуск…"
+                    HomeServerStatus.Error -> "Повторить запуск"
+                    else -> "Запустить сервер"
+                },
+            )
+        }
+    }
+}
+
+@Composable
+private fun ServerDetailsCard(
+    address: String,
+    uptimeSeconds: Long,
+    onCopy: () -> Unit,
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(24.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceContainer,
+        ),
+    ) {
+        Column(
+            modifier = Modifier.padding(20.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Text(
+                text = "Адрес сервера",
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Text(
+                text = address,
+                style = MaterialTheme.typography.bodyLarge,
+                fontWeight = FontWeight.SemiBold,
+            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                Column {
+                    Text(
+                        text = "Время работы",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Text(formatUptime(uptimeSeconds))
+                }
+                TextButton(
+                    onClick = onCopy,
+                    modifier = Modifier.semantics {
+                        contentDescription = "Скопировать адрес DeviceBridge"
+                    },
+                ) { Text("Копировать") }
+            }
+        }
+    }
+}
+
+@Composable
+private fun MessageCard(
+    title: String,
+    message: String,
+    actionLabel: String,
+    onAction: () -> Unit,
+    isWarning: Boolean,
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(22.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = if (isWarning) {
+                MaterialTheme.colorScheme.tertiaryContainer
+            } else {
+                MaterialTheme.colorScheme.errorContainer
+            },
+        ),
+    ) {
+        Column(
+            modifier = Modifier.padding(18.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Text(title, fontWeight = FontWeight.SemiBold)
+            Text(message, style = MaterialTheme.typography.bodyMedium)
+            TextButton(onClick = onAction) { Text(actionLabel) }
+        }
+    }
+}
+
+@Composable
+private fun statusContent(uiState: ServerSessionUiState): StatusContent =
+    when (uiState.status) {
+        HomeServerStatus.Stopped -> StatusContent(
+            "Сервер остановлен",
+            "Телефон пока не принимает подключения от компьютера.",
+            MaterialTheme.colorScheme.outline,
+            MaterialTheme.colorScheme.surfaceVariant,
+        )
+        HomeServerStatus.Starting -> StatusContent(
+            "Сервер запускается",
+            "Выбираем локальную сеть и открываем безопасную web-оболочку.",
+            MaterialTheme.colorScheme.primary,
+            MaterialTheme.colorScheme.primaryContainer,
+        )
+        HomeServerStatus.Running -> StatusContent(
+            "Сервер запущен",
+            "Откройте показанный адрес на компьютере в той же сети.",
+            MaterialTheme.colorScheme.primary,
+            MaterialTheme.colorScheme.primaryContainer,
+        )
+        HomeServerStatus.Stopping -> StatusContent(
+            "Сервер останавливается",
+            "Закрываем локальный адрес и освобождаем ресурсы.",
+            MaterialTheme.colorScheme.outline,
+            MaterialTheme.colorScheme.surfaceVariant,
+        )
+        HomeServerStatus.Error -> StatusContent(
+            "Нужен повторный запуск",
+            uiState.errorMessage ?: "Не удалось продолжить работу сервера.",
+            MaterialTheme.colorScheme.error,
+            MaterialTheme.colorScheme.errorContainer,
+        )
+    }
+
+private data class StatusContent(
+    val title: String,
+    val description: String,
+    val color: androidx.compose.ui.graphics.Color,
+    val containerColor: androidx.compose.ui.graphics.Color,
+)
+
+internal fun formatUptime(totalSeconds: Long): String {
+    val safeSeconds = totalSeconds.coerceAtLeast(0)
+    val hours = safeSeconds / 3_600
+    val minutes = (safeSeconds % 3_600) / 60
+    val seconds = safeSeconds % 60
+    return "%02d:%02d:%02d".format(hours, minutes, seconds)
+}
+
 @Preview(name = "Главная — светлая", showBackground = true)
 @Composable
 private fun HomeScreenLightPreview() {
-    DeviceBridgeTheme(darkTheme = false, dynamicColor = false) {
+    DeviceBridgeTheme(darkTheme = false) {
         HomeScreen(uiState = ServerSessionUiState())
     }
 }
 
 @Preview(
-    name = "Главная — тёмная, шрифт 200%",
+    name = "Главная — тёмная, сервер запущен",
     showBackground = true,
     uiMode = Configuration.UI_MODE_NIGHT_YES,
-    fontScale = 2f,
 )
 @Composable
-private fun HomeScreenDarkLargeFontPreview() {
-    DeviceBridgeTheme(darkTheme = true, dynamicColor = false) {
-        HomeScreen(uiState = ServerSessionUiState())
+private fun HomeScreenDarkRunningPreview() {
+    DeviceBridgeTheme(darkTheme = true) {
+        HomeScreen(
+            uiState = ServerSessionUiState(
+                status = HomeServerStatus.Running,
+                localAddress = "http://192.168.1.24:49321",
+                uptimeSeconds = 3_661,
+            ),
+        )
     }
 }
