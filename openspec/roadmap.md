@@ -16,7 +16,7 @@ DeviceBridge создаётся как одно Android-приложение. Т
 
 Архив: openspec/changes/archive/2026-09-14-establish-android-foundation.
 
-### 2. validate-embedded-ktor-server — текущий change
+### 2. validate-embedded-ktor-server — завершён и архивирован
 
 Цель: снять главный технический риск одноприложенной архитектуры до разработки функций.
 
@@ -26,7 +26,9 @@ DeviceBridge создаётся как одно Android-приложение. Т
 
 Следующий этап разрешён только при verdict=accept. При verdict=replace сначала создаётся отдельный change замены server adapter.
 
-### 3. bundle-browser-web-interface
+Архив: openspec/changes/archive/2026-09-14-validate-embedded-ktor-server.
+
+### 3. bundle-browser-web-interface — завершён и архивирован
 
 Цель: встроить в APK минимальную статическую веб-страницу и воспроизводимый Vite build pipeline.
 
@@ -34,7 +36,9 @@ DeviceBridge создаётся как одно Android-приложение. Т
 
 Зависимость: положительный результат этапа 2.
 
-### 4. add-server-lifecycle
+Архив: openspec/changes/archive/2026-09-14-bundle-browser-web-interface.
+
+### 4. add-server-lifecycle — завершён и архивирован
 
 Цель: превратить принятый spike в production lifecycle локального сервера.
 
@@ -42,7 +46,9 @@ DeviceBridge создаётся как одно Android-приложение. Т
 
 Зависимость: этапы 2–3.
 
-### 5. add-secure-browser-session
+Архив: openspec/changes/archive/2026-09-15-add-server-lifecycle.
+
+### 5. add-secure-browser-session — завершён и архивирован
 
 Цель: разрешать доступ только подтверждённому браузеру в локальной сети.
 
@@ -50,7 +56,9 @@ DeviceBridge создаётся как одно Android-приложение. Т
 
 Зависимость: этап 4.
 
-### 6. add-text-and-link-transfer
+Архив: openspec/changes/archive/2026-09-16-add-secure-browser-session.
+
+### 6. add-text-and-link-transfer — завершён и архивирован
 
 Цель: реализовать ежедневный обмен текстом и ссылками между телефоном и браузером.
 
@@ -58,7 +66,9 @@ DeviceBridge создаётся как одно Android-приложение. Т
 
 Зависимость: этап 5.
 
-### 7. add-file-transfer
+Архив: openspec/changes/archive/2026-09-16-add-text-and-link-transfer.
+
+### 7. add-file-transfer — текущий change
 
 Цель: реализовать двустороннюю передачу файлов без внешнего сервера.
 
