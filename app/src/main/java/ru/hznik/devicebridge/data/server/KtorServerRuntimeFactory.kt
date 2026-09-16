@@ -13,9 +13,12 @@ import ru.hznik.devicebridge.data.network.LanNetworkSnapshotProvider
 import ru.hznik.devicebridge.domain.model.ServerEndpoint
 import ru.hznik.devicebridge.data.session.BrowserSessionCoordinator
 import ru.hznik.devicebridge.data.session.SessionGenerationHandle
+import ru.hznik.devicebridge.data.text.TextSessionEventHub
+import ru.hznik.devicebridge.data.text.TextTransferCoordinator
 import ru.hznik.devicebridge.domain.session.ServerGenerationId
 import ru.hznik.devicebridge.web.WebAssetProvider
 import ru.hznik.devicebridge.web.installSessionRoutes
+import ru.hznik.devicebridge.web.installTextRoutes
 import ru.hznik.devicebridge.web.RemoteClientAddress
 import ru.hznik.devicebridge.web.installWebRoutes
 
@@ -25,6 +28,8 @@ class KtorServerRuntimeFactory @Inject constructor(
     private val endpointResolver: LanEndpointResolver,
     private val webAssetProvider: WebAssetProvider,
     private val browserSessionCoordinator: BrowserSessionCoordinator,
+    private val textTransferCoordinator: TextTransferCoordinator,
+    private val textSessionEventHub: TextSessionEventHub,
     private val monotonicClock: MonotonicClock,
 ) : ServerRuntimeFactory {
 
@@ -33,6 +38,8 @@ class KtorServerRuntimeFactory @Inject constructor(
         endpointResolver = endpointResolver,
         webAssetProvider = webAssetProvider,
         browserSessionCoordinator = browserSessionCoordinator,
+        textTransferCoordinator = textTransferCoordinator,
+        textSessionEventHub = textSessionEventHub,
         monotonicClock = monotonicClock,
     )
 }
@@ -42,6 +49,8 @@ private class KtorServerRuntime(
     private val endpointResolver: LanEndpointResolver,
     private val webAssetProvider: WebAssetProvider,
     private val browserSessionCoordinator: BrowserSessionCoordinator,
+    private val textTransferCoordinator: TextTransferCoordinator,
+    private val textSessionEventHub: TextSessionEventHub,
     private val monotonicClock: MonotonicClock,
 ) : ServerRuntime {
 
@@ -80,6 +89,15 @@ private class KtorServerRuntime(
                     },
                     monotonicClockMs = monotonicClock::nowMs,
                     wallClockMs = System::currentTimeMillis,
+                    textCoordinator = textTransferCoordinator,
+                    textEventHub = textSessionEventHub,
+                )
+                installTextRoutes(
+                    sessionCoordinator = browserSessionCoordinator,
+                    textCoordinator = textTransferCoordinator,
+                    generationHandle = { sessionHandle.get() },
+                    allowedHosts = { allowedAuthorities.get() },
+                    wallClockMs = System::currentTimeMillis,
                 )
             },
         )
@@ -112,13 +130,15 @@ private class KtorServerRuntime(
     override suspend fun activateSessionGeneration(generation: Long) {
         check(stopServer != null) { "Listener must be started before session generation" }
         check(sessionHandle.get() == null) { "Session generation is already active" }
-        sessionHandle.set(
-            browserSessionCoordinator.activate(ServerGenerationId(generation)),
-        )
+        val generationId = ServerGenerationId(generation)
+        val handle = browserSessionCoordinator.activate(generationId)
+        textTransferCoordinator.activate(generationId)
+        sessionHandle.set(handle)
     }
 
     override suspend fun closeSessionGeneration() {
         val handle = sessionHandle.getAndSet(null) ?: return
+        textTransferCoordinator.close(handle.generationId)
         browserSessionCoordinator.closeGeneration(handle)
     }
 

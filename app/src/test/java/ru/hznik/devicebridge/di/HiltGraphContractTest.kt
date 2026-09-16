@@ -38,6 +38,32 @@ class HiltGraphContractTest {
         assertTrue(module.contains("SupervisorJob()"))
     }
 
+    @Test
+    fun textTransferDependenciesAreInstalledInSingletonGraphWithoutUiOrKtorInDomain() {
+        val module = read(
+            "src/main/java/ru/hznik/devicebridge/di/ServerLifecycleModule.kt",
+        )
+        val repository = read(
+            "src/main/java/ru/hznik/devicebridge/domain/repository/TextTransferRepository.kt",
+        )
+        val useCases = read(
+            "src/main/java/ru/hznik/devicebridge/domain/usecase/TextTransferUseCases.kt",
+        )
+
+        assertTrue(module.contains("provideTextSessionEventHub"))
+        assertTrue(module.contains("provideTextTransferCoordinator"))
+        assertTrue(module.contains("provideTextTransferRepository"))
+        assertTrue(module.contains("provideObserveTextTransfersUseCase"))
+        assertTrue(module.contains("provideSendTextToBrowserUseCase"))
+        assertTrue(module.contains("provideReceiveTextFromBrowserUseCase"))
+        assertTrue(module.contains("provideRetryTextTransferUseCase"))
+        listOf(repository, useCases).forEach { source ->
+            assertTrue(!source.contains("io.ktor"))
+            assertTrue(!source.contains("android."))
+            assertTrue(!source.contains("androidx.compose"))
+        }
+    }
+
     private fun read(relativePath: String): String {
         val path = Path.of(relativePath)
         assertTrue("Expected source file: $relativePath", Files.exists(path))

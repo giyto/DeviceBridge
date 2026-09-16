@@ -24,6 +24,8 @@ import kotlinx.coroutines.SupervisorJob
 import ru.hznik.devicebridge.data.session.BrowserSessionCoordinator
 import ru.hznik.devicebridge.data.session.security.JavaCryptographicRandom
 import ru.hznik.devicebridge.data.session.security.SessionSecretGenerator
+import ru.hznik.devicebridge.data.text.TextSessionEventHub
+import ru.hznik.devicebridge.data.text.TextTransferCoordinator
 
 class KtorServerRuntimeFactoryTest {
 
@@ -112,8 +114,19 @@ class KtorServerRuntimeFactoryTest {
         }
     }
 
-    private fun factory(): KtorServerRuntimeFactory =
-        KtorServerRuntimeFactory(
+    private fun factory(): KtorServerRuntimeFactory {
+        val browserSessions = BrowserSessionCoordinator(
+            clock = MonotonicClock { 1_000 },
+            secretGenerator = SessionSecretGenerator(JavaCryptographicRandom()),
+            scope = CoroutineScope(SupervisorJob() + Dispatchers.Default),
+        )
+        val textEventHub = TextSessionEventHub()
+        val textTransfers = TextTransferCoordinator(
+            nowEpochMillis = { 1_000_000 },
+            browserSessionState = { browserSessions.state.value },
+            eventGateway = textEventHub,
+        )
+        return KtorServerRuntimeFactory(
             networkSnapshotProvider = LanNetworkSnapshotProvider {
                 LanNetworkSnapshot(
                     activeWifiAddresses = listOf(
@@ -138,13 +151,12 @@ class KtorServerRuntimeFactoryTest {
                     }
                 },
             ),
-            browserSessionCoordinator = BrowserSessionCoordinator(
-                clock = MonotonicClock { 1_000 },
-                secretGenerator = SessionSecretGenerator(JavaCryptographicRandom()),
-                scope = CoroutineScope(SupervisorJob() + Dispatchers.Default),
-            ),
+            browserSessionCoordinator = browserSessions,
+            textTransferCoordinator = textTransfers,
+            textSessionEventHub = textEventHub,
             monotonicClock = MonotonicClock { 1_000 },
         )
+    }
 
     private fun rawGet(
         port: Int,

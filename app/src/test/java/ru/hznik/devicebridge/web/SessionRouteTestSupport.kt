@@ -15,6 +15,8 @@ import kotlinx.coroutines.runBlocking
 import ru.hznik.devicebridge.data.server.MonotonicClock
 import ru.hznik.devicebridge.data.session.BrowserSessionCoordinator
 import ru.hznik.devicebridge.data.session.SessionGenerationHandle
+import ru.hznik.devicebridge.data.text.TextSessionEventHub
+import ru.hznik.devicebridge.data.text.TextTransferCoordinator
 import ru.hznik.devicebridge.data.session.security.CryptographicRandom
 import ru.hznik.devicebridge.data.session.security.SessionSecretGenerator
 import ru.hznik.devicebridge.domain.session.ServerGenerationId
@@ -39,6 +41,14 @@ internal class SessionRouteTestServer(
     val handle: SessionGenerationHandle = runBlocking {
         coordinator.activate(ServerGenerationId(1))
     }
+    val textEventHub = TextSessionEventHub()
+    val textCoordinator = TextTransferCoordinator(
+        nowEpochMillis = { 1_000_000 },
+        browserSessionState = { coordinator.state.value },
+        eventGateway = textEventHub,
+    ).also { text ->
+        runBlocking { text.activate(handle.generationId) }
+    }
     val port: Int = ServerSocket(0).use { it.localPort }
     val authority: String = "127.0.0.1:$port"
     private val engine = embeddedServer(
@@ -54,6 +64,15 @@ internal class SessionRouteTestServer(
                 monotonicClockMs = clock::nowMs,
                 wallClockMs = { 1_000_000 },
                 webSocketAuthTimeoutMs = webSocketAuthTimeoutMs,
+                textCoordinator = textCoordinator,
+                textEventHub = textEventHub,
+            )
+            installTextRoutes(
+                sessionCoordinator = coordinator,
+                textCoordinator = textCoordinator,
+                generationHandle = { handle },
+                allowedHosts = { setOf(authority) },
+                wallClockMs = { 1_000_000 },
             )
         },
     ).also { it.start(wait = false) }
@@ -129,6 +148,7 @@ internal class SessionRouteTestServer(
         ) + extra
 
     override fun close() {
+        runBlocking { textCoordinator.close(handle.generationId) }
         runBlocking { coordinator.closeGeneration(handle) }
         engine.stop(gracePeriodMillis = 0, timeoutMillis = 2_000)
         scope.cancel()

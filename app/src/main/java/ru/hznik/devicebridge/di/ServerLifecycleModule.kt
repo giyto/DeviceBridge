@@ -24,7 +24,14 @@ import ru.hznik.devicebridge.data.session.BrowserSessionCoordinator
 import ru.hznik.devicebridge.data.session.security.JavaCryptographicRandom
 import ru.hznik.devicebridge.data.session.security.SessionSecretGenerator
 import ru.hznik.devicebridge.domain.repository.BrowserSessionRepository
+import ru.hznik.devicebridge.domain.repository.TextTransferRepository
+import ru.hznik.devicebridge.data.text.TextSessionEventHub
+import ru.hznik.devicebridge.data.text.TextTransferCoordinator
 import kotlinx.coroutines.CoroutineScope
+import ru.hznik.devicebridge.domain.usecase.ObserveTextTransfersUseCase
+import ru.hznik.devicebridge.domain.usecase.ReceiveTextFromBrowserUseCase
+import ru.hznik.devicebridge.domain.usecase.RetryTextTransferUseCase
+import ru.hznik.devicebridge.domain.usecase.SendTextToBrowserUseCase
 
 @Module
 @InstallIn(SingletonComponent::class)
@@ -80,6 +87,47 @@ abstract class ServerLifecycleModule {
         fun provideBrowserSessionRepository(
             coordinator: BrowserSessionCoordinator,
         ): BrowserSessionRepository = coordinator
+
+        @Provides
+        @Singleton
+        fun provideTextSessionEventHub(): TextSessionEventHub = TextSessionEventHub()
+
+        @Provides
+        @Singleton
+        fun provideTextTransferCoordinator(
+            browserSessions: BrowserSessionCoordinator,
+            eventHub: TextSessionEventHub,
+        ): TextTransferCoordinator = TextTransferCoordinator(
+            nowEpochMillis = System::currentTimeMillis,
+            browserSessionState = { browserSessions.state.value },
+            eventGateway = eventHub,
+        )
+
+        @Provides
+        @Singleton
+        fun provideTextTransferRepository(
+            coordinator: TextTransferCoordinator,
+        ): TextTransferRepository = coordinator
+
+        @Provides
+        fun provideObserveTextTransfersUseCase(
+            repository: TextTransferRepository,
+        ): ObserveTextTransfersUseCase = ObserveTextTransfersUseCase(repository)
+
+        @Provides
+        fun provideSendTextToBrowserUseCase(
+            repository: TextTransferRepository,
+        ): SendTextToBrowserUseCase = SendTextToBrowserUseCase(repository)
+
+        @Provides
+        fun provideReceiveTextFromBrowserUseCase(
+            repository: TextTransferRepository,
+        ): ReceiveTextFromBrowserUseCase = ReceiveTextFromBrowserUseCase(repository)
+
+        @Provides
+        fun provideRetryTextTransferUseCase(
+            repository: TextTransferRepository,
+        ): RetryTextTransferUseCase = RetryTextTransferUseCase(repository)
 
         @Provides
         @Singleton

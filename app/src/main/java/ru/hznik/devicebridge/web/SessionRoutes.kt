@@ -24,6 +24,9 @@ import io.ktor.websocket.readText
 import io.ktor.websocket.send
 import java.io.ByteArrayOutputStream
 import java.nio.charset.StandardCharsets
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withTimeoutOrNull
 import ru.hznik.devicebridge.core.protocol.session.MAX_SESSION_JSON_BYTES
 import ru.hznik.devicebridge.core.protocol.session.SESSION_PROTOCOL_VERSION
 import ru.hznik.devicebridge.core.protocol.session.SessionChallengeRequest
@@ -42,14 +45,32 @@ import ru.hznik.devicebridge.core.protocol.session.SessionWebSocketAuthValidator
 import ru.hznik.devicebridge.core.protocol.session.SessionWebSocketEventMessage
 import ru.hznik.devicebridge.core.protocol.session.SessionWebSocketValidationError
 import ru.hznik.devicebridge.core.protocol.session.SessionValidationError
+import ru.hznik.devicebridge.core.protocol.text.TEXT_ERROR_TYPE
+import ru.hznik.devicebridge.core.protocol.text.TEXT_PROTOCOL_VERSION
+import ru.hznik.devicebridge.core.protocol.text.TEXT_RECEIVED_TYPE
+import ru.hznik.devicebridge.core.protocol.text.TEXT_SNAPSHOT_TYPE
+import ru.hznik.devicebridge.core.protocol.text.TextAcknowledgementMessage
+import ru.hznik.devicebridge.core.protocol.text.TextErrorEvent
+import ru.hznik.devicebridge.core.protocol.text.TextProtocolErrorCode
+import ru.hznik.devicebridge.core.protocol.text.TextProtocolJson
+import ru.hznik.devicebridge.core.protocol.text.TextProtocolValidationError
+import ru.hznik.devicebridge.core.protocol.text.TextProtocolValidator
+import ru.hznik.devicebridge.core.protocol.text.TextReceivedEvent
+import ru.hznik.devicebridge.core.protocol.text.TextSnapshotEvent
+import ru.hznik.devicebridge.core.protocol.text.TextSnapshotItem
 import ru.hznik.devicebridge.data.session.BrowserSessionCoordinator
 import ru.hznik.devicebridge.data.session.ChallengeCreationResult
 import ru.hznik.devicebridge.data.session.SessionGenerationHandle
 import ru.hznik.devicebridge.data.session.SessionConfirmationResult
 import ru.hznik.devicebridge.data.session.SessionConnection
+import ru.hznik.devicebridge.data.text.TextSessionEventConnection
+import ru.hznik.devicebridge.data.text.TextSessionEventHub
+import ru.hznik.devicebridge.data.text.TextTransferCoordinator
 import ru.hznik.devicebridge.domain.session.PairingChallengeId
 import ru.hznik.devicebridge.domain.session.BrowserSession
-import kotlinx.coroutines.withTimeoutOrNull
+import ru.hznik.devicebridge.domain.text.TextMessageId
+import ru.hznik.devicebridge.domain.text.TextTransferDirection
+import ru.hznik.devicebridge.domain.text.TextTransferItem
 
 fun Application.installSessionRoutes(
     coordinator: BrowserSessionCoordinator,
@@ -59,6 +80,8 @@ fun Application.installSessionRoutes(
     monotonicClockMs: () -> Long,
     wallClockMs: () -> Long,
     webSocketAuthTimeoutMs: Long = 5_000,
+    textCoordinator: TextTransferCoordinator? = null,
+    textEventHub: TextSessionEventHub? = null,
 ) {
     require(webSocketAuthTimeoutMs > 0)
     install(WebSockets) {
@@ -359,37 +382,90 @@ fun Application.installSessionRoutes(
                 closeSessionPolicy("Session revoked")
                 return@webSocket
             }
+            val sendMutex = Mutex()
+            suspend fun sendSerialized(payload: String) {
+                sendMutex.withLock { send(Frame.Text(payload)) }
+            }
+            val textConnection = TextSessionEventConnection { item ->
+                runCatching {
+                    sendSerialized(TextProtocolJson.encode(item.toReceivedEvent()))
+                }.isSuccess
+            }
+            var textConnectionAttached = false
             try {
-                send(
-                    Frame.Text(
-                        SessionProtocolJson.encode(
-                            SessionWebSocketEventMessage(
-                                protocolVersion = SESSION_PROTOCOL_VERSION,
-                                messageId = "server-auth-${auth.messageId}",
-                                type = SESSION_AUTHENTICATED_MESSAGE_TYPE,
-                                timestamp = wallClockMs(),
-                            ),
+                sendSerialized(
+                    SessionProtocolJson.encode(
+                        SessionWebSocketEventMessage(
+                            protocolVersion = SESSION_PROTOCOL_VERSION,
+                            messageId = "server-auth-${auth.messageId}",
+                            type = SESSION_AUTHENTICATED_MESSAGE_TYPE,
+                            timestamp = wallClockMs(),
                         ),
                     ),
                 )
+                if (textCoordinator != null && textEventHub != null) {
+                    val snapshot = textCoordinator.snapshotFor(handle.generationId, session.id)
+                    sendSerialized(
+                        TextProtocolJson.encode(
+                            TextSnapshotEvent(
+                                protocolVersion = TEXT_PROTOCOL_VERSION,
+                                messageId = "server-snapshot-${wallClockMs()}",
+                                type = TEXT_SNAPSHOT_TYPE,
+                                timestamp = wallClockMs(),
+                                items = snapshot.map(TextTransferItem::toSnapshotItem),
+                            ),
+                        ),
+                    )
+                    textEventHub.attach(session.id, textConnection)
+                    textConnectionAttached = true
+                }
                 for (frame in incoming) {
                     if (frame !is Frame.Text) continue
-                    val repeated = runCatching {
-                        SessionProtocolJson.decode<SessionWebSocketAuthMessage>(frame.readText())
+                    val acknowledgement = runCatching {
+                        TextProtocolJson.decode<TextAcknowledgementMessage>(frame.readText())
                     }.getOrNull()
-                    val validation = repeated?.let {
-                        SessionWebSocketAuthValidator.validate(it, seenMessageIds)
+                    val validation = acknowledgement?.let(TextProtocolValidator::validate)
+                    val accepted = acknowledgement != null &&
+                        validation == TextProtocolValidationError.NONE &&
+                        acknowledgement.messageId !in seenMessageIds &&
+                        textCoordinator?.acknowledge(
+                            generationId = handle.generationId,
+                            sessionId = session.id,
+                            messageId = TextMessageId(acknowledgement.acknowledgedMessageId),
+                        ) == true
+                    if (accepted) {
+                        seenMessageIds += acknowledgement.messageId
+                        continue
                     }
-                    closeSessionPolicy(
-                        if (validation == SessionWebSocketValidationError.DUPLICATE_MESSAGE_ID) {
-                            "Duplicate authentication message"
-                        } else {
-                            "Unexpected control message"
-                        },
+                    val errorCode = if (
+                        validation == TextProtocolValidationError.UNSUPPORTED_VERSION
+                    ) {
+                        TextProtocolErrorCode.UNSUPPORTED_VERSION
+                    } else {
+                        TextProtocolErrorCode.INVALID_PAYLOAD
+                    }
+                    sendSerialized(
+                        TextProtocolJson.encode(
+                            TextErrorEvent(
+                                protocolVersion = TEXT_PROTOCOL_VERSION,
+                                messageId = "server-error-${wallClockMs()}",
+                                type = TEXT_ERROR_TYPE,
+                                timestamp = wallClockMs(),
+                                relatedMessageId = acknowledgement?.messageId,
+                                code = errorCode,
+                            ),
+                        ),
                     )
+                    closeSessionPolicy("Invalid text control message")
                     return@webSocket
                 }
             } finally {
+                if (
+                    textConnectionAttached &&
+                    textEventHub?.detach(session.id, textConnection) == true
+                ) {
+                    textCoordinator?.onConnectionLost(session.id)
+                }
                 coordinator.detachConnection(session.id, connection)
             }
         }
@@ -402,12 +478,12 @@ private suspend fun io.ktor.server.websocket.DefaultWebSocketServerSession.close
     close(CloseReason(CloseReason.Codes.VIOLATED_POLICY, message))
 }
 
-private data class AuthorizedSession(
+internal data class AuthorizedSession(
     val session: BrowserSession,
     val handle: SessionGenerationHandle,
 )
 
-private suspend fun ApplicationCall.authorizeSession(
+internal suspend fun ApplicationCall.authorizeSession(
     coordinator: BrowserSessionCoordinator,
     generationHandle: () -> SessionGenerationHandle?,
     allowedHosts: () -> Set<String>,
@@ -474,9 +550,11 @@ private suspend fun ApplicationCall.requireJsonApiRequest(allowedHosts: Set<Stri
     return true
 }
 
-private suspend fun ApplicationCall.receiveBoundedJson(): String? {
+internal suspend fun ApplicationCall.receiveBoundedJson(
+    maxBytes: Int = MAX_SESSION_JSON_BYTES,
+): String? {
     val channel = receiveChannel()
-    val output = ByteArrayOutputStream(MAX_SESSION_JSON_BYTES)
+    val output = ByteArrayOutputStream(maxBytes.coerceAtMost(16 * 1024))
     val buffer = ByteArray(1_024)
     var total = 0
     while (true) {
@@ -484,13 +562,13 @@ private suspend fun ApplicationCall.receiveBoundedJson(): String? {
         if (count < 0) break
         if (count == 0) continue
         total += count
-        if (total > MAX_SESSION_JSON_BYTES) return null
+        if (total > maxBytes) return null
         output.write(buffer, 0, count)
     }
     return output.toString(StandardCharsets.UTF_8.name())
 }
 
-private suspend fun ApplicationCall.respondSessionError(
+internal suspend fun ApplicationCall.respondSessionError(
     status: HttpStatusCode,
     code: SessionErrorCode,
     message: String,
@@ -507,10 +585,40 @@ private suspend fun ApplicationCall.respondSessionError(
     )
 }
 
-private suspend fun ApplicationCall.respondJson(status: HttpStatusCode, body: String) {
+internal suspend fun ApplicationCall.respondJson(status: HttpStatusCode, body: String) {
     respondText(body, ContentType.Application.Json, status)
 }
 
 private fun Long.ceilSeconds(): Int = ((this + 999) / 1_000).coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
 
 private const val MAX_SESSION_WEBSOCKET_FRAME_BYTES = 8 * 1_024L
+
+private fun TextTransferItem.toReceivedEvent(): TextReceivedEvent = TextReceivedEvent(
+    protocolVersion = TEXT_PROTOCOL_VERSION,
+    messageId = id.value,
+    type = TEXT_RECEIVED_TYPE,
+    timestamp = createdAtEpochMillis,
+    content = content,
+    contentKind = contentKind.toDto(),
+    direction = direction.toDto(),
+    senderLabel = browserLabel,
+    status = status.toDto(),
+)
+
+private fun TextTransferItem.toSnapshotItem(): TextSnapshotItem = TextSnapshotItem(
+    messageId = id.value,
+    timestamp = createdAtEpochMillis,
+    content = content,
+    contentKind = contentKind.toDto(),
+    direction = direction.toDto(),
+    senderLabel = browserLabel,
+    status = status.toDto(),
+)
+
+private fun TextTransferDirection.toDto() =
+    when (this) {
+        TextTransferDirection.ANDROID_TO_BROWSER ->
+            ru.hznik.devicebridge.core.protocol.text.TextDirectionDto.ANDROID_TO_BROWSER
+        TextTransferDirection.BROWSER_TO_ANDROID ->
+            ru.hznik.devicebridge.core.protocol.text.TextDirectionDto.BROWSER_TO_ANDROID
+    }

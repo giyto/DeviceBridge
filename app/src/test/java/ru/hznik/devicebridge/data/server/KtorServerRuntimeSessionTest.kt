@@ -7,7 +7,9 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.async
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.yield
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -19,7 +21,20 @@ import ru.hznik.devicebridge.data.network.LanNetworkSnapshotProvider
 import ru.hznik.devicebridge.data.session.BrowserSessionCoordinator
 import ru.hznik.devicebridge.data.session.security.CryptographicRandom
 import ru.hznik.devicebridge.data.session.security.SessionSecretGenerator
+import ru.hznik.devicebridge.data.text.TextSessionEventHub
+import ru.hznik.devicebridge.data.text.TextSessionEventConnection
+import ru.hznik.devicebridge.data.text.TextTransferCoordinator
+import ru.hznik.devicebridge.domain.session.BrowserSessionId
+import ru.hznik.devicebridge.domain.session.BrowserSession
+import ru.hznik.devicebridge.domain.session.BrowserSessionState
+import ru.hznik.devicebridge.domain.session.PairingCodeState
+import ru.hznik.devicebridge.domain.session.ServerGenerationId
 import ru.hznik.devicebridge.domain.session.BrowserSessionPhase
+import ru.hznik.devicebridge.domain.text.IncomingTextRequest
+import ru.hznik.devicebridge.domain.text.SendTextRequest
+import ru.hznik.devicebridge.domain.text.TextMessageId
+import ru.hznik.devicebridge.domain.text.TextTransferRejection
+import ru.hznik.devicebridge.domain.text.TextTransferResult
 import ru.hznik.devicebridge.web.AllowlistedWebAssetProvider
 import ru.hznik.devicebridge.web.WebAssetDescriptor
 import ru.hznik.devicebridge.web.WebAssetSource
@@ -35,11 +50,31 @@ class KtorServerRuntimeSessionTest {
             SessionSecretGenerator(DeterministicRandom()),
             scope,
         )
+        val textEventHub = TextSessionEventHub()
+        val textSession = BrowserSession(
+            id = BrowserSessionId("session-1"),
+            generationId = ServerGenerationId(1),
+            browserLabel = "Chrome",
+            sourceIpv4 = "192.168.1.2",
+            connectedAtElapsedRealtimeMs = 1_000,
+        )
+        val textBrowserState = BrowserSessionState.active(
+            generationId = ServerGenerationId(1),
+            pairingCode = PairingCodeState("123456", 60_000),
+            sessions = listOf(textSession),
+        )
+        val textTransfers = TextTransferCoordinator(
+            nowEpochMillis = { 1_000_000 },
+            browserSessionState = { textBrowserState },
+            eventGateway = textEventHub,
+        )
         val runtime = KtorServerRuntimeFactory(
             networkSnapshotProvider = networkProvider(),
             endpointResolver = LanEndpointResolver(),
             webAssetProvider = webAssets(),
             browserSessionCoordinator = sessions,
+            textTransferCoordinator = textTransfers,
+            textSessionEventHub = textEventHub,
             monotonicClock = clock,
         ).create()
         val endpoint = runtime.start()
@@ -54,9 +89,47 @@ class KtorServerRuntimeSessionTest {
             assertEquals(200, active.statusCode())
             assertTrue(active.body().contains("\"challengeId\""))
             assertFalse(active.body().contains("123456"))
+            val accepted = textTransfers.acceptIncoming(
+                IncomingTextRequest(
+                    id = TextMessageId("runtime-message"),
+                    generationId = ServerGenerationId(1),
+                    sessionId = BrowserSessionId("session-1"),
+                    browserLabel = "Chrome",
+                    content = "ephemeral",
+                    requestedAtEpochMillis = 999_000,
+                ),
+            )
+            assertTrue(accepted is TextTransferResult.Accepted)
+            assertEquals(1, textTransfers.state.value.items.size)
+            textEventHub.attach(textSession.id, TextSessionEventConnection { true })
+            val pending = async {
+                textTransfers.send(SendTextRequest(textSession.id, "pending until stop"))
+            }
+            while (textTransfers.state.value.items.none { it.content == "pending until stop" }) {
+                yield()
+            }
+            assertFalse(pending.isCompleted)
 
             runtime.closeSessionGeneration()
             assertEquals(BrowserSessionPhase.INACTIVE, sessions.state.value.phase)
+            assertTrue(textTransfers.state.value.items.isEmpty())
+            assertEquals(
+                TextTransferResult.Rejected(TextTransferRejection.GENERATION_CLOSED),
+                pending.await(),
+            )
+            assertEquals(
+                TextTransferResult.Rejected(TextTransferRejection.GENERATION_CLOSED),
+                textTransfers.acceptIncoming(
+                    IncomingTextRequest(
+                        id = TextMessageId("stale-message"),
+                        generationId = ServerGenerationId(1),
+                        sessionId = BrowserSessionId("session-1"),
+                        browserLabel = "Chrome",
+                        content = "must not arrive",
+                        requestedAtEpochMillis = 1_000_000,
+                    ),
+                ),
+            )
             assertEquals(503, challenge(endpoint.port, endpoint.host, endpoint.port).statusCode())
         } finally {
             runtime.stop()
