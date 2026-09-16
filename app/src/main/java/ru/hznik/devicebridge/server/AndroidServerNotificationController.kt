@@ -13,6 +13,7 @@ import javax.inject.Inject
 import javax.inject.Singleton
 import ru.hznik.devicebridge.R
 import ru.hznik.devicebridge.domain.model.ServerLifecycleState
+import ru.hznik.devicebridge.domain.repository.BrowserSessionRepository
 
 interface ServerNotificationController {
     fun createForegroundNotification(state: ServerLifecycleState): Notification
@@ -26,6 +27,7 @@ interface ServerNotificationController {
 class AndroidServerNotificationController @Inject constructor(
     @param:ApplicationContext private val context: Context,
     private val modelFactory: ServerNotificationModelFactory,
+    private val browserSessionRepository: BrowserSessionRepository,
 ) : ServerNotificationController {
 
     private val notificationManager =
@@ -35,7 +37,12 @@ class AndroidServerNotificationController @Inject constructor(
         state: ServerLifecycleState,
     ): Notification {
         ensureChannel()
-        val model = requireNotNull(modelFactory.create(state)) {
+        val model = requireNotNull(
+            modelFactory.create(
+                state = state,
+                activeSessionCount = browserSessionRepository.state.value.sessions.size,
+            ),
+        ) {
             "Foreground notification requires an active server state"
         }
         return NotificationCompat.Builder(context, CHANNEL_ID)
@@ -62,7 +69,10 @@ class AndroidServerNotificationController @Inject constructor(
     }
 
     override fun publish(state: ServerLifecycleState) {
-        val model = modelFactory.create(state)
+        val model = modelFactory.create(
+            state = state,
+            activeSessionCount = browserSessionRepository.state.value.sessions.size,
+        )
         if (model == null) {
             cancel()
             return

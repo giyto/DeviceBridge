@@ -13,7 +13,7 @@ beforeEach(() => {
 
 describe("DeviceBridge shell markup", () => {
   it("uses semantic landmarks and a textual live status", () => {
-    createShellView(document, () => undefined);
+    createShellView(document, actions());
 
     expect(document.querySelector("header")).not.toBeNull();
     expect(document.querySelector("main")).not.toBeNull();
@@ -29,7 +29,7 @@ describe("DeviceBridge shell markup", () => {
   });
 
   it("shows the trusted-network HTTP warning without technical euphemisms", () => {
-    createShellView(document, () => undefined);
+    createShellView(document, actions());
     const warning = document.querySelector('[data-role="security-warning"]')?.textContent ?? "";
 
     expect(warning).toContain("HTTP");
@@ -38,25 +38,32 @@ describe("DeviceBridge shell markup", () => {
     expect(warning).toContain("публичном Wi-Fi");
   });
 
-  it("does not expose unfinished pairing, text or file controls", () => {
-    createShellView(document, () => undefined);
+  it("exposes an accessible pairing form while transfer controls stay disabled", () => {
+    createShellView(document, actions());
 
-    expect(document.querySelector("form")).toBeNull();
-    expect(document.querySelector("input")).toBeNull();
-    expect(document.querySelector('button[data-action="pair"]')).toBeNull();
-    expect(document.querySelector('button[data-action="send-text"]')).toBeNull();
-    expect(document.querySelector('button[data-action="send-file"]')).toBeNull();
-    expect(document.body.textContent).toContain("Подключение и передача появятся позже");
+    expect(document.querySelector('label[for="pairing-code"]')?.textContent).toContain("код");
+    expect(document.querySelector<HTMLInputElement>("#pairing-code")?.inputMode).toBe("numeric");
+    expect(document.querySelector<HTMLButtonElement>('button[data-action="pair"]')).not.toBeNull();
+    expect(document.querySelector<HTMLButtonElement>('button[data-action="send-text"]')?.disabled).toBe(true);
+    expect(document.querySelector<HTMLButtonElement>('button[data-action="send-file"]')?.disabled).toBe(true);
+    expect(document.body.textContent).toContain("Передача появится на следующем этапе");
   });
 });
 
 describe("createShellView", () => {
   it("renders compatible availability and exact version data", () => {
-    const view = createShellView(document, () => undefined);
+    const view = createShellView(document, actions());
 
     view.render({
-      kind: "available",
+      kind: "ready",
       manifest: { protocolVersion: 1, webAssetVersion: "sha256-abcd" },
+      challenge: {
+        protocolVersion: 1,
+        challengeId: "challenge-1",
+        expiresAtEpochMillis: 10_000,
+        confirmTimeoutSeconds: 60,
+        attemptsRemaining: 5,
+      },
     });
 
     expect(document.querySelector('[data-role="status-title"]')?.textContent).toBe(
@@ -69,20 +76,21 @@ describe("createShellView", () => {
     expect(document.querySelector<HTMLButtonElement>('[data-action="retry"]')?.hidden).toBe(
       true,
     );
+    expect(document.querySelector<HTMLFormElement>('[data-role="pairing-form"]')?.hidden).toBe(false);
   });
 
-  it("renders an unavailable state and invokes manual retry", () => {
+  it("renders an offline state and invokes manual retry", () => {
     const retry = vi.fn();
-    const view = createShellView(document, retry);
+    const view = createShellView(document, { ...actions(), onRetry: retry });
 
     view.render({
-      kind: "unavailable",
+      kind: "offline",
       message: "Не удаётся связаться с DeviceBridge.",
     });
     document.querySelector<HTMLButtonElement>('[data-action="retry"]')?.click();
 
     expect(document.querySelector('[data-role="status-title"]')?.textContent).toBe(
-      "Связь потеряна",
+      "DeviceBridge недоступен",
     );
     expect(document.querySelector('[data-role="status-detail"]')?.textContent).toContain(
       "Не удаётся",
@@ -94,10 +102,10 @@ describe("createShellView", () => {
   });
 
   it("explains the next automatic retry", () => {
-    const view = createShellView(document, () => undefined);
+    const view = createShellView(document, actions());
 
     view.render({
-      kind: "unavailable",
+      kind: "offline",
       message: "Не удаётся связаться с DeviceBridge.",
       nextRetryInMs: 2_000,
     });
@@ -106,4 +114,59 @@ describe("createShellView", () => {
       "2 сек",
     );
   });
+
+  it("submits six digits, renders waiting and disconnects a connected session", () => {
+    const onSubmitCode = vi.fn();
+    const onDisconnect = vi.fn();
+    const view = createShellView(document, {
+      ...actions(),
+      onSubmitCode,
+      onDisconnect,
+    });
+    const manifest = { protocolVersion: 1, webAssetVersion: "sha256-abcd" };
+    view.render({
+      kind: "ready",
+      manifest,
+      challenge: {
+        protocolVersion: 1,
+        challengeId: "challenge-1",
+        expiresAtEpochMillis: 10_000,
+        confirmTimeoutSeconds: 60,
+        attemptsRemaining: 5,
+      },
+    });
+    const input = document.querySelector<HTMLInputElement>("#pairing-code")!;
+    input.value = "123456";
+    document.querySelector<HTMLFormElement>('[data-role="pairing-form"]')
+      ?.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    expect(onSubmitCode).toHaveBeenCalledWith("123456");
+
+    view.render({ kind: "awaiting", manifest });
+    expect(document.querySelector('[data-role="session-title"]')?.textContent).toContain(
+      "Подтвердите",
+    );
+    expect(input.disabled).toBe(true);
+
+    view.render({
+      kind: "connected",
+      manifest,
+      status: {
+        protocolVersion: 1,
+        sessionId: "session-1",
+        connected: true,
+        activeSessionCount: 2,
+      },
+    });
+    document.querySelector<HTMLButtonElement>('[data-action="disconnect"]')?.click();
+    expect(onDisconnect).toHaveBeenCalledOnce();
+    expect(document.body.textContent).not.toContain("session-1");
+  });
 });
+
+function actions() {
+  return {
+    onRetry: () => undefined,
+    onSubmitCode: (_code: string) => undefined,
+    onDisconnect: () => undefined,
+  };
+}

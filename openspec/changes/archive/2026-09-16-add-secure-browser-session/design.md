@@ -55,9 +55,9 @@ HTTP использует `Authorization: Bearer`; WebSocket принимает 
 
 Альтернатива — cookie — требует отдельной CSRF-модели и не даёт преимущества для локального bearer API. Token в query string отклонён из-за browser history, access logs и referrer leakage. Полностью memory-only browser token отклонён как слишком неудобный при обычном refresh, хотя server-side срок всё равно ограничен lifecycle.
 
-### 5. Exact same-origin guard применяется ко всему session API
+### 5. Host allowlist и same-origin guard применяются ко всему session API
 
-Текущая allowlist фактического `host:port` сохраняется. Навигационные GET web assets допускают отсутствие `Origin`, но API POST/DELETE и WebSocket upgrade требуют совпадающие `Host` и `Origin`; pairing POST дополнительно требует bounded `application/json`. Permissive CORS headers не добавляются. CSP остаётся `default-src 'self'; connect-src 'self'`, а web UI выводит client-provided значения только через text nodes.
+Текущая allowlist фактического `host:port` сохраняется. Навигационные GET web assets допускают отсутствие `Origin`. Browser same-origin `GET /api/v1/status` также может не содержать `Origin` по правилам Fetch, поэтому для него обязательны разрешённый `Host` и действующий bearer token, а присутствующий `Origin` всегда проверяется на точное совпадение. API POST/DELETE и WebSocket upgrade требуют совпадающие `Host` и `Origin`; pairing POST дополнительно требует bounded `application/json`. Permissive CORS headers не добавляются. CSP остаётся `default-src 'self'; connect-src 'self'`, а web UI выводит client-provided значения только через text nodes.
 
 Публичная поверхность: `/`, `/assets/*`, `/web-manifest.json`, `POST /api/v1/session/challenge`, `POST /api/v1/session/confirm`. Защищённая поверхность этого change: `GET /api/v1/status`, `DELETE /api/v1/session`, `WS /api/v1/events`. Unfinished text/file/transfer routes и `/diagnostics/*` сохраняют 404 в production независимо от token.
 

@@ -12,10 +12,12 @@ import androidx.compose.ui.platform.LocalClipboard
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertTextContains
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.unit.Density
@@ -25,6 +27,8 @@ import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 import ru.hznik.devicebridge.ui.theme.DeviceBridgeTheme
+import ru.hznik.devicebridge.domain.session.BrowserSessionId
+import ru.hznik.devicebridge.domain.session.PairingRequestId
 
 @RunWith(AndroidJUnit4::class)
 class HomeScreenTest {
@@ -113,8 +117,90 @@ class HomeScreenTest {
         composeRule.onNodeWithText("Текст").assertIsNotEnabled()
         composeRule.onNodeWithText("Файлы").assertIsNotEnabled()
         composeRule.onNodeWithText(
-            "Станут доступны после безопасного подключения браузера на следующем этапе.",
+            "Сначала безопасно подключите браузер по коду выше.",
         ).performScrollTo().assertIsDisplayed()
+    }
+
+    @Test
+    fun runningShowsPairingCodeAndCountdownOnlyForActiveGeneration() {
+        var state by mutableStateOf(
+            ServerSessionUiState(
+                status = HomeServerStatus.Running,
+                localAddress = "http://192.168.1.24:8787",
+                pairingCode = "123456",
+                pairingExpiresInSeconds = 95,
+            ),
+        )
+        composeRule.setContent {
+            DeviceBridgeTheme { HomeScreen(uiState = state) }
+        }
+
+        composeRule.onNodeWithText("Код подключения").assertIsDisplayed()
+        composeRule.onNodeWithText("123456").assertIsDisplayed()
+        composeRule.onNodeWithText("Код обновится через 01:35").assertIsDisplayed()
+
+        composeRule.runOnIdle { state = ServerSessionUiState() }
+        composeRule.onNodeWithText("123456").assertDoesNotExist()
+    }
+
+    @Test
+    fun pendingBrowserCardsDispatchExactApproveAndDenyIds() {
+        val actions = mutableListOf<HomeAction>()
+        val edge = PairingRequestId("edge-request")
+        val chrome = PairingRequestId("chrome-request")
+        setScreen(
+            ServerSessionUiState(
+                status = HomeServerStatus.Running,
+                pairingCode = "123456",
+                pairingExpiresInSeconds = 120,
+                pendingBrowsers = listOf(
+                    PendingBrowserUiState(edge, "Edge", "192.168.1.2", 42),
+                    PendingBrowserUiState(chrome, "Chrome", "192.168.1.3", 38),
+                ),
+            ),
+            onAction = actions::add,
+        )
+
+        composeRule.onAllNodesWithText("Разрешить").assertCountEquals(2)
+        composeRule.onNodeWithContentDescription(
+            "Разрешить Edge с адреса 192.168.1.2",
+        ).performScrollTo().performClick()
+        composeRule.onNodeWithContentDescription(
+            "Отклонить Chrome с адреса 192.168.1.3",
+        ).performScrollTo().performClick()
+
+        assertEquals(
+            listOf(HomeAction.ApproveBrowser(edge), HomeAction.DenyBrowser(chrome)),
+            actions,
+        )
+    }
+
+    @Test
+    fun activeBrowsersCanBeRevokedWithoutShowingCredentials() {
+        val actions = mutableListOf<HomeAction>()
+        val sessionId = BrowserSessionId("session-1")
+        setScreen(
+            ServerSessionUiState(
+                status = HomeServerStatus.Running,
+                pairingCode = "123456",
+                pairingExpiresInSeconds = 120,
+                activeBrowsers = listOf(
+                    ActiveBrowserUiState(sessionId, "Chrome", "192.168.1.3"),
+                ),
+            ),
+            onAction = actions::add,
+        )
+
+        composeRule.onNodeWithText("Подключённые браузеры: 1")
+            .performScrollTo().assertIsDisplayed()
+        composeRule.onNodeWithContentDescription(
+            "Отключить Chrome с адреса 192.168.1.3",
+        ).performScrollTo().performClick()
+        composeRule.onNodeWithText("Браузер подключён. Передача появится на следующем этапе.")
+            .performScrollTo().assertIsDisplayed()
+        composeRule.onNodeWithText("Bearer", substring = true, ignoreCase = true)
+            .assertDoesNotExist()
+        assertEquals(listOf(HomeAction.RevokeBrowser(sessionId)), actions)
     }
 
     @Test
@@ -158,14 +244,15 @@ class HomeScreenTest {
     private fun setScreen(
         state: ServerSessionUiState,
         clipboard: Clipboard? = null,
+        onAction: (HomeAction) -> Unit = {},
     ) {
         composeRule.setContent {
             DeviceBridgeTheme {
                 if (clipboard == null) {
-                    HomeScreen(uiState = state)
+                    HomeScreen(uiState = state, onAction = onAction)
                 } else {
                     CompositionLocalProvider(LocalClipboard provides clipboard) {
-                        HomeScreen(uiState = state)
+                        HomeScreen(uiState = state, onAction = onAction)
                     }
                 }
             }

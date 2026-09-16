@@ -71,6 +71,7 @@ class ServerLifecycleCoordinator @Inject constructor(
                 newRuntime = runtimeFactory.create()
                 activeRuntime = newRuntime
                 val endpoint = newRuntime.start()
+                newRuntime.activateSessionGeneration(currentGeneration)
                 mutableState.value = ServerLifecycleReducer.reduce(
                     mutableState.value,
                     ServerLifecycleEvent.Started(
@@ -96,6 +97,7 @@ class ServerLifecycleCoordinator @Inject constructor(
             } catch (throwable: Throwable) {
                 permissionRevocationObserver.stop()
                 lanNetworkObserver.stop()
+                runCatching { newRuntime?.closeSessionGeneration() }
                 runCatching { newRuntime?.stop() }
                 activeRuntime = null
                 sessionJournal.clear()
@@ -132,6 +134,7 @@ class ServerLifecycleCoordinator @Inject constructor(
             val runtime = activeRuntime
             activeRuntime = null
             try {
+                runtime?.closeSessionGeneration()
                 withTimeout(stopTimeoutPolicy.timeoutMillis) {
                     runtime?.stop()
                 }
@@ -196,6 +199,7 @@ class ServerLifecycleCoordinator @Inject constructor(
             lanNetworkObserver.stop()
             val runtime = activeRuntime
             activeRuntime = null
+            runCatching { runtime?.closeSessionGeneration() }
             runCatching { runtime?.stop() }
             if (cause != ServerLifecycleError.PermissionRevoked) {
                 sessionJournal.clear()

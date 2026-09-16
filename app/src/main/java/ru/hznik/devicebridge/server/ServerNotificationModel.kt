@@ -12,7 +12,12 @@ data class ServerNotificationModel(
 
 class ServerNotificationModelFactory @Inject constructor() {
 
-    fun create(state: ServerLifecycleState): ServerNotificationModel? = when (state) {
+    fun create(
+        state: ServerLifecycleState,
+        activeSessionCount: Int = 0,
+    ): ServerNotificationModel? {
+        require(activeSessionCount >= 0) { "Active session count cannot be negative" }
+        return when (state) {
         ServerLifecycleState.Stopped,
         is ServerLifecycleState.Error,
         -> null
@@ -26,7 +31,8 @@ class ServerNotificationModelFactory @Inject constructor() {
 
         is ServerLifecycleState.Running -> ServerNotificationModel(
             title = "Сервер запущен",
-            text = state.endpoint.url + " • 0 браузеров • Передача не выполняется",
+            text = state.endpoint.url +
+                " • $activeSessionCount браузеров • Передача не выполняется",
             ongoing = true,
             showStopAction = true,
         )
@@ -37,5 +43,6 @@ class ServerNotificationModelFactory @Inject constructor() {
             ongoing = true,
             showStopAction = false,
         )
+    }
     }
 }

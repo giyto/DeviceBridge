@@ -260,20 +260,26 @@ h2 {
   animation: status-pulse 1.8s ease-out infinite;
 }
 
-.status-card[data-state="available"] .status-card__icon {
+.status-card[data-state="ready"] .status-card__icon,
+.status-card[data-state="connected"] .status-card__icon {
   background: var(--success-soft);
 }
 
-.status-card[data-state="available"] .status-card__pulse {
+.status-card[data-state="ready"] .status-card__pulse,
+.status-card[data-state="connected"] .status-card__pulse {
   background: var(--success);
   animation: none;
 }
 
-.status-card[data-state="unavailable"] .status-card__icon {
+.status-card[data-state="offline"] .status-card__icon,
+.status-card[data-state="sessionLost"] .status-card__icon,
+.status-card[data-state="denied"] .status-card__icon {
   background: var(--danger-soft);
 }
 
-.status-card[data-state="unavailable"] .status-card__pulse {
+.status-card[data-state="offline"] .status-card__pulse,
+.status-card[data-state="sessionLost"] .status-card__pulse,
+.status-card[data-state="denied"] .status-card__pulse {
   background: var(--danger);
   animation: none;
 }
@@ -380,6 +386,78 @@ h2 {
 }
 
 .stage-card__step {
+  color: var(--text-muted);
+}
+
+.pairing-form,
+.transfer-preview {
+  display: grid;
+  gap: 0.75rem;
+  margin-top: 1.25rem;
+  padding-top: 1.25rem;
+  border-top: 1px solid var(--border);
+}
+
+.pairing-form[hidden] {
+  display: none;
+}
+
+.pairing-form label {
+  font-size: 0.9rem;
+  font-weight: 720;
+}
+
+.pairing-form input {
+  width: 100%;
+  min-height: 54px;
+  padding: 0.7rem 0.9rem;
+  border: 1px solid var(--border-strong);
+  border-radius: 14px;
+  background: var(--surface-elevated);
+  color: var(--text);
+  font: 700 1.35rem/1 ui-monospace, "Cascadia Code", Consolas, monospace;
+  letter-spacing: 0.22em;
+}
+
+.field-help {
+  color: var(--text-muted);
+  font-size: 0.82rem;
+}
+
+.primary-button,
+.transfer-actions button {
+  min-height: 44px;
+  padding: 0.7rem 1rem;
+  border: 1px solid transparent;
+  border-radius: 12px;
+  font-weight: 720;
+}
+
+.primary-button {
+  background: var(--accent);
+  color: var(--background);
+  cursor: pointer;
+}
+
+.primary-button:disabled,
+.transfer-actions button:disabled {
+  cursor: not-allowed;
+  opacity: 0.58;
+}
+
+.transfer-preview h2 {
+  font-size: 1rem;
+}
+
+.transfer-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.65rem;
+}
+
+.transfer-actions button {
+  border-color: var(--border);
+  background: var(--surface-elevated);
   color: var(--text-muted);
 }
 

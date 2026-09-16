@@ -47,6 +47,18 @@ describe("built web privacy contract", () => {
       runtimeUrls.every((url) => url.startsWith("/") || url.startsWith("#")),
     ).toBe(true);
   });
+
+  it("does not persist credentials in local storage, cookies, URLs or logs", () => {
+    const scripts = outputFiles()
+      .filter((path) => path.endsWith(".js"))
+      .map((path) => readFileSync(resolve(outputRoot, path), "utf8"))
+      .join("\n");
+
+    expect(scripts).not.toContain("localStorage");
+    expect(scripts).not.toContain("document.cookie");
+    expect(scripts).not.toMatch(/[?&](?:token|bearer)=/i);
+    expect(scripts).not.toMatch(/console\.(?:log|info|debug)\(/);
+  });
 });
 
 interface ManifestEntry {

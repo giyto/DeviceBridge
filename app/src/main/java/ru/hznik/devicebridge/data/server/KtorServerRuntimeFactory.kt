@@ -11,7 +11,12 @@ import ru.hznik.devicebridge.data.network.LanEndpointResolution
 import ru.hznik.devicebridge.data.network.LanEndpointResolver
 import ru.hznik.devicebridge.data.network.LanNetworkSnapshotProvider
 import ru.hznik.devicebridge.domain.model.ServerEndpoint
+import ru.hznik.devicebridge.data.session.BrowserSessionCoordinator
+import ru.hznik.devicebridge.data.session.SessionGenerationHandle
+import ru.hznik.devicebridge.domain.session.ServerGenerationId
 import ru.hznik.devicebridge.web.WebAssetProvider
+import ru.hznik.devicebridge.web.installSessionRoutes
+import ru.hznik.devicebridge.web.RemoteClientAddress
 import ru.hznik.devicebridge.web.installWebRoutes
 
 @Singleton
@@ -19,12 +24,16 @@ class KtorServerRuntimeFactory @Inject constructor(
     private val networkSnapshotProvider: LanNetworkSnapshotProvider,
     private val endpointResolver: LanEndpointResolver,
     private val webAssetProvider: WebAssetProvider,
+    private val browserSessionCoordinator: BrowserSessionCoordinator,
+    private val monotonicClock: MonotonicClock,
 ) : ServerRuntimeFactory {
 
     override fun create(): ServerRuntime = KtorServerRuntime(
         networkSnapshotProvider = networkSnapshotProvider,
         endpointResolver = endpointResolver,
         webAssetProvider = webAssetProvider,
+        browserSessionCoordinator = browserSessionCoordinator,
+        monotonicClock = monotonicClock,
     )
 }
 
@@ -32,10 +41,13 @@ private class KtorServerRuntime(
     private val networkSnapshotProvider: LanNetworkSnapshotProvider,
     private val endpointResolver: LanEndpointResolver,
     private val webAssetProvider: WebAssetProvider,
+    private val browserSessionCoordinator: BrowserSessionCoordinator,
+    private val monotonicClock: MonotonicClock,
 ) : ServerRuntime {
 
     private var stopServer: (() -> Unit)? = null
     private var startedNetworkFingerprint: String? = null
+    private val sessionHandle = AtomicReference<SessionGenerationHandle?>(null)
 
     override val networkFingerprint: String?
         get() = startedNetworkFingerprint
@@ -58,6 +70,16 @@ private class KtorServerRuntime(
                 installWebRoutes(
                     webAssetProvider = webAssetProvider,
                     allowedHosts = { allowedAuthorities.get() },
+                )
+                installSessionRoutes(
+                    coordinator = browserSessionCoordinator,
+                    generationHandle = { sessionHandle.get() },
+                    allowedHosts = { allowedAuthorities.get() },
+                    sourceIpv4 = { call ->
+                        RemoteClientAddress.canonicalIpv4(call.request.local.remoteHost)
+                    },
+                    monotonicClockMs = monotonicClock::nowMs,
+                    wallClockMs = System::currentTimeMillis,
                 )
             },
         )
@@ -87,7 +109,21 @@ private class KtorServerRuntime(
         }
     }
 
+    override suspend fun activateSessionGeneration(generation: Long) {
+        check(stopServer != null) { "Listener must be started before session generation" }
+        check(sessionHandle.get() == null) { "Session generation is already active" }
+        sessionHandle.set(
+            browserSessionCoordinator.activate(ServerGenerationId(generation)),
+        )
+    }
+
+    override suspend fun closeSessionGeneration() {
+        val handle = sessionHandle.getAndSet(null) ?: return
+        browserSessionCoordinator.closeGeneration(handle)
+    }
+
     override suspend fun stop() {
+        closeSessionGeneration()
         val stop = stopServer ?: return
         stopServer = null
         startedNetworkFingerprint = null
