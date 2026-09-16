@@ -18,7 +18,10 @@ object SessionRequestSecurityPolicy {
         contentType: String?,
         contentLength: Long?,
         allowedHosts: Set<String>,
+        maxBodyBytes: Long = MAX_SESSION_JSON_BYTES.toLong(),
+        bodyTooLargeStatus: HttpStatusCode = HttpStatusCode.BadRequest,
     ): RequestGuardResult {
+        require(maxBodyBytes > 0)
         val originResult = validateSameOrigin(host, origin, allowedHosts)
         if (originResult != RequestGuardResult.Allowed) return originResult
         val parsedContentType = contentType
@@ -26,8 +29,8 @@ object SessionRequestSecurityPolicy {
         if (parsedContentType == null || !parsedContentType.match(ContentType.Application.Json)) {
             return RequestGuardResult.Rejected(HttpStatusCode.BadRequest)
         }
-        if (contentLength != null && (contentLength < 0 || contentLength > MAX_SESSION_JSON_BYTES)) {
-            return RequestGuardResult.Rejected(HttpStatusCode.BadRequest)
+        if (contentLength != null && (contentLength < 0 || contentLength > maxBodyBytes)) {
+            return RequestGuardResult.Rejected(bodyTooLargeStatus)
         }
         return RequestGuardResult.Allowed
     }

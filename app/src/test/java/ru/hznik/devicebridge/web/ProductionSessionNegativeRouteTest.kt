@@ -10,7 +10,7 @@ import org.junit.Test
 class ProductionSessionNegativeRouteTest {
 
     @Test
-    fun diagnosticsTrustedBrowserAndTransferStayNotFoundEvenWithValidSession() =
+    fun onlyTextRouteOpensWhileDiagnosticsTrustedBrowserAndFilesStayNotFound() =
         withSessionRouteServer { server ->
             val paired = server.pairBrowser("Chrome")
             val headers = mapOf(
@@ -19,14 +19,20 @@ class ProductionSessionNegativeRouteTest {
                 "Content-Type" to "application/json",
             )
 
+            val text = server.request(
+                "POST",
+                "/api/v1/text",
+                """{"protocolVersion":1,"messageId":"production-text-1","type":"text.send","timestamp":123,"content":"hello"}""",
+                headers,
+            )
             val responses = listOf(
                 server.request("GET", "/diagnostics/health", headers = headers),
                 server.request("GET", "/api/v1/trusted-browsers", headers = headers),
-                server.request("POST", "/api/v1/text", "{}", headers),
                 server.request("POST", "/api/v1/files", "{}", headers),
                 server.request("POST", "/api/v1/transfer", "{}", headers),
             )
 
+            assertEquals(200, text.statusCode())
             assertTrue(responses.all { it.statusCode() == 404 })
             assertTrue(responses.all { !it.body().contains("token", ignoreCase = true) })
         }
@@ -40,6 +46,8 @@ class ProductionSessionNegativeRouteTest {
         assertFalse(runtime.contains("DiagnosticRoutes"))
         assertFalse(runtime.contains("diagnosticToken", ignoreCase = true))
         assertFalse(runtime.contains("TrustedBrowser"))
+        assertTrue(runtime.contains("installTextRoutes"))
+        assertFalse(runtime.contains("installFileRoutes"))
         assertEquals(true, Files.exists(Path.of("src/debug/java/ru/hznik/devicebridge/diagnostics")))
     }
 }
