@@ -60,6 +60,24 @@ class ServerNotificationModelTest {
     }
 
     @Test
+    fun runningModelUsesActualActiveSessionCountWithoutSecrets() {
+        val running = ServerLifecycleState.Running(
+            generation = 1,
+            endpoint = ServerEndpoint("192.168.1.24", 49_321),
+            startedAtElapsedRealtimeMs = 10,
+        )
+
+        val none = requireNotNull(factory.create(running, activeSessionCount = 0))
+        val two = requireNotNull(factory.create(running, activeSessionCount = 2))
+
+        assertTrue(none.text.contains("0 браузеров"))
+        assertTrue(two.text.contains("2 браузеров"))
+        assertFalse(two.text.contains("code", ignoreCase = true))
+        assertFalse(two.text.contains("token", ignoreCase = true))
+        assertFalse(two.text.contains("bearer", ignoreCase = true))
+    }
+
+    @Test
     fun androidPublisherUsesIdempotentLowPriorityChannelAndImmutableStopAction() {
         val source = Files.readString(
             Path.of(
@@ -73,5 +91,15 @@ class ServerNotificationModelTest {
         assertTrue(source.contains("FLAG_IMMUTABLE"))
         assertTrue(source.contains("ACTION_STOP"))
         assertFalse(source.contains("token", ignoreCase = true))
+    }
+
+    @Test
+    fun foregroundServiceObservesBrowserSessionStateForCountUpdates() {
+        val source = Files.readString(
+            Path.of("src/main/java/ru/hznik/devicebridge/server/ServerForegroundService.kt"),
+        )
+
+        assertTrue(source.contains("BrowserSessionRepository"))
+        assertTrue(source.contains("combine("))
     }
 }

@@ -34,6 +34,7 @@ class CoordinatorNetworkChangeTest {
         yield()
 
         assertEquals(1, runtime.stopCalls)
+        assertEquals(1, runtime.closeSessionCalls)
         assertEquals(1, observer.stopCalls)
         assertEquals(1, createCalls)
         assertEquals(
@@ -58,6 +59,7 @@ class CoordinatorNetworkChangeTest {
         yield()
 
         assertEquals(1, fixture.runtime.stopCalls)
+        assertEquals(1, fixture.runtime.closeSessionCalls)
         assertEquals(
             ServerLifecycleError.AddressChanged,
             (fixture.coordinator.state.value as ServerLifecycleState.Error).cause,
@@ -137,11 +139,16 @@ class CoordinatorNetworkChangeTest {
 
     private class RecordingRuntime : ServerRuntime {
         var stopCalls = 0
+        var closeSessionCalls = 0
 
         override val networkFingerprint: String = "wlan0|192.168.1.24"
 
         override suspend fun start(): ServerEndpoint =
             ServerEndpoint("192.168.1.24", 8787)
+
+        override suspend fun closeSessionGeneration() {
+            closeSessionCalls += 1
+        }
 
         override suspend fun stop() {
             stopCalls += 1

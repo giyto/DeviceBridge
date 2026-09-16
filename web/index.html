@@ -81,13 +81,47 @@
         </div>
       </aside>
 
-      <section class="stage-card" aria-labelledby="stage-title">
-        <p class="stage-card__step">Этап 3</p>
-        <h2 id="stage-title">Основа браузерного интерфейса готовится</h2>
-        <p>
-          Подключение и передача появятся позже — после защищённого подтверждения
-          браузера на телефоне.
+      <section class="stage-card" aria-labelledby="stage-title" data-role="session-panel">
+        <p class="stage-card__step">Безопасное подключение</p>
+        <h2 id="stage-title" data-role="session-title">Подготовка подключения…</h2>
+        <p data-role="session-detail">
+          Проверяем локальный сервер на телефоне.
         </p>
+
+        <form class="pairing-form" data-role="pairing-form" hidden novalidate>
+          <label for="pairing-code">Шестизначный код с телефона</label>
+          <input
+            id="pairing-code"
+            name="pairing-code"
+            type="text"
+            inputmode="numeric"
+            autocomplete="one-time-code"
+            pattern="[0-9]{6}"
+            minlength="6"
+            maxlength="6"
+            aria-describedby="pairing-help"
+            required
+          />
+          <span id="pairing-help" class="field-help">
+            После отправки подтвердите этот браузер в приложении DeviceBridge.
+          </span>
+          <button class="primary-button" data-action="pair" type="submit">
+            Подключить браузер
+          </button>
+        </form>
+
+        <button class="secondary-button" data-action="disconnect" type="button" hidden>
+          Отключить этот браузер
+        </button>
+
+        <div class="transfer-preview" aria-labelledby="transfer-title">
+          <h2 id="transfer-title">Передача появится на следующем этапе</h2>
+          <p>Подключение уже защищено, но текст и файлы пока недоступны.</p>
+          <div class="transfer-actions">
+            <button type="button" data-action="send-text" disabled>Отправить текст</button>
+            <button type="button" data-action="send-file" disabled>Отправить файл</button>
+          </div>
+        </div>
       </section>
     </main>
 

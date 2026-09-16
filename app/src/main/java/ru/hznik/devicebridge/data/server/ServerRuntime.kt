@@ -9,6 +9,10 @@ interface ServerRuntime {
 
     suspend fun start(): ServerEndpoint
 
+    suspend fun activateSessionGeneration(generation: Long) = Unit
+
+    suspend fun closeSessionGeneration() = Unit
+
     suspend fun stop()
 }
 

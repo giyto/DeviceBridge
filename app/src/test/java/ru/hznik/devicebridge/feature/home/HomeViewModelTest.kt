@@ -31,7 +31,20 @@ import ru.hznik.devicebridge.domain.model.ServerLifecycleError
 import ru.hznik.devicebridge.domain.model.ServerLifecycleState
 import ru.hznik.devicebridge.domain.model.ServerStopReason
 import ru.hznik.devicebridge.domain.repository.ServerLifecycleRepository
+import ru.hznik.devicebridge.domain.repository.BrowserSessionRepository
+import ru.hznik.devicebridge.domain.session.BrowserSession
+import ru.hznik.devicebridge.domain.session.BrowserSessionId
+import ru.hznik.devicebridge.domain.session.BrowserSessionState
+import ru.hznik.devicebridge.domain.session.PairingChallengeId
+import ru.hznik.devicebridge.domain.session.PairingCodeState
+import ru.hznik.devicebridge.domain.session.PairingRequestId
+import ru.hznik.devicebridge.domain.session.PendingBrowserRequest
+import ru.hznik.devicebridge.domain.session.ServerGenerationId
+import ru.hznik.devicebridge.domain.usecase.ApproveBrowserRequestUseCase
+import ru.hznik.devicebridge.domain.usecase.DenyBrowserRequestUseCase
+import ru.hznik.devicebridge.domain.usecase.ObserveBrowserSessionsUseCase
 import ru.hznik.devicebridge.domain.usecase.ObserveServerLifecycleUseCase
+import ru.hznik.devicebridge.domain.usecase.RevokeBrowserSessionUseCase
 import ru.hznik.devicebridge.domain.usecase.StartServerUseCase
 import ru.hznik.devicebridge.domain.usecase.StopServerUseCase
 
@@ -71,6 +84,85 @@ class HomeViewModelTest {
         runCurrent()
         assertEquals(7L, viewModel.uiState.value.uptimeSeconds)
     }
+
+    @Test
+    fun runningStateIncludesPairingCountdownPendingRequestsAndSessions() =
+        runTest(dispatcher) {
+            val lifecycle = FakeRepository(runningState())
+            val sessions = FakeBrowserSessionRepository(activeBrowserState())
+            val clock = FakeClock(12_000)
+            val ticker = FakeTicker()
+            val viewModel = createViewModel(
+                repository = lifecycle,
+                sessionRepository = sessions,
+                clock = clock,
+                ticker = ticker,
+            )
+            runCurrent()
+
+            val initial = viewModel.uiState.value
+            assertEquals("123456", initial.pairingCode)
+            assertEquals(8L, initial.pairingExpiresInSeconds)
+            assertEquals(
+                listOf(PairingRequestId("request-1"), PairingRequestId("request-2")),
+                initial.pendingBrowsers.map { it.id },
+            )
+            assertEquals(listOf(BrowserSessionId("session-1")), initial.activeBrowsers.map { it.id })
+            assertEquals("Edge", initial.pendingBrowsers.first().browserLabel)
+            assertEquals("192.168.1.3", initial.activeBrowsers.single().sourceIpv4)
+
+            clock.nowMs = 15_100
+            ticker.pulse()
+            runCurrent()
+            assertEquals(5L, viewModel.uiState.value.pairingExpiresInSeconds)
+        }
+
+    @Test
+    fun approveDenyAndRevokeDelegateExactTypedIdOnlyOnceWhileInFlight() =
+        runTest(dispatcher) {
+            val sessions = FakeBrowserSessionRepository(activeBrowserState())
+            val viewModel = createViewModel(
+                repository = FakeRepository(runningState()),
+                sessionRepository = sessions,
+            )
+            runCurrent()
+
+            val requestId = PairingRequestId("request-1")
+            val deniedRequestId = PairingRequestId("request-2")
+            val sessionId = BrowserSessionId("session-1")
+            viewModel.onAction(HomeAction.ApproveBrowser(requestId))
+            viewModel.onAction(HomeAction.ApproveBrowser(requestId))
+            viewModel.onAction(HomeAction.DenyBrowser(deniedRequestId))
+            viewModel.onAction(HomeAction.DenyBrowser(deniedRequestId))
+            viewModel.onAction(HomeAction.RevokeBrowser(sessionId))
+            viewModel.onAction(HomeAction.RevokeBrowser(sessionId))
+            runCurrent()
+
+            assertEquals(listOf(requestId), sessions.approved)
+            assertEquals(listOf(deniedRequestId), sessions.denied)
+            assertEquals(listOf(sessionId), sessions.revoked)
+        }
+
+    @Test
+    fun stoppedLifecycleHidesStaleSessionDataAndRecreationReadsLiveProcessState() =
+        runTest(dispatcher) {
+            val lifecycle = FakeRepository(runningState())
+            val sessions = FakeBrowserSessionRepository(activeBrowserState())
+            val first = createViewModel(lifecycle, sessionRepository = sessions)
+            runCurrent()
+            assertEquals("123456", first.uiState.value.pairingCode)
+
+            val recreated = createViewModel(lifecycle, sessionRepository = sessions)
+            runCurrent()
+            assertEquals(first.uiState.value.pairingCode, recreated.uiState.value.pairingCode)
+            assertEquals(first.uiState.value.activeBrowsers, recreated.uiState.value.activeBrowsers)
+
+            lifecycle.mutableState.value = ServerLifecycleState.Stopped
+            runCurrent()
+            assertNull(first.uiState.value.pairingCode)
+            assertTrue(first.uiState.value.pendingBrowsers.isEmpty())
+            assertTrue(first.uiState.value.activeBrowsers.isEmpty())
+        }
 
     @Test
     fun api37RequestsLanPermissionOnceBeforeStart() = runTest(dispatcher) {
@@ -158,6 +250,7 @@ class HomeViewModelTest {
         gateway: FakePermissionGateway = FakePermissionGateway(snapshot()),
         clock: FakeClock = FakeClock(0),
         ticker: FakeTicker = FakeTicker(),
+        sessionRepository: FakeBrowserSessionRepository = FakeBrowserSessionRepository(),
     ) = HomeViewModel(
         StartServerUseCase(repository),
         StopServerUseCase(repository),
@@ -166,6 +259,10 @@ class HomeViewModelTest {
         ServerPermissionRequestPlanner(ServerPermissionPolicy()),
         clock,
         ticker,
+        ObserveBrowserSessionsUseCase(sessionRepository),
+        ApproveBrowserRequestUseCase(sessionRepository),
+        DenyBrowserRequestUseCase(sessionRepository),
+        RevokeBrowserSessionUseCase(sessionRepository),
     )
 
     private class FakeRepository(
@@ -185,6 +282,28 @@ class HomeViewModelTest {
     ) : ServerPermissionGateway {
         override fun snapshot(localNetworkCanAskAgain: Boolean) =
             current.copy(localNetworkCanAskAgain = localNetworkCanAskAgain)
+    }
+
+    private class FakeBrowserSessionRepository(
+        initial: BrowserSessionState = BrowserSessionState.inactive(),
+    ) : BrowserSessionRepository {
+        val mutableState = MutableStateFlow(initial)
+        override val state: StateFlow<BrowserSessionState> = mutableState
+        val approved = mutableListOf<PairingRequestId>()
+        val denied = mutableListOf<PairingRequestId>()
+        val revoked = mutableListOf<BrowserSessionId>()
+
+        override suspend fun approve(requestId: PairingRequestId) {
+            approved += requestId
+        }
+
+        override suspend fun deny(requestId: PairingRequestId) {
+            denied += requestId
+        }
+
+        override suspend fun revoke(sessionId: BrowserSessionId) {
+            revoked += sessionId
+        }
     }
 
     private class FakeClock(var nowMs: Long) : MonotonicClock {
@@ -208,6 +327,43 @@ class HomeViewModelTest {
             generation = 1,
             endpoint = ServerEndpoint("192.168.1.24", 8_787),
             startedAtElapsedRealtimeMs = 0,
+        )
+
+        fun activeBrowserState() = BrowserSessionState.active(
+            generationId = ServerGenerationId(1),
+            pairingCode = PairingCodeState(
+                value = "123456",
+                expiresAtElapsedRealtimeMs = 20_000,
+            ),
+            pendingRequests = listOf(
+                PendingBrowserRequest(
+                    id = PairingRequestId("request-1"),
+                    challengeId = PairingChallengeId("challenge-1"),
+                    generationId = ServerGenerationId(1),
+                    browserLabel = "Edge",
+                    sourceIpv4 = "192.168.1.2",
+                    createdAtElapsedRealtimeMs = 10_000,
+                    expiresAtElapsedRealtimeMs = 18_000,
+                ),
+                PendingBrowserRequest(
+                    id = PairingRequestId("request-2"),
+                    challengeId = PairingChallengeId("challenge-2"),
+                    generationId = ServerGenerationId(1),
+                    browserLabel = "Firefox",
+                    sourceIpv4 = "192.168.1.4",
+                    createdAtElapsedRealtimeMs = 10_500,
+                    expiresAtElapsedRealtimeMs = 18_500,
+                ),
+            ),
+            sessions = listOf(
+                BrowserSession(
+                    id = BrowserSessionId("session-1"),
+                    generationId = ServerGenerationId(1),
+                    browserLabel = "Chrome",
+                    sourceIpv4 = "192.168.1.3",
+                    connectedAtElapsedRealtimeMs = 11_000,
+                ),
+            ),
         )
     }
 }

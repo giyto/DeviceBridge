@@ -1,7 +1,10 @@
 package ru.hznik.devicebridge.data.server
 
+import java.nio.file.Files
+import java.nio.file.Path
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import ru.hznik.devicebridge.data.permission.ServerPermissionGateway
 import ru.hznik.devicebridge.data.permission.ServerPermissionSnapshot
@@ -9,6 +12,26 @@ import ru.hznik.devicebridge.domain.model.ServerLifecycleError
 import ru.hznik.devicebridge.domain.model.ServerLifecycleState
 
 class ServerSessionRecoveryTest {
+
+    @Test
+    fun lifecycleJournalCannotPersistOrBackupBrowserCredentials() {
+        assertEquals(
+            setOf("clear", "consumeInterruptedSession", "markRunning"),
+            ServerSessionJournal::class.java.declaredMethods.map { it.name }.toSet(),
+        )
+        val source = Files.readString(
+            Path.of("src/main/java/ru/hznik/devicebridge/data/server/ServerSessionJournal.kt"),
+        )
+        assertFalse(source.contains("token", ignoreCase = true))
+        assertFalse(source.contains("pairing", ignoreCase = true))
+
+        val backupRules = Files.readString(Path.of("src/main/res/xml/backup_rules.xml"))
+        val extractionRules = Files.readString(
+            Path.of("src/main/res/xml/data_extraction_rules.xml"),
+        )
+        assertTrue(backupRules.contains("server_session_journal.xml"))
+        assertTrue(extractionRules.contains("server_session_journal.xml"))
+    }
 
     @Test
     fun interruptedApi37SessionWithRevokedLanPermissionBecomesRecoverableError() {

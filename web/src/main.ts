@@ -1,12 +1,25 @@
-import { ConnectionController } from "./connectionController";
+import { SessionApiClient } from "./sessionApiClient";
+import { SessionController } from "./sessionController";
+import { SessionEventSocketClient } from "./sessionEventSocketClient";
+import { BrowserSessionTokenStore } from "./sessionTokenStore";
 import { createShellView } from "./shellView";
 import { WebManifestClient } from "./webManifestClient";
 
-const client = new WebManifestClient();
-let controller: ConnectionController;
-const view = createShellView(document, () => controller.retry());
+let controller: SessionController;
+const view = createShellView(document, {
+  onRetry: () => controller.retry(),
+  onSubmitCode: (code) => controller.submitCode(code),
+  onDisconnect: () => controller.disconnect(),
+});
 
-controller = new ConnectionController(client, (state) => view.render(state));
+controller = new SessionController(
+  new WebManifestClient(),
+  new SessionApiClient(),
+  new BrowserSessionTokenStore(),
+  new SessionEventSocketClient(),
+  (state) => view.render(state),
+  browserLabel(navigator.userAgent),
+);
 controller.start();
 
 globalThis.addEventListener(
@@ -17,3 +30,17 @@ globalThis.addEventListener(
   },
   { once: true },
 );
+
+function browserLabel(userAgent: string): string {
+  const browser = userAgent.includes("Edg/")
+    ? "Edge"
+    : userAgent.includes("Firefox/")
+      ? "Firefox"
+      : userAgent.includes("Chrome/")
+        ? "Chrome"
+        : userAgent.includes("Safari/")
+          ? "Safari"
+          : "Browser";
+  const platform = navigator.platform.trim() || "Computer";
+  return `${browser} on ${platform}`.slice(0, 64);
+}

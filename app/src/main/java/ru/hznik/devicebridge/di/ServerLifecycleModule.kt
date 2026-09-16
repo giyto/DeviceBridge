@@ -20,6 +20,11 @@ import ru.hznik.devicebridge.feature.home.DefaultHomeUptimeTicker
 import ru.hznik.devicebridge.feature.home.HomeUptimeTicker
 import ru.hznik.devicebridge.server.AndroidServerNotificationController
 import ru.hznik.devicebridge.server.ServerNotificationController
+import ru.hznik.devicebridge.data.session.BrowserSessionCoordinator
+import ru.hznik.devicebridge.data.session.security.JavaCryptographicRandom
+import ru.hznik.devicebridge.data.session.security.SessionSecretGenerator
+import ru.hznik.devicebridge.domain.repository.BrowserSessionRepository
+import kotlinx.coroutines.CoroutineScope
 
 @Module
 @InstallIn(SingletonComponent::class)
@@ -61,6 +66,23 @@ abstract class ServerLifecycleModule {
 
         @Provides
         @Singleton
+        fun provideBrowserSessionCoordinator(
+            monotonicClock: MonotonicClock,
+            @ApplicationScope applicationScope: CoroutineScope,
+        ): BrowserSessionCoordinator = BrowserSessionCoordinator(
+            clock = monotonicClock,
+            secretGenerator = SessionSecretGenerator(JavaCryptographicRandom()),
+            scope = applicationScope,
+        )
+
+        @Provides
+        @Singleton
+        fun provideBrowserSessionRepository(
+            coordinator: BrowserSessionCoordinator,
+        ): BrowserSessionRepository = coordinator
+
+        @Provides
+        @Singleton
         fun provideServerLifecycleRepository(
             coordinator: ServerLifecycleCoordinator,
             serviceCommands: ServerServiceCommandGateway,
@@ -83,5 +105,21 @@ abstract class ServerLifecycleModule {
         fun provideObserveServerLifecycleUseCase(
             repository: ServerLifecycleRepository,
         ) = ru.hznik.devicebridge.domain.usecase.ObserveServerLifecycleUseCase(repository)
+
+        @Provides
+        fun provideObserveBrowserSessionsUseCase(repository: BrowserSessionRepository) =
+            ru.hznik.devicebridge.domain.usecase.ObserveBrowserSessionsUseCase(repository)
+
+        @Provides
+        fun provideApproveBrowserRequestUseCase(repository: BrowserSessionRepository) =
+            ru.hznik.devicebridge.domain.usecase.ApproveBrowserRequestUseCase(repository)
+
+        @Provides
+        fun provideDenyBrowserRequestUseCase(repository: BrowserSessionRepository) =
+            ru.hznik.devicebridge.domain.usecase.DenyBrowserRequestUseCase(repository)
+
+        @Provides
+        fun provideRevokeBrowserSessionUseCase(repository: BrowserSessionRepository) =
+            ru.hznik.devicebridge.domain.usecase.RevokeBrowserSessionUseCase(repository)
     }
 }

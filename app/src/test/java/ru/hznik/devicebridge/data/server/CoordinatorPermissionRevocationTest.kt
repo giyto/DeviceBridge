@@ -29,6 +29,7 @@ class CoordinatorPermissionRevocationTest {
         yield()
 
         assertEquals(1, runtime.stopCalls)
+        assertEquals(1, runtime.closeSessionCalls)
         assertEquals(
             ServerLifecycleState.Error(
                 generation = 1,
@@ -40,6 +41,7 @@ class CoordinatorPermissionRevocationTest {
         coordinator.start()
         assertTrue(coordinator.state.value is ServerLifecycleState.Running)
         assertEquals(2, observer.startCalls)
+        assertEquals(2, runtime.activateSessionCalls)
     }
 
     private class FakePermissionRevocationObserver : PermissionRevocationObserver {
@@ -62,9 +64,19 @@ class CoordinatorPermissionRevocationTest {
 
     private class RecordingRuntime : ServerRuntime {
         var stopCalls = 0
+        var activateSessionCalls = 0
+        var closeSessionCalls = 0
 
         override suspend fun start(): ServerEndpoint =
             ServerEndpoint("192.168.1.24", 8787)
+
+        override suspend fun activateSessionGeneration(generation: Long) {
+            activateSessionCalls += 1
+        }
+
+        override suspend fun closeSessionGeneration() {
+            closeSessionCalls += 1
+        }
 
         override suspend fun stop() {
             stopCalls += 1

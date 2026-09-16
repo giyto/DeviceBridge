@@ -37,7 +37,9 @@ class ServerForegroundServiceContractTest {
 
     @Test
     fun lifecycleNotificationsComeFromProcessWideCoordinatorState() {
-        assertTrue(source.contains("coordinator.state.collect"))
+        assertTrue(source.contains("combine("))
+        assertTrue(source.contains("coordinator.state"))
+        assertTrue(source.contains("browserSessionRepository.state"))
         assertTrue(source.contains("notificationController.publish(state)"))
         assertFalse(source.contains("savedInstanceState"))
     }

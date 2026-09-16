@@ -1,5 +1,8 @@
 package ru.hznik.devicebridge.feature.home
 
+import ru.hznik.devicebridge.domain.session.BrowserSessionId
+import ru.hznik.devicebridge.domain.session.PairingRequestId
+
 enum class HomeServerStatus {
     Stopped,
     Starting,
@@ -17,6 +20,10 @@ data class ServerSessionUiState(
     val isPermissionExplanationVisible: Boolean = false,
     val openSettingsForPermission: Boolean = false,
     val showNotificationWarning: Boolean = false,
+    val pairingCode: String? = null,
+    val pairingExpiresInSeconds: Long? = null,
+    val pendingBrowsers: List<PendingBrowserUiState> = emptyList(),
+    val activeBrowsers: List<ActiveBrowserUiState> = emptyList(),
 ) {
     val canStart: Boolean
         get() = !commandPending &&
@@ -30,6 +37,21 @@ data class ServerSessionUiState(
     val canSendFiles: Boolean = false
 }
 
+data class PendingBrowserUiState(
+    val id: PairingRequestId,
+    val browserLabel: String,
+    val sourceIpv4: String,
+    val expiresInSeconds: Long,
+    val actionPending: Boolean = false,
+)
+
+data class ActiveBrowserUiState(
+    val id: BrowserSessionId,
+    val browserLabel: String,
+    val sourceIpv4: String,
+    val actionPending: Boolean = false,
+)
+
 sealed interface HomeAction {
     data object StartClicked : HomeAction
     data object StopClicked : HomeAction
@@ -38,6 +60,9 @@ sealed interface HomeAction {
         val localNetworkCanAskAgain: Boolean,
     ) : HomeAction
     data object NotificationWarningDismissed : HomeAction
+    data class ApproveBrowser(val requestId: PairingRequestId) : HomeAction
+    data class DenyBrowser(val requestId: PairingRequestId) : HomeAction
+    data class RevokeBrowser(val sessionId: BrowserSessionId) : HomeAction
 }
 
 sealed interface HomeEffect {

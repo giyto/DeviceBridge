@@ -7,6 +7,7 @@ import javax.inject.Inject
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -15,7 +16,14 @@ import ru.hznik.devicebridge.data.permission.ServerPermissionRequestPlanner
 import ru.hznik.devicebridge.data.server.MonotonicClock
 import ru.hznik.devicebridge.domain.model.ServerLifecycleError
 import ru.hznik.devicebridge.domain.model.ServerLifecycleState
+import ru.hznik.devicebridge.domain.session.BrowserSessionId
+import ru.hznik.devicebridge.domain.session.BrowserSessionState
+import ru.hznik.devicebridge.domain.session.PairingRequestId
+import ru.hznik.devicebridge.domain.usecase.ApproveBrowserRequestUseCase
+import ru.hznik.devicebridge.domain.usecase.DenyBrowserRequestUseCase
+import ru.hznik.devicebridge.domain.usecase.ObserveBrowserSessionsUseCase
 import ru.hznik.devicebridge.domain.usecase.ObserveServerLifecycleUseCase
+import ru.hznik.devicebridge.domain.usecase.RevokeBrowserSessionUseCase
 import ru.hznik.devicebridge.domain.usecase.StartServerUseCase
 import ru.hznik.devicebridge.domain.usecase.StopServerUseCase
 
@@ -28,10 +36,20 @@ class HomeViewModel @Inject constructor(
     private val permissionPlanner: ServerPermissionRequestPlanner,
     private val monotonicClock: MonotonicClock,
     private val uptimeTicker: HomeUptimeTicker,
+    observeBrowserSessions: ObserveBrowserSessionsUseCase,
+    private val approveBrowserRequest: ApproveBrowserRequestUseCase,
+    private val denyBrowserRequest: DenyBrowserRequestUseCase,
+    private val revokeBrowserSession: RevokeBrowserSessionUseCase,
 ) : ViewModel() {
     private val lifecycleState = observeServerLifecycle()
+    private val browserSessionState = observeBrowserSessions()
+    private val decidingRequestIds = mutableSetOf<PairingRequestId>()
+    private val revokingSessionIds = mutableSetOf<BrowserSessionId>()
     private val mutableUiState = kotlinx.coroutines.flow.MutableStateFlow(
-        lifecycleState.value.toUiState(monotonicClock.nowMs()),
+        lifecycleState.value.toUiState(
+            browserSessionState.value,
+            monotonicClock.nowMs(),
+        ),
     )
     private val effectChannel = Channel<HomeEffect>(Channel.BUFFERED)
     private var localNetworkCanAskAgain = true
@@ -41,14 +59,16 @@ class HomeViewModel @Inject constructor(
 
     init {
         viewModelScope.launch {
-            lifecycleState.collectLatest { state ->
+            combine(lifecycleState, browserSessionState) { lifecycle, sessions ->
+                lifecycle to sessions
+            }.collectLatest { (state, sessions) ->
                 mutableUiState.update { previous ->
-                    state.toUiState(monotonicClock.nowMs(), previous)
+                    state.toUiState(sessions, monotonicClock.nowMs(), previous)
                 }
                 if (state is ServerLifecycleState.Running) {
                     uptimeTicker.ticks().collect {
                         mutableUiState.update { previous ->
-                            state.toUiState(monotonicClock.nowMs(), previous)
+                            state.toUiState(sessions, monotonicClock.nowMs(), previous)
                         }
                     }
                 }
@@ -68,6 +88,56 @@ class HomeViewModel @Inject constructor(
             HomeAction.NotificationWarningDismissed -> mutableUiState.update {
                 it.copy(showNotificationWarning = false)
             }
+            is HomeAction.ApproveBrowser -> decideRequest(
+                requestId = action.requestId,
+                decision = approveBrowserRequest::invoke,
+            )
+            is HomeAction.DenyBrowser -> decideRequest(
+                requestId = action.requestId,
+                decision = denyBrowserRequest::invoke,
+            )
+            is HomeAction.RevokeBrowser -> revokeSession(action.sessionId)
+        }
+    }
+
+    private fun decideRequest(
+        requestId: PairingRequestId,
+        decision: suspend (PairingRequestId) -> Unit,
+    ) {
+        if (browserSessionState.value.pendingRequests.none { it.id == requestId }) return
+        if (!decidingRequestIds.add(requestId)) return
+        refreshSessionUi()
+        viewModelScope.launch {
+            try {
+                decision(requestId)
+            } finally {
+                decidingRequestIds.remove(requestId)
+                refreshSessionUi()
+            }
+        }
+    }
+
+    private fun revokeSession(sessionId: BrowserSessionId) {
+        if (browserSessionState.value.sessions.none { it.id == sessionId }) return
+        if (!revokingSessionIds.add(sessionId)) return
+        refreshSessionUi()
+        viewModelScope.launch {
+            try {
+                revokeBrowserSession(sessionId)
+            } finally {
+                revokingSessionIds.remove(sessionId)
+                refreshSessionUi()
+            }
+        }
+    }
+
+    private fun refreshSessionUi() {
+        mutableUiState.update { previous ->
+            lifecycleState.value.toUiState(
+                browserSessionState.value,
+                monotonicClock.nowMs(),
+                previous,
+            )
         }
     }
 
@@ -132,6 +202,7 @@ class HomeViewModel @Inject constructor(
     }
 
     private fun ServerLifecycleState.toUiState(
+        sessions: BrowserSessionState,
         nowMs: Long,
         previous: ServerSessionUiState = ServerSessionUiState(),
     ): ServerSessionUiState {
@@ -157,6 +228,7 @@ class HomeViewModel @Inject constructor(
                         cause == ServerLifecycleError.PermissionRevoked,
             )
         }
+        val showSessions = this is ServerLifecycleState.Running && sessions.isActive
         return base.copy(
             commandPending = false,
             showNotificationWarning = previous.showNotificationWarning,
@@ -164,8 +236,42 @@ class HomeViewModel @Inject constructor(
                 base.isPermissionExplanationVisible ||
                     previous.isPermissionExplanationVisible,
             openSettingsForPermission = previous.openSettingsForPermission,
+            pairingCode = sessions.pairingCode?.value.takeIf { showSessions },
+            pairingExpiresInSeconds = sessions.pairingCode
+                ?.expiresAtElapsedRealtimeMs
+                ?.remainingSeconds(nowMs)
+                ?.takeIf { showSessions },
+            pendingBrowsers = if (showSessions) {
+                sessions.pendingRequests.map { request ->
+                    PendingBrowserUiState(
+                        id = request.id,
+                        browserLabel = request.browserLabel,
+                        sourceIpv4 = request.sourceIpv4,
+                        expiresInSeconds = request.expiresAtElapsedRealtimeMs
+                            .remainingSeconds(nowMs),
+                        actionPending = request.id in decidingRequestIds,
+                    )
+                }
+            } else {
+                emptyList()
+            },
+            activeBrowsers = if (showSessions) {
+                sessions.sessions.map { session ->
+                    ActiveBrowserUiState(
+                        id = session.id,
+                        browserLabel = session.browserLabel,
+                        sourceIpv4 = session.sourceIpv4,
+                        actionPending = session.id in revokingSessionIds,
+                    )
+                }
+            } else {
+                emptyList()
+            },
         )
     }
+
+    private fun Long.remainingSeconds(nowMs: Long): Long =
+        ((this - nowMs).coerceAtLeast(0) + 999) / 1_000
 
     private fun ServerLifecycleError.userMessage(): String = when (this) {
         ServerLifecycleError.LocalNetworkPermissionDenied,

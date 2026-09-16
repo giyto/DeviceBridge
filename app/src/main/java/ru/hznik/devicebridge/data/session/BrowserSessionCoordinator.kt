@@ -1,0 +1,473 @@
+package ru.hznik.devicebridge.data.session
+
+import java.nio.charset.StandardCharsets
+import java.security.MessageDigest
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withTimeoutOrNull
+import ru.hznik.devicebridge.data.server.MonotonicClock
+import ru.hznik.devicebridge.data.session.security.SessionSecretGenerator
+import ru.hznik.devicebridge.data.session.security.SessionTokenCredential
+import ru.hznik.devicebridge.domain.repository.BrowserSessionRepository
+import ru.hznik.devicebridge.domain.session.BrowserSession
+import ru.hznik.devicebridge.domain.session.BrowserSessionEvent
+import ru.hznik.devicebridge.domain.session.BrowserSessionId
+import ru.hznik.devicebridge.domain.session.BrowserSessionReducer
+import ru.hznik.devicebridge.domain.session.BrowserSessionState
+import ru.hznik.devicebridge.domain.session.PairingChallengeId
+import ru.hznik.devicebridge.domain.session.PairingRequestId
+import ru.hznik.devicebridge.domain.session.PendingBrowserRequest
+import ru.hznik.devicebridge.domain.session.ServerGenerationId
+
+class SessionGenerationHandle internal constructor(
+    internal val generationId: ServerGenerationId,
+)
+
+fun interface SessionConnection {
+    suspend fun close()
+}
+
+sealed interface ChallengeCreationResult {
+    data class Created(
+        val challengeId: PairingChallengeId,
+        val expiresAtElapsedRealtimeMs: Long,
+        val confirmTimeoutSeconds: Int,
+        val attemptsRemaining: Int,
+    ) : ChallengeCreationResult
+
+    data class RateLimited(val retryAfterMs: Long) : ChallengeCreationResult
+    data object InvalidMetadata : ChallengeCreationResult
+    data object CapacityReached : ChallengeCreationResult
+    data object GenerationClosed : ChallengeCreationResult
+}
+
+sealed interface SessionConfirmationResult {
+    data class Approved(
+        val sessionId: BrowserSessionId,
+        val token: String,
+    ) : SessionConfirmationResult
+
+    data class InvalidCode(val remainingAttempts: Int) : SessionConfirmationResult
+    data class RateLimited(val retryAfterMs: Long) : SessionConfirmationResult
+    data object InvalidChallenge : SessionConfirmationResult
+    data object InvalidMetadata : SessionConfirmationResult
+    data object Expired : SessionConfirmationResult
+    data object Denied : SessionConfirmationResult
+    data object TimedOut : SessionConfirmationResult
+    data object CapacityReached : SessionConfirmationResult
+    data object GenerationClosed : SessionConfirmationResult
+}
+
+class BrowserSessionCoordinator(
+    private val clock: MonotonicClock,
+    private val secretGenerator: SessionSecretGenerator,
+    private val scope: CoroutineScope,
+    maxChallenges: Int = MAX_ACTIVE_CHALLENGES,
+    private val maxPendingRequests: Int = MAX_CONCURRENT_PENDING_REQUESTS,
+    private val maxSessions: Int = 16,
+    private val confirmWaitTimeoutMs: Long = PENDING_REQUEST_TTL_MS,
+) : BrowserSessionRepository {
+    private data class ChallengeRecord(
+        val generationId: ServerGenerationId,
+        val metadata: NormalizedClientMetadata,
+    )
+
+    private data class PendingEntry(
+        val request: PendingBrowserRequest,
+        val decision: CompletableDeferred<SessionConfirmationResult>,
+    )
+
+    private data class StoredSession(
+        val session: BrowserSession,
+        val credential: SessionTokenCredential,
+    )
+
+    private sealed interface ConfirmationPreparation {
+        data class Await(val entry: PendingEntry) : ConfirmationPreparation
+        data class Immediate(val result: SessionConfirmationResult) : ConfirmationPreparation
+    }
+
+    private val mutex = Mutex()
+    private val lifetimePolicy = SessionLifetimePolicy(clock, secretGenerator)
+    private val rateLimiter = PairingRateLimiter(clock)
+    private val challenges = BoundedExpiringRegistry<PairingChallengeId, ChallengeRecord>(
+        clock = clock,
+        maxEntries = maxChallenges,
+    )
+    private val pending = BoundedExpiringRegistry<PairingRequestId, PendingEntry>(
+        clock = clock,
+        maxEntries = maxPendingRequests,
+    )
+    private val sessions = LinkedHashMap<BrowserSessionId, StoredSession>()
+    private val connections = LinkedHashMap<BrowserSessionId, MutableSet<SessionConnection>>()
+    private val mutableState = MutableStateFlow(BrowserSessionState.inactive())
+
+    @Volatile
+    private var activeHandle: SessionGenerationHandle? = null
+    private var codeRotationJob: Job? = null
+
+    init {
+        require(confirmWaitTimeoutMs in 1..PENDING_REQUEST_TTL_MS)
+    }
+
+    override val state: StateFlow<BrowserSessionState> = mutableState.asStateFlow()
+
+    suspend fun activate(generationId: ServerGenerationId): SessionGenerationHandle {
+        val (handle, oldConnections) = mutex.withLock {
+            val toClose = clearActiveGenerationLocked()
+            val newHandle = SessionGenerationHandle(generationId)
+            activeHandle = newHandle
+            val code = lifetimePolicy.newPairingCode()
+            mutableState.value = BrowserSessionReducer.reduce(
+                BrowserSessionState.inactive(),
+                BrowserSessionEvent.Activated(generationId, code),
+            )
+            scheduleCodeRotation(newHandle)
+            newHandle to toClose
+        }
+        closeConnections(oldConnections)
+        return handle
+    }
+
+    fun isCurrent(handle: SessionGenerationHandle): Boolean = activeHandle === handle
+
+    suspend fun closeGeneration(handle: SessionGenerationHandle) {
+        val toClose = mutex.withLock {
+            if (activeHandle !== handle) emptyList() else clearActiveGenerationLocked()
+        }
+        closeConnections(toClose)
+    }
+
+    suspend fun createChallenge(
+        handle: SessionGenerationHandle,
+        browserLabel: String,
+        sourceIpv4: String,
+    ): ChallengeCreationResult = mutex.withLock {
+        if (activeHandle !== handle) return@withLock ChallengeCreationResult.GenerationClosed
+        val metadata = when (val normalized = ClientMetadataNormalizer.normalize(browserLabel, sourceIpv4)) {
+            is ClientMetadataResult.Valid -> normalized.metadata
+            is ClientMetadataResult.Invalid -> return@withLock ChallengeCreationResult.InvalidMetadata
+        }
+        when (val limit = rateLimiter.check(metadata.sourceIpv4)) {
+            is RateLimitDecision.Blocked -> return@withLock ChallengeCreationResult.RateLimited(
+                limit.retryAfterMs,
+            )
+            is RateLimitDecision.Allowed -> {
+                clearExpiredBlock(handle)
+                val currentCode = refreshPairingCode(handle)
+                val challengeId = PairingChallengeId(secretGenerator.newOpaqueId())
+                val result = challenges.put(
+                    key = challengeId,
+                    value = ChallengeRecord(handle.generationId, metadata),
+                    expiresAtMs = currentCode.expiresAtElapsedRealtimeMs,
+                )
+                if (result == RegistryPutResult.CAPACITY_REACHED) {
+                    return@withLock ChallengeCreationResult.CapacityReached
+                }
+                ChallengeCreationResult.Created(
+                    challengeId = challengeId,
+                    expiresAtElapsedRealtimeMs = currentCode.expiresAtElapsedRealtimeMs,
+                    confirmTimeoutSeconds = (PENDING_REQUEST_TTL_MS / 1_000).toInt(),
+                    attemptsRemaining = limit.remainingAttempts,
+                )
+            }
+        }
+    }
+
+    suspend fun confirmAndAwait(
+        handle: SessionGenerationHandle,
+        challengeId: PairingChallengeId,
+        code: String,
+        browserLabel: String,
+        sourceIpv4: String,
+    ): SessionConfirmationResult {
+        val preparation = mutex.withLock {
+            prepareConfirmation(handle, challengeId, code, browserLabel, sourceIpv4)
+        }
+        if (preparation is ConfirmationPreparation.Immediate) return preparation.result
+        val entry = (preparation as ConfirmationPreparation.Await).entry
+        val decided = withTimeoutOrNull(confirmWaitTimeoutMs) { entry.decision.await() }
+        if (decided != null) return decided
+
+        mutex.withLock {
+            val removed = pending.remove(entry.request.id)
+            if (removed === entry && activeHandle?.generationId == entry.request.generationId) {
+                mutableState.value = BrowserSessionReducer.reduce(
+                    mutableState.value,
+                    BrowserSessionEvent.RequestExpired(
+                        entry.request.generationId,
+                        entry.request.id,
+                    ),
+                )
+            }
+        }
+        return SessionConfirmationResult.TimedOut
+    }
+
+    override suspend fun approve(requestId: PairingRequestId) {
+        mutex.withLock {
+            val entry = pending.remove(requestId) ?: return@withLock
+            val handle = activeHandle
+            if (handle == null || handle.generationId != entry.request.generationId) {
+                entry.decision.complete(SessionConfirmationResult.GenerationClosed)
+                return@withLock
+            }
+            if (sessions.size >= maxSessions) {
+                entry.decision.complete(SessionConfirmationResult.CapacityReached)
+                mutableState.value = BrowserSessionReducer.reduce(
+                    mutableState.value,
+                    BrowserSessionEvent.RequestDenied(entry.request.generationId, requestId),
+                )
+                return@withLock
+            }
+            val rawToken = secretGenerator.newSessionToken()
+            val session = BrowserSession(
+                id = BrowserSessionId(secretGenerator.newOpaqueId()),
+                generationId = handle.generationId,
+                browserLabel = entry.request.browserLabel,
+                sourceIpv4 = entry.request.sourceIpv4,
+                connectedAtElapsedRealtimeMs = clock.nowMs(),
+            )
+            sessions[session.id] = StoredSession(
+                session = session,
+                credential = SessionTokenCredential.fromRaw(handle.generationId, rawToken),
+            )
+            val nextCode = lifetimePolicy.newPairingCode()
+            mutableState.value = BrowserSessionReducer.reduce(
+                mutableState.value,
+                BrowserSessionEvent.RequestApproved(
+                    generationId = handle.generationId,
+                    requestId = requestId,
+                    session = session,
+                    nextPairingCode = nextCode,
+                ),
+            )
+            scheduleCodeRotation(handle)
+            entry.decision.complete(SessionConfirmationResult.Approved(session.id, rawToken))
+        }
+    }
+
+    override suspend fun deny(requestId: PairingRequestId) {
+        mutex.withLock {
+            val entry = pending.remove(requestId) ?: return@withLock
+            mutableState.value = BrowserSessionReducer.reduce(
+                mutableState.value,
+                BrowserSessionEvent.RequestDenied(entry.request.generationId, requestId),
+            )
+            entry.decision.complete(SessionConfirmationResult.Denied)
+        }
+    }
+
+    suspend fun authenticate(
+        handle: SessionGenerationHandle,
+        token: String,
+    ): BrowserSession? = mutex.withLock {
+        if (activeHandle !== handle || token.isBlank()) return@withLock null
+        sessions.values
+            .firstOrNull { it.credential.matches(handle.generationId, token) }
+            ?.session
+    }
+
+    suspend fun attachConnection(
+        sessionId: BrowserSessionId,
+        connection: SessionConnection,
+    ): Boolean = mutex.withLock {
+        if (sessionId !in sessions) return@withLock false
+        connections.getOrPut(sessionId, ::linkedSetOf).add(connection)
+        true
+    }
+
+    suspend fun detachConnection(
+        sessionId: BrowserSessionId,
+        connection: SessionConnection,
+    ) {
+        mutex.withLock {
+            connections[sessionId]?.let { bound ->
+                bound.remove(connection)
+                if (bound.isEmpty()) connections.remove(sessionId)
+            }
+        }
+    }
+
+    override suspend fun revoke(sessionId: BrowserSessionId) {
+        val toClose = mutex.withLock {
+            val removed = sessions.remove(sessionId) ?: return@withLock emptyList()
+            mutableState.value = BrowserSessionReducer.reduce(
+                mutableState.value,
+                BrowserSessionEvent.SessionRevoked(removed.session.generationId, sessionId),
+            )
+            connections.remove(sessionId)?.toList().orEmpty()
+        }
+        toClose.forEach { connection ->
+            try {
+                connection.close()
+            } catch (_: Exception) {
+                // Revocation is complete even if a transport was already closed.
+            }
+        }
+    }
+
+    private fun scheduleCodeRotation(handle: SessionGenerationHandle) {
+        codeRotationJob = scope.launch {
+            val currentCode = mutableState.value.pairingCode ?: return@launch
+            val delayMs = (currentCode.expiresAtElapsedRealtimeMs - clock.nowMs()).coerceAtLeast(1)
+            delay(delayMs)
+            mutex.withLock {
+                if (activeHandle !== handle) return@withLock
+                val latestCode = mutableState.value.pairingCode ?: return@withLock
+                val rotated = lifetimePolicy.currentOrRotated(latestCode)
+                mutableState.value = BrowserSessionReducer.reduce(
+                    mutableState.value,
+                    BrowserSessionEvent.PairingCodeRotated(handle.generationId, rotated),
+                )
+                scheduleCodeRotation(handle)
+            }
+        }
+    }
+
+    private fun refreshPairingCode(handle: SessionGenerationHandle) =
+        requireNotNull(mutableState.value.pairingCode).let { current ->
+            val refreshed = lifetimePolicy.currentOrRotated(current)
+            if (refreshed !== current) {
+                mutableState.value = BrowserSessionReducer.reduce(
+                    mutableState.value,
+                    BrowserSessionEvent.PairingCodeRotated(handle.generationId, refreshed),
+                )
+                scheduleCodeRotation(handle)
+            }
+            refreshed
+        }
+
+    private fun prepareConfirmation(
+        handle: SessionGenerationHandle,
+        challengeId: PairingChallengeId,
+        code: String,
+        browserLabel: String,
+        sourceIpv4: String,
+    ): ConfirmationPreparation {
+        if (activeHandle !== handle) {
+            return ConfirmationPreparation.Immediate(SessionConfirmationResult.GenerationClosed)
+        }
+        val currentCode = requireNotNull(mutableState.value.pairingCode)
+        if (!lifetimePolicy.isPairingCodeActive(currentCode)) {
+            refreshPairingCode(handle)
+            return ConfirmationPreparation.Immediate(SessionConfirmationResult.Expired)
+        }
+        val challenge = challenges.get(challengeId)
+            ?: return ConfirmationPreparation.Immediate(SessionConfirmationResult.InvalidChallenge)
+        if (challenge.generationId != handle.generationId) {
+            return ConfirmationPreparation.Immediate(SessionConfirmationResult.GenerationClosed)
+        }
+        val metadata = when (val normalized = ClientMetadataNormalizer.normalize(browserLabel, sourceIpv4)) {
+            is ClientMetadataResult.Valid -> normalized.metadata
+            is ClientMetadataResult.Invalid -> {
+                return ConfirmationPreparation.Immediate(SessionConfirmationResult.InvalidMetadata)
+            }
+        }
+        if (metadata != challenge.metadata) {
+            return ConfirmationPreparation.Immediate(SessionConfirmationResult.InvalidMetadata)
+        }
+        when (val limit = rateLimiter.check(metadata.sourceIpv4)) {
+            is RateLimitDecision.Blocked -> {
+                return ConfirmationPreparation.Immediate(
+                    SessionConfirmationResult.RateLimited(limit.retryAfterMs),
+                )
+            }
+            is RateLimitDecision.Allowed -> clearExpiredBlock(handle)
+        }
+        if (!constantTimeCodeEquals(currentCode.value, code)) {
+            return when (val failure = rateLimiter.recordFailure(metadata.sourceIpv4)) {
+                is RateLimitDecision.Allowed -> ConfirmationPreparation.Immediate(
+                    SessionConfirmationResult.InvalidCode(failure.remainingAttempts),
+                )
+                is RateLimitDecision.Blocked -> {
+                    mutableState.value = BrowserSessionReducer.reduce(
+                        mutableState.value,
+                        BrowserSessionEvent.SourceBlocked(
+                            handle.generationId,
+                            Math.addExact(clock.nowMs(), failure.retryAfterMs),
+                        ),
+                    )
+                    ConfirmationPreparation.Immediate(
+                        SessionConfirmationResult.RateLimited(failure.retryAfterMs),
+                    )
+                }
+            }
+        }
+
+        val requestId = PairingRequestId(secretGenerator.newOpaqueId())
+        val request = PendingBrowserRequest(
+            id = requestId,
+            challengeId = challengeId,
+            generationId = handle.generationId,
+            browserLabel = metadata.browserLabel,
+            sourceIpv4 = metadata.sourceIpv4,
+            createdAtElapsedRealtimeMs = clock.nowMs(),
+            expiresAtElapsedRealtimeMs = lifetimePolicy.newPendingExpiry(),
+        )
+        val entry = PendingEntry(request, CompletableDeferred())
+        if (pending.put(requestId, entry, request.expiresAtElapsedRealtimeMs) == RegistryPutResult.CAPACITY_REACHED) {
+            return ConfirmationPreparation.Immediate(SessionConfirmationResult.CapacityReached)
+        }
+        challenges.remove(challengeId)
+        rateLimiter.recordSuccess(metadata.sourceIpv4)
+        mutableState.value = BrowserSessionReducer.reduce(
+            mutableState.value,
+            BrowserSessionEvent.RequestAdded(request),
+        )
+        return ConfirmationPreparation.Await(entry)
+    }
+
+    private fun constantTimeCodeEquals(expected: String, actual: String): Boolean = MessageDigest.isEqual(
+        expected.toByteArray(StandardCharsets.US_ASCII),
+        actual.toByteArray(StandardCharsets.US_ASCII),
+    )
+
+    private fun clearExpiredBlock(handle: SessionGenerationHandle) {
+        val blockedUntil = mutableState.value.blockedUntilElapsedRealtimeMs ?: return
+        if (clock.nowMs() >= blockedUntil) {
+            mutableState.value = BrowserSessionReducer.reduce(
+                mutableState.value,
+                BrowserSessionEvent.SourceBlockCleared(handle.generationId),
+            )
+        }
+    }
+
+    private fun clearActiveGenerationLocked(): List<SessionConnection> {
+        val handle = activeHandle ?: return emptyList()
+        codeRotationJob?.cancel()
+        codeRotationJob = null
+        challenges.clear()
+        pending.clear().forEach { entry ->
+            entry.decision.complete(SessionConfirmationResult.GenerationClosed)
+        }
+        sessions.clear()
+        rateLimiter.clear()
+        val toClose = connections.values.flatten().distinct()
+        connections.clear()
+        activeHandle = null
+        mutableState.value = BrowserSessionReducer.reduce(
+            mutableState.value,
+            BrowserSessionEvent.Deactivated(handle.generationId),
+        )
+        return toClose
+    }
+
+    private suspend fun closeConnections(connections: List<SessionConnection>) {
+        connections.forEach { connection ->
+            try {
+                connection.close()
+            } catch (_: Exception) {
+                // Lifecycle cleanup remains complete if transport close races its peer.
+            }
+        }
+    }
+}

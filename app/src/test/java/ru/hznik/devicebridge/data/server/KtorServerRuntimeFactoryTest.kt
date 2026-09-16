@@ -18,6 +18,12 @@ import ru.hznik.devicebridge.data.network.LanNetworkSnapshotProvider
 import ru.hznik.devicebridge.web.AllowlistedWebAssetProvider
 import ru.hznik.devicebridge.web.WebAssetDescriptor
 import ru.hznik.devicebridge.web.WebAssetSource
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import ru.hznik.devicebridge.data.session.BrowserSessionCoordinator
+import ru.hznik.devicebridge.data.session.security.JavaCryptographicRandom
+import ru.hznik.devicebridge.data.session.security.SessionSecretGenerator
 
 class KtorServerRuntimeFactoryTest {
 
@@ -64,16 +70,21 @@ class KtorServerRuntimeFactoryTest {
     }
 
     @Test
-    fun productionRuntimeDoesNotPublishDiagnosticsOrFutureApi() = runBlocking {
+    fun productionRuntimeKeepsDiagnosticsAbsentAndProtectsSessionStatus() = runBlocking {
         val runtime = factory().create()
         val endpoint = runtime.start()
 
         try {
             val diagnostics = rawGet(endpoint.port, endpoint.authority, "/diagnostics/health")
-            val futureApi = rawGet(endpoint.port, endpoint.authority, "/api/v1/status")
+            val protectedStatus = rawGet(
+                endpoint.port,
+                endpoint.authority,
+                "/api/v1/status",
+                origin = endpoint.url,
+            )
 
             assertTrue(diagnostics.startsWith("HTTP/1.1 404"))
-            assertTrue(futureApi.startsWith("HTTP/1.1 404"))
+            assertTrue(protectedStatus.startsWith("HTTP/1.1 401"))
             assertFalse(diagnostics.contains("ktorVersion"))
         } finally {
             runtime.stop()
@@ -127,17 +138,25 @@ class KtorServerRuntimeFactoryTest {
                     }
                 },
             ),
+            browserSessionCoordinator = BrowserSessionCoordinator(
+                clock = MonotonicClock { 1_000 },
+                secretGenerator = SessionSecretGenerator(JavaCryptographicRandom()),
+                scope = CoroutineScope(SupervisorJob() + Dispatchers.Default),
+            ),
+            monotonicClock = MonotonicClock { 1_000 },
         )
 
     private fun rawGet(
         port: Int,
         hostHeader: String,
         path: String,
+        origin: String? = null,
     ): String = Socket("127.0.0.1", port).use { socket ->
         socket.soTimeout = 2_000
         val writer = socket.getOutputStream().bufferedWriter(StandardCharsets.US_ASCII)
         writer.write("GET " + path + " HTTP/1.1\r\n")
         writer.write("Host: " + hostHeader + "\r\n")
+        origin?.let { writer.write("Origin: " + it + "\r\n") }
         writer.write("Connection: close\r\n")
         writer.write("\r\n")
         writer.flush()

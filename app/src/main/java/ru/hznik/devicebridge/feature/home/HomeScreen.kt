@@ -15,6 +15,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
@@ -27,6 +28,7 @@ import androidx.compose.ui.platform.toClipEntry
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
@@ -91,6 +93,37 @@ fun HomeScreen(
             )
         }
 
+        if (
+            uiState.status == HomeServerStatus.Running &&
+            uiState.pairingCode != null &&
+            uiState.pairingExpiresInSeconds != null
+        ) {
+            PairingCodeCard(
+                code = uiState.pairingCode,
+                expiresInSeconds = uiState.pairingExpiresInSeconds,
+            )
+        }
+
+        if (
+            uiState.status == HomeServerStatus.Running &&
+            uiState.pendingBrowsers.isNotEmpty()
+        ) {
+            PendingBrowsersSection(
+                requests = uiState.pendingBrowsers,
+                onAction = onAction,
+            )
+        }
+
+        if (
+            uiState.status == HomeServerStatus.Running &&
+            uiState.activeBrowsers.isNotEmpty()
+        ) {
+            ActiveBrowsersSection(
+                sessions = uiState.activeBrowsers,
+                onAction = onAction,
+            )
+        }
+
         if (uiState.isPermissionExplanationVisible) {
             MessageCard(
                 title = "Разрешите доступ к локальной сети",
@@ -144,10 +177,176 @@ fun HomeScreen(
         }
 
         Text(
-            text = "Станут доступны после безопасного подключения браузера на следующем этапе.",
+            text = if (uiState.activeBrowsers.isEmpty()) {
+                "Сначала безопасно подключите браузер по коду выше."
+            } else {
+                "Браузер подключён. Передача появится на следующем этапе."
+            },
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
+    }
+}
+
+@Composable
+private fun PairingCodeCard(
+    code: String,
+    expiresInSeconds: Long,
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(24.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.primaryContainer,
+        ),
+    ) {
+        Column(
+            modifier = Modifier.padding(20.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Text(
+                text = "Код подключения",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold,
+            )
+            Text(
+                text = code,
+                style = MaterialTheme.typography.displayMedium,
+                fontFamily = FontFamily.Monospace,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.semantics {
+                    contentDescription = "Код подключения $code"
+                },
+            )
+            Text(
+                text = "Код обновится через ${formatCountdown(expiresInSeconds)}",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onPrimaryContainer,
+            )
+            Text(
+                text = "Откройте адрес сервера на компьютере, введите этот код и подтвердите браузер здесь.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onPrimaryContainer,
+            )
+        }
+    }
+}
+
+@Composable
+private fun PendingBrowsersSection(
+    requests: List<PendingBrowserUiState>,
+    onAction: (HomeAction) -> Unit,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Text(
+            text = "Запросы на подключение",
+            style = MaterialTheme.typography.titleLarge,
+            fontWeight = FontWeight.SemiBold,
+        )
+        requests.forEach { request ->
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(22.dp),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                ),
+            ) {
+                Column(
+                    modifier = Modifier.padding(18.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Text(request.browserLabel, fontWeight = FontWeight.SemiBold)
+                    Text(
+                        text = request.sourceIpv4,
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontFamily = FontFamily.Monospace,
+                    )
+                    Text(
+                        text = "Запрос истечёт через ${formatCountdown(request.expiresInSeconds)}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSecondaryContainer,
+                    )
+                    HorizontalDivider()
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    ) {
+                        OutlinedButton(
+                            onClick = {
+                                onAction(HomeAction.DenyBrowser(request.id))
+                            },
+                            enabled = !request.actionPending,
+                            modifier = Modifier
+                                .weight(1f)
+                                .semantics {
+                                    contentDescription =
+                                        "Отклонить ${request.browserLabel} с адреса ${request.sourceIpv4}"
+                                },
+                        ) { Text("Отклонить") }
+                        Button(
+                            onClick = {
+                                onAction(HomeAction.ApproveBrowser(request.id))
+                            },
+                            enabled = !request.actionPending,
+                            modifier = Modifier
+                                .weight(1f)
+                                .semantics {
+                                    contentDescription =
+                                        "Разрешить ${request.browserLabel} с адреса ${request.sourceIpv4}"
+                                },
+                        ) { Text("Разрешить") }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ActiveBrowsersSection(
+    sessions: List<ActiveBrowserUiState>,
+    onAction: (HomeAction) -> Unit,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Text(
+            text = "Подключённые браузеры: ${sessions.size}",
+            style = MaterialTheme.typography.titleLarge,
+            fontWeight = FontWeight.SemiBold,
+        )
+        sessions.forEach { session ->
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(22.dp),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceContainer,
+                ),
+            ) {
+                Column(
+                    modifier = Modifier.padding(18.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    Text(session.browserLabel, fontWeight = FontWeight.SemiBold)
+                    Text(
+                        text = session.sourceIpv4,
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontFamily = FontFamily.Monospace,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    OutlinedButton(
+                        onClick = {
+                            onAction(HomeAction.RevokeBrowser(session.id))
+                        },
+                        enabled = !session.actionPending,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .semantics {
+                                contentDescription =
+                                    "Отключить ${session.browserLabel} с адреса ${session.sourceIpv4}"
+                            },
+                    ) { Text("Отключить") }
+                }
+            }
+        }
     }
 }
 
@@ -316,6 +515,13 @@ internal fun formatUptime(totalSeconds: Long): String {
     val minutes = (safeSeconds % 3_600) / 60
     val seconds = safeSeconds % 60
     return "%02d:%02d:%02d".format(hours, minutes, seconds)
+}
+
+internal fun formatCountdown(totalSeconds: Long): String {
+    val safeSeconds = totalSeconds.coerceAtLeast(0)
+    val minutes = safeSeconds / 60
+    val seconds = safeSeconds % 60
+    return "%02d:%02d".format(minutes, seconds)
 }
 
 @Preview(name = "Главная — светлая", showBackground = true)

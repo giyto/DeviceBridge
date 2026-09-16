@@ -14,6 +14,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import ru.hznik.devicebridge.data.server.ServerLifecycleCoordinator
@@ -21,6 +22,7 @@ import ru.hznik.devicebridge.di.ApplicationScope
 import ru.hznik.devicebridge.domain.model.ServerLifecycleError
 import ru.hznik.devicebridge.domain.model.ServerLifecycleState
 import ru.hznik.devicebridge.domain.model.ServerStopReason
+import ru.hznik.devicebridge.domain.repository.BrowserSessionRepository
 
 @AndroidEntryPoint
 class ServerForegroundService : Service() {
@@ -30,6 +32,9 @@ class ServerForegroundService : Service() {
 
     @Inject
     lateinit var notificationController: ServerNotificationController
+
+    @Inject
+    lateinit var browserSessionRepository: BrowserSessionRepository
 
     @Inject
     @ApplicationScope
@@ -44,7 +49,11 @@ class ServerForegroundService : Service() {
     override fun onCreate() {
         super.onCreate()
         stateCollectionJob = applicationScope.launch {
-            coordinator.state.collect { state ->
+            combine(
+                coordinator.state,
+                browserSessionRepository.state,
+            ) { lifecycleState, _ -> lifecycleState }
+                .collect { state ->
                 withContext(Dispatchers.Main.immediate) {
                     if (!foregroundStarted) {
                         return@withContext
