@@ -114,14 +114,63 @@
           Отключить этот браузер
         </button>
 
-        <div class="transfer-preview" aria-labelledby="transfer-title">
-          <h2 id="transfer-title">Передача появится на следующем этапе</h2>
-          <p>Подключение уже защищено, но текст и файлы пока недоступны.</p>
-          <div class="transfer-actions">
-            <button type="button" data-action="send-text" disabled>Отправить текст</button>
+        <section
+          class="text-transfer"
+          data-role="text-transfer"
+          aria-labelledby="text-transfer-title"
+          hidden
+        >
+          <div class="text-transfer__heading">
+            <div>
+              <p class="stage-card__step">Текущая сессия</p>
+              <h2 id="text-transfer-title">Текст между телефоном и браузером</h2>
+            </div>
+            <span class="text-transfer__privacy">Без истории на диске</span>
+          </div>
+
+          <form class="text-form" data-role="text-form">
+            <label for="text-draft">Текст или HTTP(S)-ссылка</label>
+            <textarea
+              id="text-draft"
+              name="text-draft"
+              rows="5"
+              aria-describedby="text-draft-help"
+              placeholder="Введите или вставьте текст"
+              required
+            ></textarea>
+            <span id="text-draft-help" class="field-help">
+              До 100 КБ. Отправка выполняется только после нажатия кнопки.
+            </span>
+            <p class="text-form__error" data-role="text-error" role="alert" hidden></p>
+            <button class="primary-button" data-action="send-text" type="submit" disabled>
+              Отправить на телефон
+            </button>
+          </form>
+
+          <div class="text-feed-panel">
+            <div class="text-feed-panel__heading">
+              <h3>Сообщения этой сессии</h3>
+              <span data-role="text-feed-count">0</span>
+            </div>
+            <p class="text-feed__empty" data-role="text-feed-empty">
+              Здесь появятся отправленные и полученные сообщения.
+            </p>
+            <ol
+              class="text-feed"
+              data-role="text-feed"
+              aria-label="Сообщения текущей сессии"
+              aria-live="polite"
+            ></ol>
+          </div>
+
+          <div class="file-unavailable" role="note">
+            <div>
+              <strong>Передача файлов — следующий этап</strong>
+              <p>На этом этапе доступен только текст и безопасные HTTP(S)-ссылки.</p>
+            </div>
             <button type="button" data-action="send-file" disabled>Отправить файл</button>
           </div>
-        </div>
+        </section>
       </section>
     </main>
 

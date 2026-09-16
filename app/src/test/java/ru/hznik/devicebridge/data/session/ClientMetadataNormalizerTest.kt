@@ -4,6 +4,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import ru.hznik.devicebridge.core.protocol.session.MAX_SESSION_JSON_BYTES
+import ru.hznik.devicebridge.core.protocol.session.MAX_CLIENT_LABEL_LENGTH
 
 class ClientMetadataNormalizerTest {
 
@@ -35,6 +36,32 @@ class ClientMetadataNormalizerTest {
                 ClientMetadataNormalizer.normalize("Edge", address),
             )
         }
+    }
+
+    @Test
+    fun acceptsExactLimitPreservesPlainTextAndRejectsBlankAfterTrim() {
+        val prefix = "Яндекс Браузер • "
+        val exactLimit = prefix + "x".repeat(MAX_CLIENT_LABEL_LENGTH - prefix.length)
+        assertEquals(MAX_CLIENT_LABEL_LENGTH, exactLimit.length)
+        assertEquals(
+            ClientMetadataResult.Valid(
+                NormalizedClientMetadata(exactLimit, "192.168.1.20"),
+            ),
+            ClientMetadataNormalizer.normalize("  $exactLimit  ", "192.168.1.20"),
+        )
+        assertEquals(
+            ClientMetadataResult.Valid(
+                NormalizedClientMetadata("<b>Яндекс Браузер</b>", "192.168.1.20"),
+            ),
+            ClientMetadataNormalizer.normalize(
+                "  <b>Яндекс Браузер</b>  ",
+                "192.168.1.20",
+            ),
+        )
+        assertEquals(
+            ClientMetadataResult.Invalid(ClientMetadataError.INVALID_LABEL),
+            ClientMetadataNormalizer.normalize("   ", "192.168.1.20"),
+        )
     }
 
     @Test
