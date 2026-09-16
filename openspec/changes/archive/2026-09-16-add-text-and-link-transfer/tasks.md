@@ -57,9 +57,9 @@
 
 ## 8. Ручная приёмка и завершение change
 
-- [ ] 8.1 Проверить pairing и точную label в актуальных Chrome, Edge и Яндекс Браузере на Windows: Яндекс Браузер не должен отображаться как Chrome; зафиксировать результат каждого browser в checklist.
-- [ ] 8.2 Проверить Android → Browser и Browser → Android для текста, кириллицы, emoji, многострочного содержимого и HTTP(S)-ссылки; подтвердить sender/time/direction/status, отсутствие auto-open и адресность выбранному браузеру.
-- [ ] 8.3 Обновить страницу в той же вкладке и проверить восстановление session и bounded text snapshot без повторного pairing и дублей; затем отозвать session и проверить возврат к pairing.
-- [ ] 8.4 Проверить явную вставку, Android Share Target и browser manual-copy fallback на LAN HTTP; подтвердить отсутствие скрытого clipboard read и ложного сообщения об успешном копировании.
-- [ ] 8.5 Проверить, что «Файлы» остаются недоступными, `/api/v1/files`, `/api/v1/transfers/*` и `/diagnostics/*` возвращают 404, а приложение не выполняет внешние запросы.
-- [ ] 8.6 После подтверждения ручной приёмки отметить выполненные tasks, запустить `openspec validate add-text-and-link-transfer --strict`, синхронизировать main specs и архивировать change через OpenSpec archive workflow.
+- [x] 8.1 Проверить pairing и точную label в актуальных Chrome, Edge и Яндекс Браузере на Windows: Яндекс Браузер не должен отображаться как Chrome; зафиксировать результат каждого browser в checklist.
+- [x] 8.2 Проверить Android → Browser и Browser → Android для текста, кириллицы, emoji, многострочного содержимого и HTTP(S)-ссылки; подтвердить sender/time/direction/status, отсутствие auto-open и адресность выбранному браузеру.
+- [x] 8.3 Обновить страницу в той же вкладке и проверить восстановление session и bounded text snapshot без повторного pairing и дублей; затем отозвать session и проверить возврат к pairing.
+- [x] 8.4 Проверить явную вставку, Android Share Target и browser manual-copy fallback на LAN HTTP; подтвердить отсутствие скрытого clipboard read и ложного сообщения об успешном копировании.
+- [x] 8.5 Проверить, что «Файлы» остаются недоступными, `/api/v1/files`, `/api/v1/transfers/*` и `/diagnostics/*` возвращают 404, а приложение не выполняет внешние запросы.
+- [x] 8.6 После подтверждения ручной приёмки отметить выполненные tasks, запустить `openspec validate add-text-and-link-transfer --strict`, синхронизировать main specs и архивировать change через OpenSpec archive workflow.

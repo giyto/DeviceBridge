@@ -11,12 +11,14 @@
 ### Web verification
 
 - `npm.cmd test` from `web/` completed successfully after a production prebuild.
-- Result: 17 test files, 82 tests, 0 failures.
+- Result: 17 test files, 84 tests, 0 failures.
 - Strict TypeScript typecheck and `npm.cmd run build` completed successfully.
 - Built assets contain no external runtime origin, analytics integration or service-worker registration.
 - Browser identity fixtures verify product-specific priority: YaBrowser, Edge, Opera, Firefox, Chrome/Chromium, Safari and neutral fallback.
 - Text API tests cover the exact `text.send` schema, Bearer header, token-free URL, `401`, `409`, `413` and abort.
 - WebSocket tests cover auth-before-events, bounded reconnect, session loss, snapshot callbacks, live-event deduplication and `text.ack`.
+- LAN HTTP regression tests verify WebSocket authentication and browser text sending
+  when secure-context-only `crypto.randomUUID()` is unavailable.
 - DOM tests cover keyboard form submission, accessible labels, sender/time/direction/status, plain-text rendering of HTML-like payloads, explicit copy with manual fallback and explicit safe HTTP(S) opening without auto-navigation.
 
 ### Android and packaged-assets verification
@@ -47,18 +49,19 @@ Focused result: 7 suites, 27 tests, 0 failures, 0 errors, 0 skipped.
 
 ## Manual acceptance checklist
 
-These checks require current desktop browsers and user interaction. They are intentionally left open until acceptance is performed.
+User acceptance was completed on 2026-09-16 with the current debug APK and current
+desktop browsers.
 
-- [ ] Pair and verify the exact label in current Chrome on Windows.
-- [ ] Pair and verify the exact label in current Edge on Windows.
-- [ ] Pair in current Yandex Browser and verify that Android shows «Яндекс Браузер», not Chrome.
-- [ ] Send plain text, Cyrillic, emoji, multiline text and an HTTP(S) link Browser → Android.
-- [ ] Send the same content types Android → one selected browser and verify that a second session receives nothing.
-- [ ] Verify sender, time, direction and status in Android and browser feeds.
-- [ ] Refresh the authorized tab and verify session restoration plus a bounded, duplicate-free snapshot.
-- [ ] Revoke the session on Android and verify that the browser returns to pairing.
-- [ ] Verify explicit Android clipboard paste and the Android `ACTION_SEND text/plain` share target without automatic sending.
-- [ ] On LAN HTTP, click «Копировать» and verify the selectable manual fallback without a false success message.
-- [ ] Verify that receiving an HTTP(S) link never opens it automatically and only an explicit «Открыть ссылку» action navigates.
-- [ ] Verify that file controls remain disabled and unfinished file/transfer/diagnostic routes return 404.
-- [ ] Stop and restart the Android server; verify that old browser credentials cannot authorize the new generation.
+- [x] Pair and verify the exact label in current Chrome on Windows.
+- [x] Pair and verify the exact label in current Edge on Windows.
+- [x] Pair in current Yandex Browser and verify that Android shows «Яндекс Браузер», not Chrome.
+- [x] Send plain text, Cyrillic, emoji, multiline text and an HTTP(S) link Browser → Android.
+- [x] Send the same content types Android → one selected browser and verify that a second session receives nothing.
+- [x] Verify sender, time, direction and status in Android and browser feeds.
+- [x] Refresh the authorized tab and verify session restoration plus a bounded, duplicate-free snapshot.
+- [x] Revoke the session on Android and verify that the browser returns to pairing.
+- [x] Verify explicit Android clipboard paste and the Android `ACTION_SEND text/plain` share target without automatic sending.
+- [x] On LAN HTTP, click «Копировать» and verify the selectable manual fallback without a false success message.
+- [x] Verify that receiving an HTTP(S) link never opens it automatically and only an explicit «Открыть ссылку» action navigates.
+- [x] Verify that file controls remain disabled and unfinished file/transfer/diagnostic routes return 404.
+- [x] Stop and restart the Android server; verify that old browser credentials cannot authorize the new generation.
