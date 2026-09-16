@@ -2,6 +2,31 @@ import { describe, expect, it, vi } from "vitest";
 import { SessionEventSocketClient, type SocketLike } from "../src/sessionEventSocketClient";
 
 describe("SessionEventSocketClient", () => {
+  it("authenticates on LAN HTTP when crypto.randomUUID is unavailable", () => {
+    vi.stubGlobal("crypto", insecureHttpCrypto());
+    try {
+      const sockets: FakeSocket[] = [];
+      const client = new SessionEventSocketClient(
+        (url) => {
+          const socket = new FakeSocket(url);
+          sockets.push(socket);
+          return socket;
+        },
+        "http://192.168.1.24:8787",
+        immediateScheduler,
+      );
+
+      client.connect("secret-token", { onSessionLost: vi.fn() });
+      expect(() => sockets[0]!.open()).not.toThrow();
+
+      const auth = JSON.parse(sockets[0]!.sent[0]!) as { messageId: string; type: string };
+      expect(auth.type).toBe("session.auth");
+      expect(auth.messageId).toMatch(/^[A-Za-z0-9_-]{1,64}$/);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it("keeps token out of URL and sends it only in the first auth frame", () => {
     const sockets: FakeSocket[] = [];
     const client = new SessionEventSocketClient(
@@ -204,6 +229,15 @@ const immediateScheduler = {
   setTimeout(callback: () => void): unknown { callback(); return 1; },
   clearTimeout(): void {},
 };
+
+function insecureHttpCrypto(): Pick<Crypto, "getRandomValues"> {
+  return {
+    getRandomValues<T extends ArrayBufferView | null>(array: T): T {
+      if (array instanceof Uint8Array) array.fill(0x2a);
+      return array;
+    },
+  };
+}
 
 function receivedEvent(messageId: string, content: string): object {
   return {

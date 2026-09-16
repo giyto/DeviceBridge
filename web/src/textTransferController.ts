@@ -14,6 +14,7 @@ import type {
   TextReceivedEvent,
   TextSnapshotEvent,
 } from "./sessionEventSocketClient";
+import { createProtocolMessageId } from "./protocolMessageId";
 
 const MAX_FEED_ITEMS = 100;
 
@@ -61,7 +62,7 @@ export class TextTransferController {
   constructor(
     private readonly api: TextSender,
     private readonly onStateChange: (state: TextTransferUiState) => void,
-    private readonly createMessageId: () => string = () => crypto.randomUUID(),
+    private readonly createMessageId: () => string = createProtocolMessageId,
     private readonly now: () => number = () => Date.now(),
     private readonly onUnauthorized: () => void = () => undefined,
   ) {}

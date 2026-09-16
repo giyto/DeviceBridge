@@ -1,4 +1,5 @@
 import { SESSION_PROTOCOL_VERSION } from "./sessionApiClient";
+import { createProtocolMessageId } from "./protocolMessageId";
 import type {
   TextApiErrorCode,
   TextContentKind,
@@ -82,7 +83,7 @@ export class SessionEventSocketClient {
     private readonly socketFactory: SocketFactory = (url) => new WebSocket(url),
     private readonly origin: string = globalThis.location.origin,
     private readonly scheduler: SocketScheduler = browserScheduler,
-    private readonly createMessageId: () => string = () => crypto.randomUUID(),
+    private readonly createMessageId: () => string = createProtocolMessageId,
     private readonly now: () => number = () => Date.now(),
   ) {}
 

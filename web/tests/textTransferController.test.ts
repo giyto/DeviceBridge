@@ -7,6 +7,28 @@ import {
 import { TextApiError, type TextAccepted } from "../src/textApiClient";
 
 describe("TextTransferController", () => {
+  it("sends from LAN HTTP when crypto.randomUUID is unavailable", async () => {
+    vi.stubGlobal("crypto", insecureHttpCrypto());
+    try {
+      const api = fakeSender();
+      const states: TextTransferUiState[] = [];
+      const controller = new TextTransferController(
+        api,
+        (state) => states.push(state),
+      );
+      controller.activate("secret-token");
+      controller.updateDraft("hello");
+
+      expect(() => controller.sendDraft()).not.toThrow();
+      await vi.waitFor(() => expect(api.send).toHaveBeenCalledOnce());
+
+      const command = api.send.mock.calls[0]?.[1] as { messageId: string };
+      expect(command.messageId).toMatch(/^[A-Za-z0-9_-]{1,64}$/);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it("sends only for an active session and publishes the delivered item", async () => {
     const api = fakeSender();
     const fixture = createFixture(api);
@@ -179,5 +201,14 @@ function incomingItem(messageId: string, content: string) {
     direction: "ANDROID_TO_BROWSER" as const,
     senderLabel: "Телефон",
     status: "DELIVERED" as const,
+  };
+}
+
+function insecureHttpCrypto(): Pick<Crypto, "getRandomValues"> {
+  return {
+    getRandomValues<T extends ArrayBufferView | null>(array: T): T {
+      if (array instanceof Uint8Array) array.fill(0x2a);
+      return array;
+    },
   };
 }
