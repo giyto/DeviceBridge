@@ -104,6 +104,32 @@ class SessionConfirmRouteTest {
         assertTrue(server.coordinator.state.value.pendingRequests.isEmpty())
     }
 
+    @Test
+    fun normalizedYandexLabelRemainsLiteralPlainTextInPendingRequest() =
+        withSessionRouteServer { server ->
+            val rawLabel = "  <b>Яндекс Браузер</b>  "
+            val challenge = server.challenge(rawLabel)
+            val future = server.requestAsync(
+                "POST",
+                "/api/v1/session/confirm",
+                server.confirmBody(challenge.challengeId, "123456", rawLabel),
+                server.sameOriginJsonHeaders(),
+            )
+
+            server.awaitPendingRequest()
+
+            assertEquals(
+                "<b>Яндекс Браузер</b>",
+                server.coordinator.state.value.pendingRequests.single().browserLabel,
+            )
+            runBlocking {
+                server.coordinator.deny(
+                    server.coordinator.state.value.pendingRequests.single().id,
+                )
+            }
+            assertEquals(403, future.get(2, TimeUnit.SECONDS).statusCode())
+        }
+
     private fun SessionRouteTestServer.challenge(label: String): SessionChallengeResponse {
         val response = request(
             "POST",

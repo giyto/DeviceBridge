@@ -99,4 +99,25 @@ class SessionChallengeRouteTest {
             assertEquals(400, oversized.statusCode())
             assertTrue(missingOrigin.headers().firstValue("access-control-allow-origin").isEmpty)
         }
+
+    @Test
+    fun blankAndOver64CharacterLabelsAreRejectedBeforeCreatingChallenge() =
+        withSessionRouteServer { server ->
+            val blank = server.request(
+                "POST",
+                "/api/v1/session/challenge",
+                """{"protocolVersion":1,"clientLabel":"   "}""",
+                server.sameOriginJsonHeaders(),
+            )
+            val oversized = server.request(
+                "POST",
+                "/api/v1/session/challenge",
+                """{"protocolVersion":1,"clientLabel":"${"x".repeat(65)}"}""",
+                server.sameOriginJsonHeaders(),
+            )
+
+            assertEquals(400, blank.statusCode())
+            assertEquals(400, oversized.statusCode())
+            assertTrue(server.coordinator.state.value.pendingRequests.isEmpty())
+        }
 }

@@ -33,27 +33,27 @@
 
 ## 5. Browser identity и web transport
 
-- [ ] 5.1 Вынести browser identity classifier в чистый TypeScript-модуль с приоритетом `YaBrowser` → Edge → Opera → Firefox → Chrome/Chromium → Safari → neutral; проверить Vitest fixtures для Яндекс Браузера с одновременным `Chrome` token и для остальных fallback.
-- [ ] 5.2 Нормализовать platform и итоговую label до 64 символов без отправки сырого User-Agent; проверить web unit-тестами empty/long/control-like hints и ожидаемую метку «Яндекс Браузер».
-- [ ] 5.3 Уточнить server metadata tests для trim, лимита, control characters и plain-text отображения; проверить `ClientMetadataNormalizerTest` и pairing route tests.
-- [ ] 5.4 Добавить защищённый web API client для `POST /api/v1/text` с типизированными результатами и ошибками; проверить Vitest-тестами bearer header, JSON schema, `401`, `409`, `413`, abort и отсутствие token в URL.
-- [ ] 5.5 Расширить WebSocket client разбором text events, отправкой `text.ack` и snapshot/reconnect callbacks; проверить Vitest-тестами auth-before-events, dedupe, bounded reconnect и session loss.
+- [x] 5.1 Вынести browser identity classifier в чистый TypeScript-модуль с приоритетом `YaBrowser` → Edge → Opera → Firefox → Chrome/Chromium → Safari → neutral; проверить Vitest fixtures для Яндекс Браузера с одновременным `Chrome` token и для остальных fallback.
+- [x] 5.2 Нормализовать platform и итоговую label до 64 символов без отправки сырого User-Agent; проверить web unit-тестами empty/long/control-like hints и ожидаемую метку «Яндекс Браузер».
+- [x] 5.3 Уточнить server metadata tests для trim, лимита, control characters и plain-text отображения; проверить `ClientMetadataNormalizerTest` и pairing route tests.
+- [x] 5.4 Добавить защищённый web API client для `POST /api/v1/text` с типизированными результатами и ошибками; проверить Vitest-тестами bearer header, JSON schema, `401`, `409`, `413`, abort и отсутствие token в URL.
+- [x] 5.5 Расширить WebSocket client разбором text events, отправкой `text.ack` и snapshot/reconnect callbacks; проверить Vitest-тестами auth-before-events, dedupe, bounded reconnect и session loss.
 
 ## 6. Browser text UI
 
-- [ ] 6.1 Реализовать отдельный `TextTransferController`, активируемый только connected session и очищаемый при revoke/`401`; проверить state-machine тестами отправку, error, retry, snapshot и потерю session во время ввода.
-- [ ] 6.2 Добавить доступную text-форму и current-session feed, сохранив file controls недоступными; проверить DOM-тестами keyboard flow, accessible names, sender/time/direction/status и responsive structure.
-- [ ] 6.3 Выводить пользовательское содержимое только через `textContent`/form value; проверить XSS regression-тестами HTML/script-like payload без появления исполняемых DOM nodes.
-- [ ] 6.4 Реализовать явное копирование с Clipboard API только в разрешённом secure context и selectable fallback; проверить Vitest-тестами success, insecure context и rejected permission без ложного success.
-- [ ] 6.5 Добавить явное открытие только server-classified `http`/`https` ссылок без auto-open; проверить DOM-тестами отсутствие navigation при получении и отсутствие open action для обычного/опасного текста.
-- [ ] 6.6 Обновить стили светлой/тёмной темы и viewport 360–1920 px для формы и карточек; проверить contract-тестами отсутствие горизонтального overflow и видимый `:focus-visible`.
+- [x] 6.1 Реализовать отдельный `TextTransferController`, активируемый только connected session и очищаемый при revoke/`401`; проверить state-machine тестами отправку, error, retry, snapshot и потерю session во время ввода.
+- [x] 6.2 Добавить доступную text-форму и current-session feed, сохранив file controls недоступными; проверить DOM-тестами keyboard flow, accessible names, sender/time/direction/status и responsive structure.
+- [x] 6.3 Выводить пользовательское содержимое только через `textContent`/form value; проверить XSS regression-тестами HTML/script-like payload без появления исполняемых DOM nodes.
+- [x] 6.4 Реализовать явное копирование с Clipboard API только в разрешённом secure context и selectable fallback; проверить Vitest-тестами success, insecure context и rejected permission без ложного success.
+- [x] 6.5 Добавить явное открытие только server-classified `http`/`https` ссылок без auto-open; проверить DOM-тестами отсутствие navigation при получении и отсутствие open action для обычного/опасного текста.
+- [x] 6.6 Обновить стили светлой/тёмной темы и viewport 360–1920 px для формы и карточек; проверить contract-тестами отсутствие горизонтального overflow и видимый `:focus-visible`.
 
 ## 7. Сквозная автоматическая проверка
 
-- [ ] 7.1 Запустить `npm.cmd --prefix web test` и `npm.cmd --prefix web run build`, исправить все ошибки и проверить, что собранные assets не обращаются к внешним origin и не регистрируют service worker.
-- [ ] 7.2 Запустить `.\gradlew.bat :app:testDebugUnitTest :app:assembleDebug`, исправить все ошибки и проверить успешную упаковку актуальных web assets.
-- [ ] 7.3 Запустить `.\gradlew.bat :app:connectedDebugAndroidTest` на API 29 и API 37.1; проверить успешные Compose, lifecycle, Ktor и `ACTION_SEND` сценарии на обоих образах.
-- [ ] 7.4 Провести server integration-сценарий с двумя browser sessions: адресная отправка в обе стороны, idempotent retry, revoke, stop/restart, неправильный token, 100 КБ и 413; сохранить результаты в manual verification checklist.
+- [x] 7.1 Запустить `npm.cmd --prefix web test` и `npm.cmd --prefix web run build`, исправить все ошибки и проверить, что собранные assets не обращаются к внешним origin и не регистрируют service worker.
+- [x] 7.2 Запустить `.\gradlew.bat :app:testDebugUnitTest :app:assembleDebug`, исправить все ошибки и проверить успешную упаковку актуальных web assets.
+- [x] 7.3 Запустить `.\gradlew.bat :app:connectedDebugAndroidTest` на API 29 и API 37.1; проверить успешные Compose, lifecycle, Ktor и `ACTION_SEND` сценарии на обоих образах.
+- [x] 7.4 Провести server integration-сценарий с двумя browser sessions: адресная отправка в обе стороны, idempotent retry, revoke, stop/restart, неправильный token, 100 КБ и 413; сохранить результаты в manual verification checklist.
 
 ## 8. Ручная приёмка и завершение change
 

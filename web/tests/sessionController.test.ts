@@ -9,6 +9,11 @@ import {
 import { SessionApiError } from "../src/sessionApiClient";
 import type { WebManifest } from "../src/webManifestClient";
 import { ManifestCompatibilityError } from "../src/webManifestClient";
+import type {
+  TextErrorEvent,
+  TextReceivedEvent,
+  TextSnapshotEvent,
+} from "../src/sessionEventSocketClient";
 
 const manifest: WebManifest = { protocolVersion: 1, webAssetVersion: "sha256-test" };
 
@@ -128,6 +133,32 @@ describe("SessionController", () => {
     expect(connected.events.connectedWith).toBe("token");
   });
 
+  it("activates text only for a connected session and routes socket text events", async () => {
+    const text = new FakeTextSession();
+    const fixture = createFixture(
+      fakeApi(),
+      new FakeTokenStore("token"),
+      { load: vi.fn().mockResolvedValue(manifest) },
+      text,
+    );
+
+    fixture.controller.start();
+    await vi.waitFor(() => expect(fixture.states.at(-1)?.kind).toBe("connected"));
+    expect(text.activeToken).toBe("token");
+
+    fixture.events.receiveText(textReceived);
+    fixture.events.receiveSnapshot(textSnapshot);
+    fixture.events.receiveTextError(textError);
+    expect(text.received).toEqual([textReceived]);
+    expect(text.snapshots).toEqual([textSnapshot]);
+    expect(text.errors).toEqual([textError]);
+
+    fixture.controller.handleTextUnauthorized();
+    expect(fixture.states.at(-1)?.kind).toBe("sessionLost");
+    expect(fixture.store.saved).toBeUndefined();
+    expect(text.activeToken).toBeUndefined();
+  });
+
   it("uses bounded offline retries and lets the user start a fresh cycle", async () => {
     vi.useFakeTimers();
     const loader = { load: vi.fn().mockRejectedValue(new Error("offline")) };
@@ -155,6 +186,7 @@ function createFixture(
   api = fakeApi(),
   store = new FakeTokenStore(),
   loader = { load: vi.fn().mockResolvedValue(manifest) },
+  textSession = new FakeTextSession(),
 ) {
   const states: SessionUiState[] = [];
   const events = new FakeEventChannel();
@@ -165,8 +197,9 @@ function createFixture(
     events,
     (state) => states.push(state),
     "Edge on Windows",
+    textSession,
   );
-  return { controller, states, api, store, events };
+  return { controller, states, api, store, events, textSession };
 }
 
 function fakeApi(): SessionApi {
@@ -203,11 +236,55 @@ class FakeTokenStore implements SessionTokenStore {
 
 class FakeEventChannel implements SessionEventChannel {
   connectedWith?: string;
-  private onSessionLost?: () => void;
-  connect(token: string, callbacks: { onSessionLost: () => void }): void {
+  private callbacks?: Parameters<SessionEventChannel["connect"]>[1];
+  connect(token: string, callbacks: Parameters<SessionEventChannel["connect"]>[1]): void {
     this.connectedWith = token;
-    this.onSessionLost = callbacks.onSessionLost;
+    this.callbacks = callbacks;
   }
   disconnect(): void { this.connectedWith = undefined; }
-  lose(): void { this.onSessionLost?.(); }
+  lose(): void { this.callbacks?.onSessionLost(); }
+  receiveText(event: TextReceivedEvent): void { this.callbacks?.onTextReceived?.(event); }
+  receiveSnapshot(event: TextSnapshotEvent): void { this.callbacks?.onTextSnapshot?.(event); }
+  receiveTextError(event: TextErrorEvent): void { this.callbacks?.onTextError?.(event); }
 }
+
+class FakeTextSession {
+  activeToken?: string;
+  readonly received: TextReceivedEvent[] = [];
+  readonly snapshots: TextSnapshotEvent[] = [];
+  readonly errors: TextErrorEvent[] = [];
+  activate(token: string): void { this.activeToken = token; }
+  deactivate(): void { this.activeToken = undefined; }
+  receive(event: TextReceivedEvent): void { this.received.push(event); }
+  applySnapshot(event: TextSnapshotEvent): void { this.snapshots.push(event); }
+  receiveError(event: TextErrorEvent): void { this.errors.push(event); }
+}
+
+const textReceived: TextReceivedEvent = {
+  protocolVersion: 1,
+  messageId: "text-1",
+  type: "text.received",
+  timestamp: 1_000,
+  content: "hello",
+  contentKind: "TEXT",
+  direction: "ANDROID_TO_BROWSER",
+  senderLabel: "Телефон",
+  status: "DELIVERED",
+};
+
+const textSnapshot: TextSnapshotEvent = {
+  protocolVersion: 1,
+  messageId: "snapshot-1",
+  type: "text.snapshot",
+  timestamp: 1_000,
+  items: [textReceived],
+};
+
+const textError: TextErrorEvent = {
+  protocolVersion: 1,
+  messageId: "error-1",
+  type: "text.error",
+  timestamp: 1_000,
+  relatedMessageId: "text-1",
+  code: "SESSION_UNAVAILABLE",
+};

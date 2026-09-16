@@ -38,7 +38,7 @@ describe("DeviceBridge shell markup", () => {
     expect(warning).toContain("публичном Wi-Fi");
   });
 
-  it("exposes an accessible pairing form while transfer controls stay disabled", () => {
+  it("exposes an accessible pairing form while text waits for a session and files stay disabled", () => {
     createShellView(document, actions());
 
     expect(document.querySelector('label[for="pairing-code"]')?.textContent).toContain("код");
@@ -46,7 +46,8 @@ describe("DeviceBridge shell markup", () => {
     expect(document.querySelector<HTMLButtonElement>('button[data-action="pair"]')).not.toBeNull();
     expect(document.querySelector<HTMLButtonElement>('button[data-action="send-text"]')?.disabled).toBe(true);
     expect(document.querySelector<HTMLButtonElement>('button[data-action="send-file"]')?.disabled).toBe(true);
-    expect(document.body.textContent).toContain("Передача появится на следующем этапе");
+    expect(document.querySelector<HTMLElement>('[data-role="text-transfer"]')?.hidden).toBe(true);
+    expect(document.body.textContent).toContain("Передача файлов — следующий этап");
   });
 });
 

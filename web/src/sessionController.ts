@@ -6,6 +6,11 @@ import {
   type SessionStatus,
 } from "./sessionApiClient";
 import { ManifestCompatibilityError, type WebManifest } from "./webManifestClient";
+import type {
+  TextErrorEvent,
+  TextReceivedEvent,
+  TextSnapshotEvent,
+} from "./sessionEventSocketClient";
 
 export type SessionUiState =
   | Readonly<{ kind: "checking" }>
@@ -42,8 +47,21 @@ export interface SessionTokenStore {
 }
 
 export interface SessionEventChannel {
-  connect(token: string, callbacks: { onSessionLost: () => void }): void;
+  connect(token: string, callbacks: {
+    readonly onSessionLost: () => void;
+    readonly onTextReceived?: (event: TextReceivedEvent) => void;
+    readonly onTextSnapshot?: (event: TextSnapshotEvent) => void;
+    readonly onTextError?: (event: TextErrorEvent) => void;
+  }): void;
   disconnect(): void;
+}
+
+export interface TextSessionLifecycle {
+  activate(token: string): void;
+  deactivate(): void;
+  receive(event: TextReceivedEvent): void;
+  applySnapshot(event: TextSnapshotEvent): void;
+  receiveError(event: TextErrorEvent): void;
 }
 
 export interface ControllerScheduler {
@@ -56,6 +74,13 @@ const OFFLINE_MESSAGE = "Не удаётся связаться с DeviceBridge.
 const browserScheduler: ControllerScheduler = {
   setTimeout: (callback, delayMs) => globalThis.setTimeout(callback, delayMs),
   clearTimeout: (handle) => globalThis.clearTimeout(handle as number),
+};
+const noTextSession: TextSessionLifecycle = {
+  activate: () => undefined,
+  deactivate: () => undefined,
+  receive: () => undefined,
+  applySnapshot: () => undefined,
+  receiveError: () => undefined,
 };
 
 export class SessionController {
@@ -74,6 +99,7 @@ export class SessionController {
     private readonly events: SessionEventChannel,
     private readonly onStateChange: (state: SessionUiState) => void,
     private readonly clientLabel: string,
+    private readonly textSession: TextSessionLifecycle = noTextSession,
     private readonly scheduler: ControllerScheduler = browserScheduler,
   ) {}
 
@@ -119,12 +145,28 @@ export class SessionController {
     this.generation += 1;
     this.cancelPending();
     this.events.disconnect();
+    this.textSession.deactivate();
+  }
+
+  handleTextUnauthorized(): void {
+    if (this.currentState.kind !== "connected") return;
+    const manifest = this.currentState.manifest;
+    this.generation += 1;
+    this.cancelPending();
+    this.clearSession();
+    this.busy = false;
+    this.emit({
+      kind: "sessionLost",
+      manifest,
+      message: "Сессия завершена на телефоне. Подключитесь снова.",
+    });
   }
 
   private beginNewCycle(): void {
     this.generation += 1;
     this.cancelPending();
     this.events.disconnect();
+    this.textSession.deactivate();
     this.busy = false;
     void this.boot(this.generation, 0);
   }
@@ -230,12 +272,22 @@ export class SessionController {
 
   private connect(manifest: WebManifest, token: string, status: SessionStatus): void {
     this.activeToken = token;
+    this.textSession.activate(token);
     this.emit({ kind: "connected", manifest, status });
     const generation = this.generation;
     this.events.connect(token, {
       onSessionLost: () => {
         if (!this.isCurrent(generation)) return;
         void this.revalidateSessionAfterEventLoss(generation, manifest, token);
+      },
+      onTextReceived: (event) => {
+        if (this.isCurrent(generation)) this.textSession.receive(event);
+      },
+      onTextSnapshot: (event) => {
+        if (this.isCurrent(generation)) this.textSession.applySnapshot(event);
+      },
+      onTextError: (event) => {
+        if (this.isCurrent(generation)) this.textSession.receiveError(event);
       },
     });
   }
@@ -324,6 +376,7 @@ export class SessionController {
     this.activeToken = undefined;
     this.tokenStore.clear();
     this.events.disconnect();
+    this.textSession.deactivate();
   }
 
   private cancelPending(): void {

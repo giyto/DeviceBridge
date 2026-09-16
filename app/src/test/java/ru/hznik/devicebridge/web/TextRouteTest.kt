@@ -71,6 +71,22 @@ class TextRouteTest {
         }
 
     @Test
+    fun unknownBearerIsRejectedBeforeCreatingIncomingItem() =
+        withSessionRouteServer { server ->
+            val response = server.request(
+                "POST",
+                "/api/v1/text",
+                sendBody(),
+                server.sameOriginJsonHeaders(
+                    mapOf("Authorization" to "Bearer unknown-session-token"),
+                ),
+            )
+
+            assertEquals(401, response.statusCode())
+            assertEquals(0, server.textCoordinator.state.value.items.size)
+        }
+
+    @Test
     fun repeatedMessageIdWithDifferentContentReturnsConflictWithoutMutation() =
         withSessionRouteServer { server ->
             val paired = server.pairBrowser("Edge")
@@ -107,6 +123,36 @@ class TextRouteTest {
 
             assertEquals(413, response.statusCode())
             assertEquals(0, server.textCoordinator.state.value.items.size)
+        }
+
+    @Test
+    fun exactContentLimitIsAcceptedWhileOneExtraByteIsRejected() =
+        withSessionRouteServer { server ->
+            val paired = server.pairBrowser("Chrome")
+            val headers = server.sameOriginJsonHeaders(
+                mapOf("Authorization" to "Bearer ${paired.token}"),
+            )
+            val exact = "a".repeat(TextContentValidator.MAX_UTF8_BYTES)
+            val oversized = "$exact!"
+
+            val accepted = server.request(
+                "POST",
+                "/api/v1/text",
+                sendBody(messageId = "exact-limit", content = exact),
+                headers,
+            )
+            val rejected = server.request(
+                "POST",
+                "/api/v1/text",
+                sendBody(messageId = "over-limit", content = oversized),
+                headers,
+            )
+
+            assertEquals(200, accepted.statusCode())
+            assertEquals(413, rejected.statusCode())
+            assertEquals(listOf("exact-limit"), server.textCoordinator.state.value.items.map {
+                it.id.value
+            })
         }
 
     private fun sendBody(
