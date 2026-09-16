@@ -42,6 +42,7 @@ fun HomeScreen(
     modifier: Modifier = Modifier,
     onAction: (HomeAction) -> Unit = {},
     onOpenText: () -> Unit = {},
+    onOpenFiles: () -> Unit = {},
 ) {
     val clipboard = LocalClipboard.current
     val coroutineScope = rememberCoroutineScope()
@@ -125,6 +126,10 @@ fun HomeScreen(
             )
         }
 
+        if (uiState.activeFileTransfers.isNotEmpty()) {
+            ActiveFileTransfersSection(uiState.activeFileTransfers)
+        }
+
         if (uiState.isPermissionExplanationVisible) {
             MessageCard(
                 title = "Разрешите доступ к локальной сети",
@@ -173,7 +178,7 @@ fun HomeScreen(
                 title = "Файлы",
                 supportingText = "Передать документ или изображение",
                 enabled = uiState.canSendFiles,
-                onClick = {},
+                onClick = onOpenFiles,
             )
         }
 
@@ -188,6 +193,44 @@ fun HomeScreen(
         )
     }
 }
+
+@Composable
+private fun ActiveFileTransfersSection(items: List<HomeFileTransferUiState>) {
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Text(
+            text = "Активные передачи",
+            style = MaterialTheme.typography.titleLarge,
+            fontWeight = FontWeight.SemiBold,
+        )
+        items.forEach { item ->
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(22.dp),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceContainer,
+                ),
+            ) {
+                Column(
+                    modifier = Modifier.padding(18.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    Text(item.displayName, fontWeight = FontWeight.SemiBold)
+                    Text(
+                        text = "${item.direction.homeLabel()} · ${item.progressPercent}%",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+        }
+    }
+}
+
+private fun ru.hznik.devicebridge.domain.file.FileTransferDirection.homeLabel(): String =
+    if (this == ru.hznik.devicebridge.domain.file.FileTransferDirection.BROWSER_TO_ANDROID) {
+        "На телефон"
+    } else {
+        "На компьютер"
+    }
 
 @Composable
 private fun PairingCodeCard(

@@ -7,6 +7,12 @@ import {
 } from "./sessionApiClient";
 import { ManifestCompatibilityError, type WebManifest } from "./webManifestClient";
 import type {
+  FileErrorEvent,
+  FileOfferEvent,
+  FileProgressEvent,
+  FileSnapshotEvent,
+} from "./fileApiClient";
+import type {
   TextErrorEvent,
   TextReceivedEvent,
   TextSnapshotEvent,
@@ -52,6 +58,10 @@ export interface SessionEventChannel {
     readonly onTextReceived?: (event: TextReceivedEvent) => void;
     readonly onTextSnapshot?: (event: TextSnapshotEvent) => void;
     readonly onTextError?: (event: TextErrorEvent) => void;
+    readonly onFileOffer?: (event: FileOfferEvent) => void;
+    readonly onFileProgress?: (event: FileProgressEvent) => void;
+    readonly onFileSnapshot?: (event: FileSnapshotEvent) => void;
+    readonly onFileError?: (event: FileErrorEvent) => void;
   }): void;
   disconnect(): void;
 }
@@ -62,6 +72,15 @@ export interface TextSessionLifecycle {
   receive(event: TextReceivedEvent): void;
   applySnapshot(event: TextSnapshotEvent): void;
   receiveError(event: TextErrorEvent): void;
+}
+
+export interface FileSessionLifecycle {
+  activate(token: string): void;
+  deactivate(): void;
+  receiveOffer(event: FileOfferEvent): void;
+  receiveProgress(event: FileProgressEvent): void;
+  applySnapshot(event: FileSnapshotEvent): void;
+  receiveError(event: FileErrorEvent): void;
 }
 
 export interface ControllerScheduler {
@@ -79,6 +98,14 @@ const noTextSession: TextSessionLifecycle = {
   activate: () => undefined,
   deactivate: () => undefined,
   receive: () => undefined,
+  applySnapshot: () => undefined,
+  receiveError: () => undefined,
+};
+const noFileSession: FileSessionLifecycle = {
+  activate: () => undefined,
+  deactivate: () => undefined,
+  receiveOffer: () => undefined,
+  receiveProgress: () => undefined,
   applySnapshot: () => undefined,
   receiveError: () => undefined,
 };
@@ -100,6 +127,7 @@ export class SessionController {
     private readonly onStateChange: (state: SessionUiState) => void,
     private readonly clientLabel: string,
     private readonly textSession: TextSessionLifecycle = noTextSession,
+    private readonly fileSession: FileSessionLifecycle = noFileSession,
     private readonly scheduler: ControllerScheduler = browserScheduler,
   ) {}
 
@@ -146,9 +174,18 @@ export class SessionController {
     this.cancelPending();
     this.events.disconnect();
     this.textSession.deactivate();
+    this.fileSession.deactivate();
   }
 
   handleTextUnauthorized(): void {
+    this.handleTransferUnauthorized();
+  }
+
+  handleFileUnauthorized(): void {
+    this.handleTransferUnauthorized();
+  }
+
+  private handleTransferUnauthorized(): void {
     if (this.currentState.kind !== "connected") return;
     const manifest = this.currentState.manifest;
     this.generation += 1;
@@ -167,6 +204,7 @@ export class SessionController {
     this.cancelPending();
     this.events.disconnect();
     this.textSession.deactivate();
+    this.fileSession.deactivate();
     this.busy = false;
     void this.boot(this.generation, 0);
   }
@@ -273,6 +311,7 @@ export class SessionController {
   private connect(manifest: WebManifest, token: string, status: SessionStatus): void {
     this.activeToken = token;
     this.textSession.activate(token);
+    this.fileSession.activate(token);
     this.emit({ kind: "connected", manifest, status });
     const generation = this.generation;
     this.events.connect(token, {
@@ -288,6 +327,18 @@ export class SessionController {
       },
       onTextError: (event) => {
         if (this.isCurrent(generation)) this.textSession.receiveError(event);
+      },
+      onFileOffer: (event) => {
+        if (this.isCurrent(generation)) this.fileSession.receiveOffer(event);
+      },
+      onFileProgress: (event) => {
+        if (this.isCurrent(generation)) this.fileSession.receiveProgress(event);
+      },
+      onFileSnapshot: (event) => {
+        if (this.isCurrent(generation)) this.fileSession.applySnapshot(event);
+      },
+      onFileError: (event) => {
+        if (this.isCurrent(generation)) this.fileSession.receiveError(event);
       },
     });
   }
@@ -377,6 +428,7 @@ export class SessionController {
     this.tokenStore.clear();
     this.events.disconnect();
     this.textSession.deactivate();
+    this.fileSession.deactivate();
   }
 
   private cancelPending(): void {

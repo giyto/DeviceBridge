@@ -12,11 +12,25 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import ru.hznik.devicebridge.app.DeviceBridgeApp
 import ru.hznik.devicebridge.feature.text.SharedTextDraft
 import ru.hznik.devicebridge.feature.text.SharedTextIntentParser
+import ru.hznik.devicebridge.feature.file.SharedFileDraft
+import ru.hznik.devicebridge.feature.file.SharedFileIntentParser
 import ru.hznik.devicebridge.ui.theme.DeviceBridgeTheme
+import javax.inject.Inject
+import ru.hznik.devicebridge.data.file.CompletedFileRegistry
+import ru.hznik.devicebridge.data.file.FileDestinationLeaseRegistry
+import ru.hznik.devicebridge.data.file.FileSourceRegistry
 
 @AndroidEntryPoint
 class MainActivity : ComponentActivity() {
+    @Inject
+    lateinit var completedFileRegistry: CompletedFileRegistry
+    @Inject
+    lateinit var destinationLeaseRegistry: FileDestinationLeaseRegistry
+    @Inject
+    lateinit var fileSourceRegistry: FileSourceRegistry
+
     private val sharedTextDraft = MutableStateFlow<SharedTextDraft?>(null)
+    private val sharedFileDraft = MutableStateFlow<SharedFileDraft?>(null)
     private var nextSharedTextRequestId = 0L
     private var sharedIntentHandled = false
 
@@ -25,17 +39,27 @@ class MainActivity : ComponentActivity() {
         sharedIntentHandled =
             savedInstanceState?.getBoolean(STATE_SHARED_INTENT_HANDLED) == true
         if (!sharedIntentHandled) {
-            acceptSharedText(intent)
+            acceptSharedIntent(intent)
         }
         enableEdgeToEdge()
         setContent {
             val pendingSharedDraft by sharedTextDraft.collectAsStateWithLifecycle()
+            val pendingSharedFileDraft by sharedFileDraft.collectAsStateWithLifecycle()
             DeviceBridgeTheme {
                 DeviceBridgeApp(
+                    completedFileRegistry = completedFileRegistry,
+                    destinationLeaseRegistry = destinationLeaseRegistry,
+                    fileSourceRegistry = fileSourceRegistry,
                     sharedTextDraft = pendingSharedDraft,
+                    sharedFileDraft = pendingSharedFileDraft,
                     onSharedTextConsumed = { requestId ->
                         if (sharedTextDraft.value?.requestId == requestId) {
                             sharedTextDraft.value = null
+                        }
+                    },
+                    onSharedFileConsumed = { requestId ->
+                        if (sharedFileDraft.value?.requestId == requestId) {
+                            sharedFileDraft.value = null
                         }
                     },
                 )
@@ -47,7 +71,7 @@ class MainActivity : ComponentActivity() {
         super.onNewIntent(intent)
         setIntent(intent)
         sharedIntentHandled = false
-        acceptSharedText(intent)
+        acceptSharedIntent(intent)
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
@@ -55,12 +79,20 @@ class MainActivity : ComponentActivity() {
         super.onSaveInstanceState(outState)
     }
 
-    private fun acceptSharedText(source: Intent?) {
-        val text = SharedTextIntentParser.parse(source) ?: return
+    private fun acceptSharedIntent(source: Intent?) {
+        val text = SharedTextIntentParser.parse(source)
+        if (text != null) {
+            sharedIntentHandled = true
+            sharedTextDraft.value = SharedTextDraft(
+                requestId = ++nextSharedTextRequestId,
+                text = text,
+            )
+            return
+        }
+        val files = SharedFileIntentParser.parse(source) ?: return
         sharedIntentHandled = true
-        sharedTextDraft.value = SharedTextDraft(
+        sharedFileDraft.value = files.copy(
             requestId = ++nextSharedTextRequestId,
-            text = text,
         )
     }
 

@@ -8,6 +8,14 @@ import ru.hznik.devicebridge.core.protocol.session.SessionErrorCode
 import ru.hznik.devicebridge.core.protocol.session.SessionErrorEnvelope
 import ru.hznik.devicebridge.core.protocol.session.SessionProtocolJson
 import ru.hznik.devicebridge.core.protocol.session.SessionStatusResponse
+import kotlinx.coroutines.runBlocking
+import ru.hznik.devicebridge.domain.file.CreateFileTransfersRequest
+import ru.hznik.devicebridge.domain.file.FileCommandId
+import ru.hznik.devicebridge.domain.file.FileTransferDirection
+import ru.hznik.devicebridge.domain.file.FileTransferId
+import ru.hznik.devicebridge.domain.file.FileTransferMetadata
+import ru.hznik.devicebridge.domain.file.FileTransferPhase
+import ru.hznik.devicebridge.domain.session.BrowserSessionId
 
 class ProtectedSessionRouteTest {
 
@@ -118,4 +126,44 @@ class ProtectedSessionRouteTest {
             assertEquals(200, edgeAfter.statusCode())
             assertEquals(1, server.coordinator.state.value.sessions.size)
         }
+
+    @Test
+    fun deleteCancelsFileTransfersOwnedByCallingSessionBeforeRevocation() =
+        withSessionRouteServer(enableFileEvents = true) { server ->
+            val paired = server.pairBrowser("Chrome")
+            runBlocking {
+                server.fileCoordinator.create(
+                    CreateFileTransfersRequest(
+                        commandId = FileCommandId("owned-command"),
+                        generationId = server.handle.generationId,
+                        ownerSessionId = BrowserSessionId(paired.sessionId),
+                        files = listOf(fileMetadata("owned-file")),
+                    ),
+                )
+            }
+
+            val response = server.request(
+                "DELETE",
+                "/api/v1/session",
+                headers = mapOf(
+                    "Origin" to "http://${server.authority}",
+                    "Authorization" to "Bearer ${paired.token}",
+                ),
+            )
+
+            assertEquals(204, response.statusCode())
+            assertEquals(
+                FileTransferPhase.CANCELLED,
+                server.fileCoordinator.state.value.item(FileTransferId("owned-file"))?.phase,
+            )
+        }
+
+    private fun fileMetadata(id: String) = FileTransferMetadata(
+        id = FileTransferId(id),
+        displayName = "$id.bin",
+        sizeBytes = 1,
+        mimeType = "application/octet-stream",
+        sha256 = "a".repeat(64),
+        direction = FileTransferDirection.BROWSER_TO_ANDROID,
+    )
 }

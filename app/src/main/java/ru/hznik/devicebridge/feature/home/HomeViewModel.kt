@@ -29,6 +29,8 @@ import ru.hznik.devicebridge.domain.usecase.StopServerUseCase
 import ru.hznik.devicebridge.domain.usecase.ObserveTextTransfersUseCase
 import ru.hznik.devicebridge.domain.text.TextTransferState
 import ru.hznik.devicebridge.domain.text.TextTransferStatus
+import ru.hznik.devicebridge.domain.file.FileTransferSnapshot
+import ru.hznik.devicebridge.domain.usecase.ObserveFileTransfersUseCase
 
 @HiltViewModel
 class HomeViewModel @Inject constructor(
@@ -44,16 +46,19 @@ class HomeViewModel @Inject constructor(
     private val denyBrowserRequest: DenyBrowserRequestUseCase,
     private val revokeBrowserSession: RevokeBrowserSessionUseCase,
     observeTextTransfers: ObserveTextTransfersUseCase,
+    observeFileTransfers: ObserveFileTransfersUseCase,
 ) : ViewModel() {
     private val lifecycleState = observeServerLifecycle()
     private val browserSessionState = observeBrowserSessions()
     private val textTransferState = observeTextTransfers()
+    private val fileTransferState = observeFileTransfers()
     private val decidingRequestIds = mutableSetOf<PairingRequestId>()
     private val revokingSessionIds = mutableSetOf<BrowserSessionId>()
     private val mutableUiState = kotlinx.coroutines.flow.MutableStateFlow(
         lifecycleState.value.toUiState(
             browserSessionState.value,
             textTransferState.value,
+            fileTransferState.value,
             monotonicClock.nowMs(),
         ),
     )
@@ -69,13 +74,16 @@ class HomeViewModel @Inject constructor(
                 lifecycleState,
                 browserSessionState,
                 textTransferState,
-            ) { lifecycle, sessions, transfers ->
-                Triple(lifecycle, sessions, transfers)
-            }.collectLatest { (state, sessions, transfers) ->
+                fileTransferState,
+            ) { lifecycle, sessions, textTransfers, fileTransfers ->
+                HomeSourceState(lifecycle, sessions, textTransfers, fileTransfers)
+            }.collectLatest { source ->
+                val state = source.lifecycle
                 mutableUiState.update { previous ->
                     state.toUiState(
-                        sessions,
-                        transfers,
+                        source.sessions,
+                        source.textTransfers,
+                        source.fileTransfers,
                         monotonicClock.nowMs(),
                         previous,
                     )
@@ -84,8 +92,9 @@ class HomeViewModel @Inject constructor(
                     uptimeTicker.ticks().collect {
                         mutableUiState.update { previous ->
                             state.toUiState(
-                                sessions,
-                                transfers,
+                                source.sessions,
+                                source.textTransfers,
+                                source.fileTransfers,
                                 monotonicClock.nowMs(),
                                 previous,
                             )
@@ -156,6 +165,7 @@ class HomeViewModel @Inject constructor(
             lifecycleState.value.toUiState(
                 browserSessionState.value,
                 textTransferState.value,
+                fileTransferState.value,
                 monotonicClock.nowMs(),
                 previous,
             )
@@ -225,6 +235,7 @@ class HomeViewModel @Inject constructor(
     private fun ServerLifecycleState.toUiState(
         sessions: BrowserSessionState,
         transfers: TextTransferState,
+        fileTransfers: FileTransferSnapshot,
         nowMs: Long,
         previous: ServerSessionUiState = ServerSessionUiState(),
     ): ServerSessionUiState {
@@ -294,6 +305,20 @@ class HomeViewModel @Inject constructor(
             } else {
                 HomeTextTransferStatus.Idle
             },
+            activeFileTransfers = if (this is ServerLifecycleState.Running) {
+                fileTransfers.items.filterNot { it.phase.isTerminal }.map { item ->
+                    HomeFileTransferUiState(
+                        id = item.metadata.id,
+                        displayName = item.metadata.displayName,
+                        sizeBytes = item.metadata.sizeBytes,
+                        direction = item.metadata.direction,
+                        phase = item.phase,
+                        bytesTransferred = item.bytesTransferred,
+                    )
+                }
+            } else {
+                emptyList()
+            },
         )
     }
 
@@ -334,3 +359,10 @@ class HomeViewModel @Inject constructor(
         is ServerLifecycleError.Unexpected -> "Произошла непредвиденная ошибка сервера."
     }
 }
+
+private data class HomeSourceState(
+    val lifecycle: ServerLifecycleState,
+    val sessions: BrowserSessionState,
+    val textTransfers: TextTransferState,
+    val fileTransfers: FileTransferSnapshot,
+)

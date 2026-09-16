@@ -10,6 +10,7 @@ import org.junit.Test
 import ru.hznik.devicebridge.domain.model.ServerEndpoint
 import ru.hznik.devicebridge.domain.model.ServerLifecycleError
 import ru.hznik.devicebridge.domain.model.ServerLifecycleState
+import ru.hznik.devicebridge.domain.file.FileTransferDirection
 
 class ServerNotificationModelTest {
 
@@ -96,6 +97,35 @@ class ServerNotificationModelTest {
         assertTrue(active.text.contains("Передача текста выполняется"))
         assertFalse(active.text.contains("секретное содержимое"))
         assertFalse(active.text.contains("message", ignoreCase = true))
+    }
+
+    @Test
+    fun activeFileTransferShowsOnlySafeNameDirectionAndProgress() {
+        val running = ServerLifecycleState.Running(
+            generation = 1,
+            endpoint = ServerEndpoint("192.168.1.24", 49_321),
+            startedAtElapsedRealtimeMs = 10,
+        )
+
+        val model = requireNotNull(
+            factory.create(
+                state = running,
+                activeSessionCount = 1,
+                activeFileTransfer = FileNotificationProgress(
+                    displayName = "../report.pdf\u202e.exe",
+                    direction = FileTransferDirection.BROWSER_TO_ANDROID,
+                    bytesTransferred = 50,
+                    totalBytes = 100,
+                ),
+            ),
+        )
+
+        assertTrue(model.text.contains("На телефон"))
+        assertTrue(model.text.contains("50%"))
+        assertTrue(model.text.contains("report.pdf.exe"))
+        assertFalse(model.text.contains("../"))
+        assertFalse(model.text.contains("content://"))
+        assertFalse(model.text.contains("sha256", ignoreCase = true))
     }
 
     @Test

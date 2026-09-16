@@ -122,7 +122,7 @@ class HomeScreenTest {
     }
 
     @Test
-    fun oneOrSeveralActiveSessionsEnableOnlyTextTransfer() {
+    fun oneOrSeveralActiveSessionsEnableTextAndFileTransfer() {
         var state by mutableStateOf(
             ServerSessionUiState(
                 status = HomeServerStatus.Running,
@@ -140,7 +140,7 @@ class HomeScreenTest {
         }
 
         composeRule.onNodeWithText("Текст").performScrollTo().assertIsEnabled()
-        composeRule.onNodeWithText("Файлы").performScrollTo().assertIsNotEnabled()
+        composeRule.onNodeWithText("Файлы").performScrollTo().assertIsEnabled()
 
         composeRule.runOnIdle {
             state = state.copy(
@@ -153,7 +153,7 @@ class HomeScreenTest {
         }
 
         composeRule.onNodeWithText("Текст").performScrollTo().assertIsEnabled()
-        composeRule.onNodeWithText("Файлы").performScrollTo().assertIsNotEnabled()
+        composeRule.onNodeWithText("Файлы").performScrollTo().assertIsEnabled()
     }
 
     @Test

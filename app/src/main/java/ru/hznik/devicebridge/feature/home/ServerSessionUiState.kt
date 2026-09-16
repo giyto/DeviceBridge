@@ -2,6 +2,9 @@ package ru.hznik.devicebridge.feature.home
 
 import ru.hznik.devicebridge.domain.session.BrowserSessionId
 import ru.hznik.devicebridge.domain.session.PairingRequestId
+import ru.hznik.devicebridge.domain.file.FileTransferDirection
+import ru.hznik.devicebridge.domain.file.FileTransferId
+import ru.hznik.devicebridge.domain.file.FileTransferPhase
 
 enum class HomeServerStatus {
     Stopped,
@@ -32,6 +35,7 @@ data class ServerSessionUiState(
     val pendingBrowsers: List<PendingBrowserUiState> = emptyList(),
     val activeBrowsers: List<ActiveBrowserUiState> = emptyList(),
     val textTransferStatus: HomeTextTransferStatus = HomeTextTransferStatus.Idle,
+    val activeFileTransfers: List<HomeFileTransferUiState> = emptyList(),
 ) {
     val canStart: Boolean
         get() = !commandPending &&
@@ -43,7 +47,24 @@ data class ServerSessionUiState(
     val canSendText: Boolean
         get() = status == HomeServerStatus.Running && activeBrowsers.isNotEmpty()
 
-    val canSendFiles: Boolean = false
+    val canSendFiles: Boolean
+        get() = status == HomeServerStatus.Running && activeBrowsers.isNotEmpty()
+}
+
+data class HomeFileTransferUiState(
+    val id: FileTransferId,
+    val displayName: String,
+    val sizeBytes: Long,
+    val direction: FileTransferDirection,
+    val phase: FileTransferPhase,
+    val bytesTransferred: Long,
+) {
+    val progressPercent: Int
+        get() = if (sizeBytes == 0L) {
+            if (phase == FileTransferPhase.COMPLETED) 100 else 0
+        } else {
+            ((bytesTransferred * 100.0) / sizeBytes).toInt().coerceIn(0, 100)
+        }
 }
 
 data class PendingBrowserUiState(

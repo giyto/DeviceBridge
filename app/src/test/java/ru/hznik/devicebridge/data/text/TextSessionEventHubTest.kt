@@ -8,6 +8,8 @@ import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import ru.hznik.devicebridge.data.session.SessionEventDispatcher
+import ru.hznik.devicebridge.data.session.SessionOutboundEvent
 import ru.hznik.devicebridge.domain.session.BrowserSessionId
 import ru.hznik.devicebridge.domain.session.ServerGenerationId
 import ru.hznik.devicebridge.domain.text.TextContentKind
@@ -19,15 +21,15 @@ class TextSessionEventHubTest {
 
     @Test
     fun deliveryWaitsForAuthorizedBrowserChannelToAttach() = runTest {
-        val hub = TextSessionEventHub()
+        val hub = SessionEventDispatcher(scope = backgroundScope)
         var deliveredItem: TextTransferItem? = null
         val delivery = async { hub.deliver(outgoingItem()) }
         runCurrent()
 
         assertFalse(delivery.isCompleted)
 
-        hub.attach(sessionId) { item ->
-            deliveredItem = item
+        hub.attach(sessionId) { event ->
+            deliveredItem = (event as SessionOutboundEvent.Text).item
             true
         }
         runCurrent()
@@ -38,7 +40,7 @@ class TextSessionEventHubTest {
 
     @Test
     fun deliveryStopsWaitingWhenBrowserChannelNeverAttaches() = runTest {
-        val hub = TextSessionEventHub()
+        val hub = SessionEventDispatcher(scope = backgroundScope)
         val delivery = async { hub.deliver(outgoingItem()) }
         runCurrent()
 

@@ -2,6 +2,7 @@ package ru.hznik.devicebridge.di
 
 import java.nio.file.Files
 import java.nio.file.Path
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -50,7 +51,7 @@ class HiltGraphContractTest {
             "src/main/java/ru/hznik/devicebridge/domain/usecase/TextTransferUseCases.kt",
         )
 
-        assertTrue(module.contains("provideTextSessionEventHub"))
+        assertTrue(module.contains("provideSessionEventDispatcher"))
         assertTrue(module.contains("provideTextTransferCoordinator"))
         assertTrue(module.contains("provideTextTransferRepository"))
         assertTrue(module.contains("provideObserveTextTransfersUseCase"))
@@ -62,6 +63,51 @@ class HiltGraphContractTest {
             assertTrue(!source.contains("android."))
             assertTrue(!source.contains("androidx.compose"))
         }
+    }
+
+    @Test
+    fun fileTransferDependenciesUseOneProcessCoordinatorAndAndroidAdaptersStayOutsideDomain() {
+        val module = read(
+            "src/main/java/ru/hznik/devicebridge/di/ServerLifecycleModule.kt",
+        )
+        val repository = read(
+            "src/main/java/ru/hznik/devicebridge/domain/repository/FileTransferRepository.kt",
+        )
+        val useCases = read(
+            "src/main/java/ru/hznik/devicebridge/domain/usecase/FileTransferUseCases.kt",
+        )
+
+        assertTrue(module.contains("@Singleton\n        fun provideFileTransferCoordinator"))
+        assertTrue(module.contains("provideFileTransferRepository"))
+        assertTrue(module.contains("provideFileSessionEventBridge"))
+        assertTrue(module.contains("bindFileTransferWifiLock"))
+        assertTrue(module.contains("provideFileUploadTargetFactory"))
+        assertTrue(module.contains("provideFileDownloadSourceFactory"))
+        assertTrue(module.contains("provideObserveFileTransfersUseCase"))
+        assertTrue(module.contains("provideCreateFileTransfersUseCase"))
+        assertTrue(module.contains("provideApproveFileTransferUseCase"))
+        assertTrue(module.contains("provideCancelFileTransferUseCase"))
+        assertTrue(module.contains("provideRetryFileTransferUseCase"))
+        assertTrue(module.contains("provideVerifyFileTransferUseCase"))
+        listOf(repository, useCases).forEach { source ->
+            assertTrue(!source.contains("io.ktor"))
+            assertTrue(!source.contains("android."))
+            assertTrue(!source.contains("androidx.compose"))
+            assertTrue(!source.contains("ContentResolver"))
+        }
+    }
+
+    @Test
+    fun fileSelectionPreparationOwnsSourceRegistrationAndUsesSingletonRegistry() {
+        val activity = read("src/main/java/ru/hznik/devicebridge/MainActivity.kt")
+        val app = read("src/main/java/ru/hznik/devicebridge/app/DeviceBridgeApp.kt")
+        val viewModel = read("src/main/java/ru/hznik/devicebridge/feature/file/FileViewModel.kt")
+
+        assertTrue(activity.contains("lateinit var fileSourceRegistry: FileSourceRegistry"))
+        assertTrue(app.contains("fileSourceRegistry: FileSourceRegistry? = null"))
+        assertTrue(app.contains("sourceRegistry = effectiveFileSourceRegistry"))
+        assertTrue(app.contains("stageTemporarySources = true"))
+        assertFalse(viewModel.contains("FileSourceRegistry"))
     }
 
     private fun read(relativePath: String): String {

@@ -19,11 +19,19 @@ import ru.hznik.devicebridge.data.network.LanEndpointResolver
 import ru.hznik.devicebridge.data.network.LanNetworkSnapshot
 import ru.hznik.devicebridge.data.network.LanNetworkSnapshotProvider
 import ru.hznik.devicebridge.data.session.BrowserSessionCoordinator
+import ru.hznik.devicebridge.data.session.SessionEventConnection
+import ru.hznik.devicebridge.data.session.SessionEventDispatcher
 import ru.hznik.devicebridge.data.session.security.CryptographicRandom
 import ru.hznik.devicebridge.data.session.security.SessionSecretGenerator
-import ru.hznik.devicebridge.data.text.TextSessionEventHub
-import ru.hznik.devicebridge.data.text.TextSessionEventConnection
 import ru.hznik.devicebridge.data.text.TextTransferCoordinator
+import ru.hznik.devicebridge.data.file.CompletedFileRegistry
+import ru.hznik.devicebridge.data.file.FileDownloadSourceFactory
+import ru.hznik.devicebridge.data.file.FileSourceRegistry
+import ru.hznik.devicebridge.data.file.FileTransferCoordinator
+import ru.hznik.devicebridge.data.file.FileUploadTargetFactory
+import ru.hznik.devicebridge.data.file.FileDestinationLeaseRegistry
+import ru.hznik.devicebridge.data.file.ScopedDocumentTreeLease
+import ru.hznik.devicebridge.data.file.DocumentTreePermissionGateway
 import ru.hznik.devicebridge.domain.session.BrowserSessionId
 import ru.hznik.devicebridge.domain.session.BrowserSession
 import ru.hznik.devicebridge.domain.session.BrowserSessionState
@@ -38,6 +46,7 @@ import ru.hznik.devicebridge.domain.text.TextTransferResult
 import ru.hznik.devicebridge.web.AllowlistedWebAssetProvider
 import ru.hznik.devicebridge.web.WebAssetDescriptor
 import ru.hznik.devicebridge.web.WebAssetSource
+import ru.hznik.devicebridge.web.FileSessionEventBridge
 
 class KtorServerRuntimeSessionTest {
 
@@ -50,7 +59,7 @@ class KtorServerRuntimeSessionTest {
             SessionSecretGenerator(DeterministicRandom()),
             scope,
         )
-        val textEventHub = TextSessionEventHub()
+        val eventDispatcher = SessionEventDispatcher(scope = scope)
         val textSession = BrowserSession(
             id = BrowserSessionId("session-1"),
             generationId = ServerGenerationId(1),
@@ -66,7 +75,29 @@ class KtorServerRuntimeSessionTest {
         val textTransfers = TextTransferCoordinator(
             nowEpochMillis = { 1_000_000 },
             browserSessionState = { textBrowserState },
-            eventGateway = textEventHub,
+            eventGateway = eventDispatcher,
+        )
+        val fileTransfers = FileTransferCoordinator(
+            browserSessionState = { textBrowserState },
+        )
+        val fileSources = FileSourceRegistry()
+        val completedFiles = CompletedFileRegistry()
+        val destinationLeases = FileDestinationLeaseRegistry()
+        val releasedLeases = mutableListOf<String>()
+        val trackedId = ru.hznik.devicebridge.domain.file.FileTransferId("tracked-file")
+        fileSources.register(trackedId, "content://source")
+        completedFiles.register(trackedId, "content://completed")
+        destinationLeases.register(
+            trackedId,
+            ScopedDocumentTreeLease(
+                "content://destination",
+                3,
+                object : DocumentTreePermissionGateway {
+                    override fun acquire(uri: String, grantFlags: Int) = true
+                    override fun isAvailable(uri: String) = true
+                    override fun release(uri: String, grantFlags: Int) { releasedLeases += uri }
+                },
+            ),
         )
         val runtime = KtorServerRuntimeFactory(
             networkSnapshotProvider = networkProvider(),
@@ -74,7 +105,19 @@ class KtorServerRuntimeSessionTest {
             webAssetProvider = webAssets(),
             browserSessionCoordinator = sessions,
             textTransferCoordinator = textTransfers,
-            textSessionEventHub = textEventHub,
+            sessionEventDispatcher = eventDispatcher,
+            fileTransferCoordinator = fileTransfers,
+            uploadTargetFactory = FileUploadTargetFactory { _, _ -> error("not used") },
+            downloadSourceFactory = FileDownloadSourceFactory { error("not used") },
+            fileSourceRegistry = fileSources,
+            completedFileRegistry = completedFiles,
+            destinationLeaseRegistry = destinationLeases,
+            fileSessionEventBridge = FileSessionEventBridge(
+                scope = scope,
+                coordinator = fileTransfers,
+                dispatcher = eventDispatcher,
+                wallClockMs = { 1_000_000 },
+            ),
             monotonicClock = clock,
         ).create()
         val endpoint = runtime.start()
@@ -101,7 +144,7 @@ class KtorServerRuntimeSessionTest {
             )
             assertTrue(accepted is TextTransferResult.Accepted)
             assertEquals(1, textTransfers.state.value.items.size)
-            textEventHub.attach(textSession.id, TextSessionEventConnection { true })
+            eventDispatcher.attach(textSession.id, SessionEventConnection { true })
             val pending = async {
                 textTransfers.send(SendTextRequest(textSession.id, "pending until stop"))
             }
@@ -113,6 +156,9 @@ class KtorServerRuntimeSessionTest {
             runtime.closeSessionGeneration()
             assertEquals(BrowserSessionPhase.INACTIVE, sessions.state.value.phase)
             assertTrue(textTransfers.state.value.items.isEmpty())
+            assertEquals(null, fileSources.sourceUri(trackedId))
+            assertEquals(null, completedFiles.uri(trackedId))
+            assertEquals(listOf("content://destination"), releasedLeases)
             assertEquals(
                 TextTransferResult.Rejected(TextTransferRejection.GENERATION_CLOSED),
                 pending.await(),

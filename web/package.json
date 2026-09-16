@@ -9,14 +9,20 @@
   },
   "packageManager": "npm@10.9.2",
   "scripts": {
+    "benchmark:file-hash": "node scripts/streaming-sha256-benchmark.mjs",
     "browser:matrix": "node scripts/browser-matrix.mjs",
     "build": "tsc --noEmit && vite build",
     "pretest": "vite build",
     "test": "vitest run",
+    "test:file-transfer-gate": "playwright test --config playwright.file-transfer.config.ts",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit"
   },
+  "dependencies": {
+    "@noble/hashes": "2.4.0"
+  },
   "devDependencies": {
+    "@playwright/test": "1.63.0",
     "@types/node": "26.5.1",
     "jsdom": "29.1.1",
     "typescript": "7.0.2",

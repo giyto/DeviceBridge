@@ -33,6 +33,14 @@ import ru.hznik.devicebridge.domain.model.ServerStopReason
 import ru.hznik.devicebridge.domain.repository.ServerLifecycleRepository
 import ru.hznik.devicebridge.domain.repository.BrowserSessionRepository
 import ru.hznik.devicebridge.domain.repository.TextTransferRepository
+import ru.hznik.devicebridge.domain.repository.FileTransferRepository
+import ru.hznik.devicebridge.domain.file.FileTransferDirection
+import ru.hznik.devicebridge.domain.file.FileTransferId
+import ru.hznik.devicebridge.domain.file.FileTransferMetadata
+import ru.hznik.devicebridge.domain.file.FileTransferOperationResult
+import ru.hznik.devicebridge.domain.file.FileTransferSnapshot
+import ru.hznik.devicebridge.domain.file.FileTransferState
+import ru.hznik.devicebridge.domain.usecase.ObserveFileTransfersUseCase
 import ru.hznik.devicebridge.domain.session.BrowserSession
 import ru.hznik.devicebridge.domain.session.BrowserSessionId
 import ru.hznik.devicebridge.domain.session.BrowserSessionState
@@ -126,6 +134,39 @@ class HomeViewModelTest {
             ticker.pulse()
             runCurrent()
             assertEquals(5L, viewModel.uiState.value.pairingExpiresInSeconds)
+        }
+
+    @Test
+    fun runningStateIncludesOnlyActiveFileTransfersWithoutSensitiveMetadata() =
+        runTest(dispatcher) {
+            val files = FakeFileTransferRepository()
+            val viewModel = createViewModel(
+                repository = FakeRepository(runningState()),
+                sessionRepository = FakeBrowserSessionRepository(activeBrowserState()),
+                fileRepository = files,
+            )
+            files.mutableState.value = FileTransferSnapshot(
+                listOf(
+                    FileTransferState.queued(
+                        generationId = ServerGenerationId(1),
+                        ownerSessionId = BrowserSessionId("session-1"),
+                        metadata = FileTransferMetadata(
+                            id = FileTransferId("home-file"),
+                            displayName = "report.pdf",
+                            sizeBytes = 100,
+                            mimeType = "application/pdf",
+                            sha256 = "a".repeat(64),
+                            direction = FileTransferDirection.BROWSER_TO_ANDROID,
+                        ),
+                    ),
+                ),
+            )
+            runCurrent()
+
+            val transfer = viewModel.uiState.value.activeFileTransfers.single()
+            assertEquals("report.pdf", transfer.displayName)
+            assertEquals(100, transfer.sizeBytes)
+            assertEquals(FileTransferDirection.BROWSER_TO_ANDROID, transfer.direction)
         }
 
     @Test
@@ -303,6 +344,7 @@ class HomeViewModelTest {
         ticker: FakeTicker = FakeTicker(),
         sessionRepository: FakeBrowserSessionRepository = FakeBrowserSessionRepository(),
         textRepository: FakeTextTransferRepository = FakeTextTransferRepository(),
+        fileRepository: FakeFileTransferRepository = FakeFileTransferRepository(),
     ) = HomeViewModel(
         StartServerUseCase(repository),
         StopServerUseCase(repository),
@@ -316,6 +358,7 @@ class HomeViewModelTest {
         DenyBrowserRequestUseCase(sessionRepository),
         RevokeBrowserSessionUseCase(sessionRepository),
         ObserveTextTransfersUseCase(textRepository),
+        ObserveFileTransfersUseCase(fileRepository),
     )
 
     private class FakeRepository(
@@ -371,6 +414,19 @@ class HomeViewModelTest {
 
         override suspend fun retry(messageId: TextMessageId): TextTransferResult =
             error("Not used")
+    }
+
+    private class FakeFileTransferRepository : FileTransferRepository {
+        val mutableState = MutableStateFlow(FileTransferSnapshot(emptyList()))
+        override val state: StateFlow<FileTransferSnapshot> = mutableState
+        override suspend fun create(request: ru.hznik.devicebridge.domain.file.CreateFileTransfersRequest) =
+            FileTransferOperationResult.InvalidState
+        override suspend fun approve(transferId: FileTransferId, destinationId: ru.hznik.devicebridge.domain.file.FileDestinationId?) =
+            FileTransferOperationResult.InvalidState
+        override suspend fun cancel(transferId: FileTransferId) = FileTransferOperationResult.InvalidState
+        override suspend fun retry(transferId: FileTransferId) = FileTransferOperationResult.InvalidState
+        override suspend fun verify(request: ru.hznik.devicebridge.domain.file.VerifyFileTransferRequest) =
+            FileTransferOperationResult.InvalidState
     }
 
     private class FakeClock(var nowMs: Long) : MonotonicClock {

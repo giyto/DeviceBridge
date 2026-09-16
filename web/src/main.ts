@@ -9,9 +9,16 @@ import { createTextTransferView } from "./textTransferView";
 import { WebManifestClient } from "./webManifestClient";
 import { createBrowserLabel } from "./browserIdentity";
 import { createProtocolMessageId } from "./protocolMessageId";
+import { FileApiClient } from "./fileApiClient";
+import { FileTransferController } from "./fileTransferController";
+import { createFileTransferView } from "./fileTransferView";
+import { hashFileStreaming } from "./fileVerifier";
+import { NativeFileDownloader } from "./nativeFileDownloader";
+import { XhrFileUploader } from "./xhrFileUploader";
 
 let controller: SessionController;
 let textController: TextTransferController;
+let fileController: FileTransferController;
 const view = createShellView(document, {
   onRetry: () => controller.retry(),
   onSubmitCode: (code) => controller.submitCode(code),
@@ -22,12 +29,30 @@ const textView = createTextTransferView(document, {
   onSend: () => textController.sendDraft(),
   onRetry: (messageId) => textController.retry(messageId),
 });
+const fileView = createFileTransferView(document, {
+  onSelect: (files) => fileController.selectFiles(files),
+  onConfirm: () => void fileController.confirmSelection(),
+  onCancel: (transferId) => void fileController.cancel(transferId),
+  onRetry: (transferId) => void fileController.retry(transferId),
+  onDownload: (transferId) => void fileController.download(transferId),
+  onVerify: (transferId, file) => void fileController.verifyDownloaded(transferId, file),
+});
 textController = new TextTransferController(
   new TextApiClient(),
   (state) => textView.render(state),
   createProtocolMessageId,
   () => Date.now(),
   () => controller.handleTextUnauthorized(),
+);
+fileController = new FileTransferController(
+  new FileApiClient(),
+  new XhrFileUploader(),
+  new NativeFileDownloader(document),
+  hashFileStreaming,
+  (state) => fileView.render(state),
+  createProtocolMessageId,
+  () => Date.now(),
+  () => controller.handleFileUnauthorized(),
 );
 
 controller = new SessionController(
@@ -38,6 +63,7 @@ controller = new SessionController(
   (state) => view.render(state),
   createBrowserLabel(navigator.userAgent, navigator.platform),
   textController,
+  fileController,
 );
 controller.start();
 
@@ -46,8 +72,10 @@ globalThis.addEventListener(
   () => {
     controller.dispose();
     textController.dispose();
+    fileController.dispose();
     view.dispose();
     textView.dispose();
+    fileView.dispose();
   },
   { once: true },
 );
