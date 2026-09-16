@@ -78,6 +78,27 @@ class ServerNotificationModelTest {
     }
 
     @Test
+    fun activeTextTransferChangesOnlyGenericNotificationStatus() {
+        val running = ServerLifecycleState.Running(
+            generation = 1,
+            endpoint = ServerEndpoint("192.168.1.24", 49_321),
+            startedAtElapsedRealtimeMs = 10,
+        )
+
+        val active = requireNotNull(
+            factory.create(
+                state = running,
+                activeSessionCount = 1,
+                hasActiveTextTransfer = true,
+            ),
+        )
+
+        assertTrue(active.text.contains("Передача текста выполняется"))
+        assertFalse(active.text.contains("секретное содержимое"))
+        assertFalse(active.text.contains("message", ignoreCase = true))
+    }
+
+    @Test
     fun androidPublisherUsesIdempotentLowPriorityChannelAndImmutableStopAction() {
         val source = Files.readString(
             Path.of(

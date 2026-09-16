@@ -122,6 +122,56 @@ class HomeScreenTest {
     }
 
     @Test
+    fun oneOrSeveralActiveSessionsEnableOnlyTextTransfer() {
+        var state by mutableStateOf(
+            ServerSessionUiState(
+                status = HomeServerStatus.Running,
+                activeBrowsers = listOf(
+                    ActiveBrowserUiState(
+                        BrowserSessionId("session-1"),
+                        "Яндекс Браузер",
+                        "192.168.1.2",
+                    ),
+                ),
+            ),
+        )
+        composeRule.setContent {
+            DeviceBridgeTheme { HomeScreen(uiState = state) }
+        }
+
+        composeRule.onNodeWithText("Текст").performScrollTo().assertIsEnabled()
+        composeRule.onNodeWithText("Файлы").performScrollTo().assertIsNotEnabled()
+
+        composeRule.runOnIdle {
+            state = state.copy(
+                activeBrowsers = state.activeBrowsers + ActiveBrowserUiState(
+                    BrowserSessionId("session-2"),
+                    "Edge",
+                    "192.168.1.3",
+                ),
+            )
+        }
+
+        composeRule.onNodeWithText("Текст").performScrollTo().assertIsEnabled()
+        composeRule.onNodeWithText("Файлы").performScrollTo().assertIsNotEnabled()
+    }
+
+    @Test
+    fun activeTextTransferShowsOnlyGenericStatus() {
+        setScreen(
+            ServerSessionUiState(
+                status = HomeServerStatus.Running,
+                textTransferStatus = HomeTextTransferStatus.Active,
+            ),
+        )
+
+        composeRule.onNodeWithText("Передача текста выполняется")
+            .performScrollTo()
+            .assertIsDisplayed()
+        composeRule.onNodeWithText("секретное содержимое").assertDoesNotExist()
+    }
+
+    @Test
     fun runningShowsPairingCodeAndCountdownOnlyForActiveGeneration() {
         var state by mutableStateOf(
             ServerSessionUiState(
@@ -196,7 +246,7 @@ class HomeScreenTest {
         composeRule.onNodeWithContentDescription(
             "Отключить Chrome с адреса 192.168.1.3",
         ).performScrollTo().performClick()
-        composeRule.onNodeWithText("Браузер подключён. Передача появится на следующем этапе.")
+        composeRule.onNodeWithText("Браузер подключён. Передача текста и ссылок доступна.")
             .performScrollTo().assertIsDisplayed()
         composeRule.onNodeWithText("Bearer", substring = true, ignoreCase = true)
             .assertDoesNotExist()

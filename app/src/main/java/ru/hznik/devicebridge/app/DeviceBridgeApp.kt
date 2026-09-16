@@ -20,6 +20,8 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.contentDescription
@@ -39,59 +41,94 @@ import ru.hznik.devicebridge.feature.home.HomeEffect
 import ru.hznik.devicebridge.feature.home.HomeViewModel
 import ru.hznik.devicebridge.feature.home.rememberServerPermissionLauncher
 import ru.hznik.devicebridge.feature.settings.SettingsScreen
+import ru.hznik.devicebridge.feature.text.TextScreen
+import ru.hznik.devicebridge.feature.text.SharedTextDraft
+import ru.hznik.devicebridge.feature.text.TextAction
+import ru.hznik.devicebridge.feature.text.TextViewModel
+import ru.hznik.devicebridge.feature.text.AndroidTextPlatformGateway
+import kotlinx.coroutines.launch
+
+private const val TEXT_ROUTE = "text"
 
 @Composable
 fun DeviceBridgeApp(
     modifier: Modifier = Modifier,
     navController: NavHostController = rememberNavController(),
-    homeContent: @Composable () -> Unit = {
+    sharedTextDraft: SharedTextDraft? = null,
+    onSharedTextConsumed: (Long) -> Unit = {},
+    homeContent: @Composable (onOpenText: () -> Unit) -> Unit = { onOpenText ->
         val homeViewModel: HomeViewModel = hiltViewModel()
-        HomeRoute(homeViewModel)
+        HomeRoute(homeViewModel, onOpenText)
+    },
+    textContent: @Composable (
+        onBack: () -> Unit,
+        sharedDraft: SharedTextDraft?,
+    ) -> Unit = { onBack, sharedDraft ->
+        val textViewModel: TextViewModel = hiltViewModel()
+        TextRoute(
+            viewModel = textViewModel,
+            onBack = onBack,
+            sharedDraft = sharedDraft,
+            onSharedTextConsumed = onSharedTextConsumed,
+        )
     },
 ) {
     val backStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = backStackEntry?.destination?.route
+    val initialRoute = remember(navController) {
+        if (sharedTextDraft == null) {
+            TopLevelDestination.Home.route
+        } else {
+            TEXT_ROUTE
+        }
+    }
 
     Scaffold(
         modifier = modifier.fillMaxSize(),
         bottomBar = {
-            NavigationBar {
-                TopLevelDestination.entries.forEach { destination ->
-                    NavigationBarItem(
-                        selected = currentRoute == destination.route,
-                        onClick = {
-                            navController.navigate(destination.route) {
-                                popUpTo(navController.graph.findStartDestination().id) {
-                                    saveState = true
+            if (TopLevelDestination.entries.any { it.route == currentRoute }) {
+                NavigationBar {
+                    TopLevelDestination.entries.forEach { destination ->
+                        NavigationBarItem(
+                            selected = currentRoute == destination.route,
+                            onClick = {
+                                navController.navigate(destination.route) {
+                                    popUpTo(navController.graph.findStartDestination().id) {
+                                        saveState = true
+                                    }
+                                    launchSingleTop = true
+                                    restoreState = true
                                 }
-                                launchSingleTop = true
-                                restoreState = true
-                            }
-                        },
-                        icon = {
-                            Text(
-                                text = destination.symbol,
-                                style = MaterialTheme.typography.labelLarge,
-                            )
-                        },
-                        label = { Text(destination.label) },
-                        modifier = Modifier.semantics {
-                            contentDescription = "Раздел ${destination.label}"
-                        },
-                    )
+                            },
+                            icon = {
+                                Text(
+                                    text = destination.symbol,
+                                    style = MaterialTheme.typography.labelLarge,
+                                )
+                            },
+                            label = { Text(destination.label) },
+                            modifier = Modifier.semantics {
+                                contentDescription = "Раздел ${destination.label}"
+                            },
+                        )
+                    }
                 }
             }
         },
     ) { innerPadding ->
         NavHost(
             navController = navController,
-            startDestination = TopLevelDestination.Home.route,
+            startDestination = initialRoute,
             modifier = Modifier
                 .fillMaxSize()
                 .padding(innerPadding),
         ) {
             composable(TopLevelDestination.Home.route) {
-                homeContent()
+                homeContent {
+                    navController.navigate(TEXT_ROUTE) {
+                        launchSingleTop = true
+                    }
+                }
             }
             composable(TopLevelDestination.History.route) {
                 HistoryScreen()
@@ -99,12 +136,33 @@ fun DeviceBridgeApp(
             composable(TopLevelDestination.Settings.route) {
                 SettingsScreen()
             }
+            composable(TEXT_ROUTE) {
+                textContent(
+                    { navController.popBackStack() },
+                    sharedTextDraft,
+                )
+            }
+        }
+    }
+
+    LaunchedEffect(sharedTextDraft?.requestId, currentRoute) {
+        if (
+            sharedTextDraft != null &&
+            currentRoute != null &&
+            currentRoute != TEXT_ROUTE
+        ) {
+            navController.navigate(TEXT_ROUTE) {
+                launchSingleTop = true
+            }
         }
     }
 }
 
 @Composable
-private fun HomeRoute(viewModel: HomeViewModel) {
+private fun HomeRoute(
+    viewModel: HomeViewModel,
+    onOpenText: () -> Unit,
+) {
     val context = LocalContext.current
     val activity = context.findActivity()
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
@@ -152,6 +210,41 @@ private fun HomeRoute(viewModel: HomeViewModel) {
     HomeScreen(
         uiState = uiState,
         onAction = viewModel::onAction,
+        onOpenText = onOpenText,
+    )
+}
+
+@Composable
+private fun TextRoute(
+    viewModel: TextViewModel,
+    onBack: () -> Unit,
+    sharedDraft: SharedTextDraft?,
+    onSharedTextConsumed: (Long) -> Unit,
+) {
+    val context = LocalContext.current
+    val platformGateway = remember(context) {
+        AndroidTextPlatformGateway(context)
+    }
+    val coroutineScope = rememberCoroutineScope()
+    val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    LaunchedEffect(sharedDraft?.requestId) {
+        sharedDraft?.let {
+            viewModel.onAction(TextAction.SharedDraftReceived(it.text))
+            onSharedTextConsumed(it.requestId)
+        }
+    }
+    TextScreen(
+        uiState = uiState,
+        onAction = viewModel::onAction,
+        onPasteRequested = {
+            coroutineScope.launch {
+                platformGateway.readClipboardText()?.let { clipboardText ->
+                    viewModel.onAction(TextAction.DraftChanged(clipboardText))
+                }
+            }
+        },
+        onOpenLinkRequested = platformGateway::openHttpLink,
+        onBack = onBack,
     )
 }
 

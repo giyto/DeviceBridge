@@ -14,6 +14,8 @@ import javax.inject.Singleton
 import ru.hznik.devicebridge.R
 import ru.hznik.devicebridge.domain.model.ServerLifecycleState
 import ru.hznik.devicebridge.domain.repository.BrowserSessionRepository
+import ru.hznik.devicebridge.domain.repository.TextTransferRepository
+import ru.hznik.devicebridge.domain.text.TextTransferStatus
 
 interface ServerNotificationController {
     fun createForegroundNotification(state: ServerLifecycleState): Notification
@@ -28,6 +30,7 @@ class AndroidServerNotificationController @Inject constructor(
     @param:ApplicationContext private val context: Context,
     private val modelFactory: ServerNotificationModelFactory,
     private val browserSessionRepository: BrowserSessionRepository,
+    private val textTransferRepository: TextTransferRepository,
 ) : ServerNotificationController {
 
     private val notificationManager =
@@ -41,6 +44,7 @@ class AndroidServerNotificationController @Inject constructor(
             modelFactory.create(
                 state = state,
                 activeSessionCount = browserSessionRepository.state.value.sessions.size,
+                hasActiveTextTransfer = textTransferRepository.hasActiveTransfer(),
             ),
         ) {
             "Foreground notification requires an active server state"
@@ -72,6 +76,7 @@ class AndroidServerNotificationController @Inject constructor(
         val model = modelFactory.create(
             state = state,
             activeSessionCount = browserSessionRepository.state.value.sessions.size,
+            hasActiveTextTransfer = textTransferRepository.hasActiveTransfer(),
         )
         if (model == null) {
             cancel()
@@ -112,6 +117,12 @@ class AndroidServerNotificationController @Inject constructor(
             .setAction(ServerForegroundService.ACTION_STOP),
         PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
     )
+
+    private fun TextTransferRepository.hasActiveTransfer(): Boolean =
+        state.value.items.any {
+            it.status == TextTransferStatus.PENDING ||
+                it.status == TextTransferStatus.SENDING
+        }
 
     companion object {
         const val CHANNEL_ID = "devicebridge_server"
