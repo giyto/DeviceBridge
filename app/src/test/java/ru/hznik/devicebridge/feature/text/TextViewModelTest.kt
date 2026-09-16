@@ -181,6 +181,35 @@ class TextViewModelTest {
     }
 
     @Test
+    fun unavailableBrowserChannelKeepsDraftAndExplainsVpnRecovery() = runTest(dispatcher) {
+        val failed = outgoingItem(
+            id = "outgoing-1",
+            session = firstSession,
+            content = "hello",
+            status = TextTransferStatus.FAILED,
+            failureReason = TextTransferFailureReason.SESSION_CLOSED,
+        )
+        val transfers = FakeTextTransfers(
+            sendResult = TextTransferResult.Accepted(failed),
+        )
+        val viewModel = createViewModel(
+            FakeBrowserSessions(browserState(firstSession)),
+            transfers,
+        )
+        viewModel.onAction(TextAction.DraftChanged("hello"))
+        runCurrent()
+
+        viewModel.onAction(TextAction.SendClicked)
+        runCurrent()
+
+        assertEquals("hello", viewModel.uiState.value.draft)
+        assertEquals(
+            "Браузер не подключён. Обновите страницу и проверьте доступ VPN к локальной сети.",
+            viewModel.uiState.value.errorMessage,
+        )
+    }
+
+    @Test
     fun failedItemCanBeRetriedWithSameMessageId() = runTest(dispatcher) {
         val failed = outgoingItem(
             id = "retry-1",
@@ -283,6 +312,7 @@ class TextViewModelTest {
             session: BrowserSession,
             content: String,
             status: TextTransferStatus,
+            failureReason: TextTransferFailureReason = TextTransferFailureReason.CONNECTION_LOST,
         ): TextTransferItem {
             val pending = TextTransferItem.outgoing(
                 id = TextMessageId(id),
@@ -302,7 +332,7 @@ class TextViewModelTest {
                 TextTransferStatus.FAILED -> sending.transitionTo(
                     next = TextTransferStatus.FAILED,
                     changedAtEpochMillis = 1_000_002,
-                    failureReason = TextTransferFailureReason.CONNECTION_LOST,
+                    failureReason = failureReason,
                 )
             }
         }

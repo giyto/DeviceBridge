@@ -323,7 +323,7 @@ class TextViewModel @Inject constructor(
         TextTransferFailureReason.CONNECTION_LOST ->
             "Соединение потеряно. Восстановите browser session и повторите."
         TextTransferFailureReason.SESSION_CLOSED ->
-            "Browser session закрыта. Выберите другого получателя."
+            "Браузер не подключён. Обновите страницу и проверьте доступ VPN к локальной сети."
         TextTransferFailureReason.PROTOCOL_ERROR ->
             "Браузер отклонил сообщение из-за ошибки протокола."
         TextTransferFailureReason.UNKNOWN,
