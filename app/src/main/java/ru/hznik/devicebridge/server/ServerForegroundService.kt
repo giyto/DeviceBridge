@@ -23,6 +23,7 @@ import ru.hznik.devicebridge.domain.model.ServerLifecycleError
 import ru.hznik.devicebridge.domain.model.ServerLifecycleState
 import ru.hznik.devicebridge.domain.model.ServerStopReason
 import ru.hznik.devicebridge.domain.repository.BrowserSessionRepository
+import ru.hznik.devicebridge.domain.repository.TextTransferRepository
 
 @AndroidEntryPoint
 class ServerForegroundService : Service() {
@@ -35,6 +36,9 @@ class ServerForegroundService : Service() {
 
     @Inject
     lateinit var browserSessionRepository: BrowserSessionRepository
+
+    @Inject
+    lateinit var textTransferRepository: TextTransferRepository
 
     @Inject
     @ApplicationScope
@@ -52,7 +56,8 @@ class ServerForegroundService : Service() {
             combine(
                 coordinator.state,
                 browserSessionRepository.state,
-            ) { lifecycleState, _ -> lifecycleState }
+                textTransferRepository.state,
+            ) { lifecycleState, _, _ -> lifecycleState }
                 .collect { state ->
                 withContext(Dispatchers.Main.immediate) {
                     if (!foregroundStarted) {

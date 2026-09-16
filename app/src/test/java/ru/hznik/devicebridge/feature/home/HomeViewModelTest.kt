@@ -32,6 +32,7 @@ import ru.hznik.devicebridge.domain.model.ServerLifecycleState
 import ru.hznik.devicebridge.domain.model.ServerStopReason
 import ru.hznik.devicebridge.domain.repository.ServerLifecycleRepository
 import ru.hznik.devicebridge.domain.repository.BrowserSessionRepository
+import ru.hznik.devicebridge.domain.repository.TextTransferRepository
 import ru.hznik.devicebridge.domain.session.BrowserSession
 import ru.hznik.devicebridge.domain.session.BrowserSessionId
 import ru.hznik.devicebridge.domain.session.BrowserSessionState
@@ -47,6 +48,16 @@ import ru.hznik.devicebridge.domain.usecase.ObserveServerLifecycleUseCase
 import ru.hznik.devicebridge.domain.usecase.RevokeBrowserSessionUseCase
 import ru.hznik.devicebridge.domain.usecase.StartServerUseCase
 import ru.hznik.devicebridge.domain.usecase.StopServerUseCase
+import ru.hznik.devicebridge.domain.usecase.ObserveTextTransfersUseCase
+import ru.hznik.devicebridge.domain.text.IncomingTextRequest
+import ru.hznik.devicebridge.domain.text.SendTextRequest
+import ru.hznik.devicebridge.domain.text.TextContentKind
+import ru.hznik.devicebridge.domain.text.TextMessageId
+import ru.hznik.devicebridge.domain.text.TextTransferFailureReason
+import ru.hznik.devicebridge.domain.text.TextTransferItem
+import ru.hznik.devicebridge.domain.text.TextTransferResult
+import ru.hznik.devicebridge.domain.text.TextTransferState
+import ru.hznik.devicebridge.domain.text.TextTransferStatus
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class HomeViewModelTest {
@@ -165,6 +176,46 @@ class HomeViewModelTest {
         }
 
     @Test
+    fun currentTextStatusTracksActiveCompletedFailedAndClearsOutsideRunning() =
+        runTest(dispatcher) {
+            val lifecycle = FakeRepository(runningState())
+            val textRepository = FakeTextTransferRepository()
+            val viewModel = createViewModel(
+                repository = lifecycle,
+                textRepository = textRepository,
+            )
+            runCurrent()
+            assertEquals(HomeTextTransferStatus.Idle, viewModel.uiState.value.textTransferStatus)
+
+            val pending = outgoingTextItem()
+            textRepository.mutableState.value = TextTransferState.of(listOf(pending))
+            runCurrent()
+            assertEquals(HomeTextTransferStatus.Active, viewModel.uiState.value.textTransferStatus)
+
+            val sending = pending.transitionTo(TextTransferStatus.SENDING, 1_001)
+            val delivered = sending.transitionTo(TextTransferStatus.DELIVERED, 1_002)
+            textRepository.mutableState.value = TextTransferState.of(listOf(delivered))
+            runCurrent()
+            assertEquals(
+                HomeTextTransferStatus.Completed,
+                viewModel.uiState.value.textTransferStatus,
+            )
+
+            val failed = sending.transitionTo(
+                next = TextTransferStatus.FAILED,
+                changedAtEpochMillis = 1_002,
+                failureReason = TextTransferFailureReason.CONNECTION_LOST,
+            )
+            textRepository.mutableState.value = TextTransferState.of(listOf(failed))
+            runCurrent()
+            assertEquals(HomeTextTransferStatus.Failed, viewModel.uiState.value.textTransferStatus)
+
+            lifecycle.mutableState.value = ServerLifecycleState.Stopped
+            runCurrent()
+            assertEquals(HomeTextTransferStatus.Idle, viewModel.uiState.value.textTransferStatus)
+        }
+
+    @Test
     fun api37RequestsLanPermissionOnceBeforeStart() = runTest(dispatcher) {
         val repository = FakeRepository()
         val gateway = FakePermissionGateway(snapshot(sdk = 37, lan = false))
@@ -251,6 +302,7 @@ class HomeViewModelTest {
         clock: FakeClock = FakeClock(0),
         ticker: FakeTicker = FakeTicker(),
         sessionRepository: FakeBrowserSessionRepository = FakeBrowserSessionRepository(),
+        textRepository: FakeTextTransferRepository = FakeTextTransferRepository(),
     ) = HomeViewModel(
         StartServerUseCase(repository),
         StopServerUseCase(repository),
@@ -263,6 +315,7 @@ class HomeViewModelTest {
         ApproveBrowserRequestUseCase(sessionRepository),
         DenyBrowserRequestUseCase(sessionRepository),
         RevokeBrowserSessionUseCase(sessionRepository),
+        ObserveTextTransfersUseCase(textRepository),
     )
 
     private class FakeRepository(
@@ -304,6 +357,20 @@ class HomeViewModelTest {
         override suspend fun revoke(sessionId: BrowserSessionId) {
             revoked += sessionId
         }
+    }
+
+    private class FakeTextTransferRepository : TextTransferRepository {
+        val mutableState = MutableStateFlow(TextTransferState.empty())
+        override val state: StateFlow<TextTransferState> = mutableState
+
+        override suspend fun send(request: SendTextRequest): TextTransferResult =
+            error("Not used")
+
+        override suspend fun receive(request: IncomingTextRequest): TextTransferResult =
+            error("Not used")
+
+        override suspend fun retry(messageId: TextMessageId): TextTransferResult =
+            error("Not used")
     }
 
     private class FakeClock(var nowMs: Long) : MonotonicClock {
@@ -364,6 +431,16 @@ class HomeViewModelTest {
                     connectedAtElapsedRealtimeMs = 11_000,
                 ),
             ),
+        )
+
+        fun outgoingTextItem() = TextTransferItem.outgoing(
+            id = TextMessageId("home-status"),
+            generationId = ServerGenerationId(1),
+            sessionId = BrowserSessionId("session-1"),
+            browserLabel = "Chrome",
+            content = "секретное содержимое",
+            contentKind = TextContentKind.TEXT,
+            createdAtEpochMillis = 1_000,
         )
     }
 }

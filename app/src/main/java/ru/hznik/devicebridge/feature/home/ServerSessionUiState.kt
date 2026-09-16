@@ -11,6 +11,13 @@ enum class HomeServerStatus {
     Error,
 }
 
+enum class HomeTextTransferStatus {
+    Idle,
+    Active,
+    Completed,
+    Failed,
+}
+
 data class ServerSessionUiState(
     val status: HomeServerStatus = HomeServerStatus.Stopped,
     val localAddress: String? = null,
@@ -24,6 +31,7 @@ data class ServerSessionUiState(
     val pairingExpiresInSeconds: Long? = null,
     val pendingBrowsers: List<PendingBrowserUiState> = emptyList(),
     val activeBrowsers: List<ActiveBrowserUiState> = emptyList(),
+    val textTransferStatus: HomeTextTransferStatus = HomeTextTransferStatus.Idle,
 ) {
     val canStart: Boolean
         get() = !commandPending &&
@@ -32,8 +40,9 @@ data class ServerSessionUiState(
     val canStop: Boolean
         get() = !commandPending && status == HomeServerStatus.Running
 
-    // Pairing belongs to the next change, so transfer remains honestly unavailable.
-    val canSendText: Boolean = false
+    val canSendText: Boolean
+        get() = status == HomeServerStatus.Running && activeBrowsers.isNotEmpty()
+
     val canSendFiles: Boolean = false
 }
 

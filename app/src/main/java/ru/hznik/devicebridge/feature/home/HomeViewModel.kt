@@ -26,6 +26,9 @@ import ru.hznik.devicebridge.domain.usecase.ObserveServerLifecycleUseCase
 import ru.hznik.devicebridge.domain.usecase.RevokeBrowserSessionUseCase
 import ru.hznik.devicebridge.domain.usecase.StartServerUseCase
 import ru.hznik.devicebridge.domain.usecase.StopServerUseCase
+import ru.hznik.devicebridge.domain.usecase.ObserveTextTransfersUseCase
+import ru.hznik.devicebridge.domain.text.TextTransferState
+import ru.hznik.devicebridge.domain.text.TextTransferStatus
 
 @HiltViewModel
 class HomeViewModel @Inject constructor(
@@ -40,14 +43,17 @@ class HomeViewModel @Inject constructor(
     private val approveBrowserRequest: ApproveBrowserRequestUseCase,
     private val denyBrowserRequest: DenyBrowserRequestUseCase,
     private val revokeBrowserSession: RevokeBrowserSessionUseCase,
+    observeTextTransfers: ObserveTextTransfersUseCase,
 ) : ViewModel() {
     private val lifecycleState = observeServerLifecycle()
     private val browserSessionState = observeBrowserSessions()
+    private val textTransferState = observeTextTransfers()
     private val decidingRequestIds = mutableSetOf<PairingRequestId>()
     private val revokingSessionIds = mutableSetOf<BrowserSessionId>()
     private val mutableUiState = kotlinx.coroutines.flow.MutableStateFlow(
         lifecycleState.value.toUiState(
             browserSessionState.value,
+            textTransferState.value,
             monotonicClock.nowMs(),
         ),
     )
@@ -59,16 +65,30 @@ class HomeViewModel @Inject constructor(
 
     init {
         viewModelScope.launch {
-            combine(lifecycleState, browserSessionState) { lifecycle, sessions ->
-                lifecycle to sessions
-            }.collectLatest { (state, sessions) ->
+            combine(
+                lifecycleState,
+                browserSessionState,
+                textTransferState,
+            ) { lifecycle, sessions, transfers ->
+                Triple(lifecycle, sessions, transfers)
+            }.collectLatest { (state, sessions, transfers) ->
                 mutableUiState.update { previous ->
-                    state.toUiState(sessions, monotonicClock.nowMs(), previous)
+                    state.toUiState(
+                        sessions,
+                        transfers,
+                        monotonicClock.nowMs(),
+                        previous,
+                    )
                 }
                 if (state is ServerLifecycleState.Running) {
                     uptimeTicker.ticks().collect {
                         mutableUiState.update { previous ->
-                            state.toUiState(sessions, monotonicClock.nowMs(), previous)
+                            state.toUiState(
+                                sessions,
+                                transfers,
+                                monotonicClock.nowMs(),
+                                previous,
+                            )
                         }
                     }
                 }
@@ -135,6 +155,7 @@ class HomeViewModel @Inject constructor(
         mutableUiState.update { previous ->
             lifecycleState.value.toUiState(
                 browserSessionState.value,
+                textTransferState.value,
                 monotonicClock.nowMs(),
                 previous,
             )
@@ -203,6 +224,7 @@ class HomeViewModel @Inject constructor(
 
     private fun ServerLifecycleState.toUiState(
         sessions: BrowserSessionState,
+        transfers: TextTransferState,
         nowMs: Long,
         previous: ServerSessionUiState = ServerSessionUiState(),
     ): ServerSessionUiState {
@@ -267,7 +289,31 @@ class HomeViewModel @Inject constructor(
             } else {
                 emptyList()
             },
+            textTransferStatus = if (this is ServerLifecycleState.Running) {
+                transfers.toHomeTextTransferStatus()
+            } else {
+                HomeTextTransferStatus.Idle
+            },
         )
+    }
+
+    private fun TextTransferState.toHomeTextTransferStatus(): HomeTextTransferStatus {
+        if (
+            items.any {
+                it.status == TextTransferStatus.PENDING ||
+                    it.status == TextTransferStatus.SENDING
+            }
+        ) {
+            return HomeTextTransferStatus.Active
+        }
+        return when (items.maxByOrNull { it.updatedAtEpochMillis }?.status) {
+            TextTransferStatus.DELIVERED -> HomeTextTransferStatus.Completed
+            TextTransferStatus.FAILED -> HomeTextTransferStatus.Failed
+            TextTransferStatus.PENDING,
+            TextTransferStatus.SENDING,
+            null,
+            -> HomeTextTransferStatus.Idle
+        }
     }
 
     private fun Long.remainingSeconds(nowMs: Long): Long =

@@ -23,13 +23,13 @@
 
 ## 4. Android text flow
 
-- [ ] 4.1 Добавить `TextViewModel`, однонаправленные actions и `TextUiState` для черновика, выбора session, предпросмотра, текущей ленты и статусов; проверить unit-тестами одну/несколько sessions, отключение получателя, success, error и retry.
-- [ ] 4.2 Реализовать Compose text screen с полем, явной вставкой, типом, preview, выбором одного получателя, подтверждением и карточками входящих элементов; проверить Compose-тестами loading/empty/disabled/error/success, клавиатурный фокус и крупный font scale.
-- [ ] 4.3 Разблокировать quick action «Текст» только при активной session и оставить «Файлы» недоступным; проверить `HomeScreenTest` для stopped, running-without-session, one-session и multi-session состояний.
-- [ ] 4.4 Добавить навигацию в text flow и безопасный возврат на главный экран без дублирования back stack; проверить navigation instrumented-тестом и пересозданием Activity.
-- [ ] 4.5 Обработать `ACTION_SEND` с `text/plain` как неподтверждённый draft и отклонить неподдерживаемые MIME/пустой payload; проверить intent-тестами отсутствие автоматической отправки и обязательный выбор session.
-- [ ] 4.6 Добавить platform adapters явной вставки и открытия только канонических `http`/`https` ссылок; проверить тестами, что clipboard не читается без action, а опасные схемы не создают `ACTION_VIEW`.
-- [ ] 4.7 Подключить current text state к главному экрану и foreground notification без содержимого сообщения; проверить unit/instrumented-тестами статусы active/completed/failed и очистку при stop.
+- [x] 4.1 Добавить `TextViewModel`, однонаправленные actions и `TextUiState` для черновика, выбора session, предпросмотра, текущей ленты и статусов; проверить unit-тестами одну/несколько sessions, отключение получателя, success, error и retry.
+- [x] 4.2 Реализовать Compose text screen с полем, явной вставкой, типом, preview, выбором одного получателя, подтверждением и карточками входящих элементов; проверить Compose-тестами loading/empty/disabled/error/success, клавиатурный фокус и крупный font scale.
+- [x] 4.3 Разблокировать quick action «Текст» только при активной session и оставить «Файлы» недоступным; проверить `HomeScreenTest` для stopped, running-without-session, one-session и multi-session состояний.
+- [x] 4.4 Добавить навигацию в text flow и безопасный возврат на главный экран без дублирования back stack; проверить navigation instrumented-тестом и пересозданием Activity.
+- [x] 4.5 Обработать `ACTION_SEND` с `text/plain` как неподтверждённый draft и отклонить неподдерживаемые MIME/пустой payload; проверить intent-тестами отсутствие автоматической отправки и обязательный выбор session.
+- [x] 4.6 Добавить platform adapters явной вставки и открытия только канонических `http`/`https` ссылок; проверить тестами, что clipboard не читается без action, а опасные схемы не создают `ACTION_VIEW`.
+- [x] 4.7 Подключить current text state к главному экрану и foreground notification без содержимого сообщения; проверить unit/instrumented-тестами статусы active/completed/failed и очистку при stop.
 
 ## 5. Browser identity и web transport
 

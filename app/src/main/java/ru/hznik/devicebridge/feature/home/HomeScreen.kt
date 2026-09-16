@@ -41,6 +41,7 @@ fun HomeScreen(
     uiState: ServerSessionUiState,
     modifier: Modifier = Modifier,
     onAction: (HomeAction) -> Unit = {},
+    onOpenText: () -> Unit = {},
 ) {
     val clipboard = LocalClipboard.current
     val coroutineScope = rememberCoroutineScope()
@@ -163,9 +164,9 @@ fun HomeScreen(
             QuickActionCard(
                 symbol = "Aa",
                 title = "Текст",
-                supportingText = "Отправить заметку или ссылку",
+                supportingText = uiState.textTransferStatus.supportingText(),
                 enabled = uiState.canSendText,
-                onClick = {},
+                onClick = onOpenText,
             )
             QuickActionCard(
                 symbol = "⇧",
@@ -180,7 +181,7 @@ fun HomeScreen(
             text = if (uiState.activeBrowsers.isEmpty()) {
                 "Сначала безопасно подключите браузер по коду выше."
             } else {
-                "Браузер подключён. Передача появится на следующем этапе."
+                "Браузер подключён. Передача текста и ссылок доступна."
             },
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -522,6 +523,13 @@ internal fun formatCountdown(totalSeconds: Long): String {
     val minutes = safeSeconds / 60
     val seconds = safeSeconds % 60
     return "%02d:%02d".format(minutes, seconds)
+}
+
+private fun HomeTextTransferStatus.supportingText(): String = when (this) {
+    HomeTextTransferStatus.Idle -> "Отправить заметку или ссылку"
+    HomeTextTransferStatus.Active -> "Передача текста выполняется"
+    HomeTextTransferStatus.Completed -> "Последняя передача доставлена"
+    HomeTextTransferStatus.Failed -> "Последняя передача завершилась ошибкой"
 }
 
 @Preview(name = "Главная — светлая", showBackground = true)
