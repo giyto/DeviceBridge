@@ -80,4 +80,4 @@
 - [x] 9.6 Повторить основной pairing/revoke/stop сценарий через hotspot без интернета; проверить новый IPv4, invalidation старого token, отсутствие внешних запросов и корректные состояния обоих интерфейсов.
 - [x] 9.7 Выполнить security review: убедиться, что code/raw tokens отсутствуют в URL, manifest/assets, Logcat, notification, persistent Android files, backup config, test reports и Git diff; зафиксировать осознанное ограничение локального HTTP.
 - [x] 9.8 Сверить реализацию с ТЗ 2.0, roadmap, proposal, design и четырьмя delta specs; подтвердить одно приложение, Clean Architecture/MVVM/SOLID и отсутствие trusted browser/transfer scope.
-- [ ] 9.9 Выполнить `openspec validate add-secure-browser-session --strict`, передать пользователю пошаговый ручной чек-лист и после подтверждения синхронизировать main specs, архивировать change, создать локальный commit и push в GitHub.
+- [x] 9.9 Выполнить `openspec validate add-secure-browser-session --strict`, передать пользователю пошаговый ручной чек-лист и после подтверждения синхронизировать main specs, архивировать change, создать локальный commit и push в GitHub.
