@@ -15,6 +15,8 @@ import ru.hznik.devicebridge.R
 import ru.hznik.devicebridge.domain.model.ServerLifecycleState
 import ru.hznik.devicebridge.domain.repository.BrowserSessionRepository
 import ru.hznik.devicebridge.domain.repository.TextTransferRepository
+import ru.hznik.devicebridge.domain.repository.FileTransferRepository
+import ru.hznik.devicebridge.domain.file.FileTransferPhase
 import ru.hznik.devicebridge.domain.text.TextTransferStatus
 
 interface ServerNotificationController {
@@ -31,6 +33,7 @@ class AndroidServerNotificationController @Inject constructor(
     private val modelFactory: ServerNotificationModelFactory,
     private val browserSessionRepository: BrowserSessionRepository,
     private val textTransferRepository: TextTransferRepository,
+    private val fileTransferRepository: FileTransferRepository,
 ) : ServerNotificationController {
 
     private val notificationManager =
@@ -45,6 +48,7 @@ class AndroidServerNotificationController @Inject constructor(
                 state = state,
                 activeSessionCount = browserSessionRepository.state.value.sessions.size,
                 hasActiveTextTransfer = textTransferRepository.hasActiveTransfer(),
+                activeFileTransfer = fileTransferRepository.activeNotificationTransfer(),
             ),
         ) {
             "Foreground notification requires an active server state"
@@ -77,6 +81,7 @@ class AndroidServerNotificationController @Inject constructor(
             state = state,
             activeSessionCount = browserSessionRepository.state.value.sessions.size,
             hasActiveTextTransfer = textTransferRepository.hasActiveTransfer(),
+            activeFileTransfer = fileTransferRepository.activeNotificationTransfer(),
         )
         if (model == null) {
             cancel()
@@ -122,6 +127,20 @@ class AndroidServerNotificationController @Inject constructor(
         state.value.items.any {
             it.status == TextTransferStatus.PENDING ||
                 it.status == TextTransferStatus.SENDING
+        }
+
+    private fun FileTransferRepository.activeNotificationTransfer(): FileNotificationProgress? =
+        state.value.items.firstOrNull { item ->
+            item.phase == FileTransferPhase.CONNECTING ||
+                item.phase == FileTransferPhase.TRANSFERRING ||
+                item.phase == FileTransferPhase.VERIFYING
+        }?.let { item ->
+            FileNotificationProgress(
+                displayName = item.metadata.displayName,
+                direction = item.metadata.direction,
+                bytesTransferred = item.bytesTransferred,
+                totalBytes = item.metadata.sizeBytes,
+            )
         }
 
     companion object {

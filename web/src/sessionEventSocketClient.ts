@@ -5,6 +5,16 @@ import type {
   TextContentKind,
   TextTransferStatus,
 } from "./textApiClient";
+import {
+  parseFileError,
+  parseFileOffer,
+  parseFileProgress,
+  parseFileSnapshot,
+  type FileErrorEvent,
+  type FileOfferEvent,
+  type FileProgressEvent,
+  type FileSnapshotEvent,
+} from "./fileApiClient";
 
 export interface SocketLike {
   onopen: ((event: Event) => void) | null;
@@ -27,6 +37,10 @@ export interface SessionEventCallbacks {
   readonly onTextReceived?: (event: TextReceivedEvent) => void;
   readonly onTextSnapshot?: (event: TextSnapshotEvent) => void;
   readonly onTextError?: (event: TextErrorEvent) => void;
+  readonly onFileOffer?: (event: FileOfferEvent) => void;
+  readonly onFileProgress?: (event: FileProgressEvent) => void;
+  readonly onFileSnapshot?: (event: FileSnapshotEvent) => void;
+  readonly onFileError?: (event: FileErrorEvent) => void;
 }
 
 export type TextDirection = "ANDROID_TO_BROWSER" | "BROWSER_TO_ANDROID";
@@ -164,6 +178,22 @@ export class SessionEventSocketClient {
       if (value?.type === "text.error") {
         const textError = parseTextError(value);
         if (textError !== undefined) callbacks.onTextError?.(textError);
+        return;
+      }
+      if (value?.type === "file.offer") {
+        routeStrictFileEvent(value, parseFileOffer, callbacks.onFileOffer);
+        return;
+      }
+      if (value?.type === "file.progress") {
+        routeStrictFileEvent(value, parseFileProgress, callbacks.onFileProgress);
+        return;
+      }
+      if (value?.type === "file.snapshot") {
+        routeStrictFileEvent(value, parseFileSnapshot, callbacks.onFileSnapshot);
+        return;
+      }
+      if (value?.type === "file.error") {
+        routeStrictFileEvent(value, parseFileError, callbacks.onFileError);
       }
     };
     socket.onerror = () => undefined;
@@ -195,6 +225,18 @@ export class SessionEventSocketClient {
       if (oldest !== undefined) this.seenTextMessageIds.delete(oldest);
     }
     return true;
+  }
+}
+
+function routeStrictFileEvent<T>(
+  value: Record<string, unknown>,
+  parser: (candidate: unknown) => T,
+  callback: ((event: T) => void) | undefined,
+): void {
+  try {
+    callback?.(parser(value));
+  } catch {
+    // Malformed server events never mutate browser state.
   }
 }
 

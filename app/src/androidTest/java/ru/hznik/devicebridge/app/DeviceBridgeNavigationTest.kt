@@ -20,6 +20,8 @@ import ru.hznik.devicebridge.feature.home.ServerSessionUiState
 import ru.hznik.devicebridge.feature.text.TextScreen
 import ru.hznik.devicebridge.feature.text.TextUiState
 import ru.hznik.devicebridge.domain.session.BrowserSessionId
+import ru.hznik.devicebridge.feature.file.FileScreen
+import ru.hznik.devicebridge.feature.file.FileUiState
 
 @RunWith(AndroidJUnit4::class)
 class DeviceBridgeNavigationTest {
@@ -69,6 +71,16 @@ class DeviceBridgeNavigationTest {
     }
 
     @Test
+    fun fileQuickActionOpensOnlyWithActiveSessionAndBackReturnsHome() {
+        setAppContent(withActiveSession = true)
+
+        composeRule.onNodeWithText("Файлы").performScrollTo().performClick()
+        composeRule.onNodeWithText("Потоковая передача", substring = true).assertIsDisplayed()
+        composeRule.onNodeWithContentDescription("Вернуться на главный экран").performClick()
+        composeRule.onNodeWithText("DeviceBridge").performScrollTo().assertIsDisplayed()
+    }
+
+    @Test
     fun restoredTextDestinationNeedsOnlyOneBackToReachHome() {
         val restorationTester = StateRestorationTester(composeRule)
         restorationTester.setContent {
@@ -112,10 +124,11 @@ class DeviceBridgeNavigationTest {
             ServerSessionUiState()
         }
         DeviceBridgeApp(
-            homeContent = { onOpenText ->
+            homeContent = { onOpenText, onOpenFiles ->
                 HomeScreen(
                     uiState = sessionState,
                     onOpenText = onOpenText,
+                    onOpenFiles = onOpenFiles,
                 )
             },
             textContent = { onBack, _ ->
@@ -124,6 +137,7 @@ class DeviceBridgeNavigationTest {
                     onBack = onBack,
                 )
             },
+            fileContent = { onBack, _ -> FileScreen(FileUiState(), onBack = onBack) },
         )
     }
 }

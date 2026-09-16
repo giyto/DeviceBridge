@@ -722,6 +722,180 @@ h2 {
   color: var(--text-muted);
 }
 
+.file-transfer {
+  display: grid;
+  min-width: 0;
+  gap: 1rem;
+  padding-top: 1.25rem;
+  border-top: 1px solid var(--border);
+}
+
+.file-transfer[hidden] {
+  display: none;
+}
+
+.file-transfer__heading,
+.file-card__heading,
+.file-card__actions {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.file-transfer__heading {
+  align-items: flex-start;
+}
+
+.file-transfer__heading .stage-card__step {
+  margin-bottom: 0.35rem;
+}
+
+.file-drop-zone {
+  display: grid;
+  min-width: 0;
+  min-height: 120px;
+  place-content: center;
+  gap: 0.35rem;
+  padding: 1rem;
+  border: 2px dashed var(--border-strong);
+  border-radius: 16px;
+  background: var(--surface-subtle);
+  color: var(--text-muted);
+  cursor: pointer;
+  text-align: center;
+  transition:
+    border-color 160ms ease,
+    background 160ms ease;
+}
+
+.file-drop-zone:hover,
+.file-drop-zone:focus-visible {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.file-drop-zone strong {
+  overflow-wrap: anywhere;
+  color: var(--text);
+}
+
+.file-selection,
+.file-transfer-list {
+  display: grid;
+  min-width: 0;
+  gap: 0.75rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.file-selection:empty {
+  display: none;
+}
+
+.file-selection__item,
+.file-card {
+  display: grid;
+  min-width: 0;
+  gap: 0.65rem;
+  padding: 0.9rem;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--surface-elevated);
+}
+
+.file-selection__item strong,
+.file-selection__item span,
+.file-card__heading strong {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.file-selection__item span,
+.file-card__details,
+.file-card__progress {
+  color: var(--text-muted);
+  font-size: 0.8rem;
+}
+
+.file-selection__error,
+.file-card__error {
+  color: var(--danger) !important;
+}
+
+.file-transfer-panel {
+  display: grid;
+  min-width: 0;
+  gap: 0.75rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--border);
+}
+
+.file-transfer-panel > p {
+  margin: 0;
+  color: var(--text-muted);
+}
+
+.file-card__status {
+  flex: 0 0 auto;
+  color: var(--text-muted);
+  font-size: 0.78rem;
+  font-weight: 750;
+}
+
+.file-card[data-status="COMPLETED"] .file-card__status {
+  color: var(--success);
+}
+
+.file-card[data-status="FAILED"] .file-card__status,
+.file-card[data-status="CANCELLED"] .file-card__status {
+  color: var(--danger);
+}
+
+.file-card__details,
+.file-card__progress,
+.file-card__error,
+.file-card__verification-note {
+  margin: 0 !important;
+  overflow-wrap: anywhere;
+}
+
+.file-card__verification-note {
+  color: var(--text-muted);
+  font-size: 0.8rem;
+}
+
+.file-card progress {
+  width: 100%;
+  min-height: 10px;
+  accent-color: var(--accent);
+}
+
+.file-card__actions {
+  justify-content: flex-start;
+  flex-wrap: wrap;
+}
+
+.file-card__actions button {
+  flex: 1 1 10rem;
+  min-width: 0;
+  margin-top: 0;
+}
+
+.visually-hidden {
+  position: absolute !important;
+  width: 1px !important;
+  height: 1px !important;
+  padding: 0 !important;
+  margin: -1px !important;
+  overflow: hidden !important;
+  clip: rect(0, 0, 0, 0) !important;
+  white-space: nowrap !important;
+  border: 0 !important;
+}
+
 .site-footer {
   border-top: 1px solid var(--border);
   color: var(--text-muted);
@@ -764,7 +938,9 @@ h2 {
   }
 
   .text-transfer__heading,
-  .file-unavailable {
+  .file-unavailable,
+  .file-transfer__heading,
+  .file-card__heading {
     align-items: stretch;
     flex-direction: column;
   }
@@ -792,6 +968,11 @@ h2 {
   }
 
   .file-unavailable button {
+    width: 100%;
+  }
+
+  .file-card__actions button {
+    flex-basis: 100%;
     width: 100%;
   }
 }

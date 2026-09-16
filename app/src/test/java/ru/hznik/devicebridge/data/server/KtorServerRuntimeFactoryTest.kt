@@ -24,8 +24,14 @@ import kotlinx.coroutines.SupervisorJob
 import ru.hznik.devicebridge.data.session.BrowserSessionCoordinator
 import ru.hznik.devicebridge.data.session.security.JavaCryptographicRandom
 import ru.hznik.devicebridge.data.session.security.SessionSecretGenerator
-import ru.hznik.devicebridge.data.text.TextSessionEventHub
+import ru.hznik.devicebridge.data.session.SessionEventDispatcher
 import ru.hznik.devicebridge.data.text.TextTransferCoordinator
+import ru.hznik.devicebridge.data.file.CompletedFileRegistry
+import ru.hznik.devicebridge.data.file.FileDownloadSourceFactory
+import ru.hznik.devicebridge.data.file.FileSourceRegistry
+import ru.hznik.devicebridge.data.file.FileTransferCoordinator
+import ru.hznik.devicebridge.data.file.FileUploadTargetFactory
+import ru.hznik.devicebridge.web.FileSessionEventBridge
 
 class KtorServerRuntimeFactoryTest {
 
@@ -115,16 +121,20 @@ class KtorServerRuntimeFactoryTest {
     }
 
     private fun factory(): KtorServerRuntimeFactory {
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
         val browserSessions = BrowserSessionCoordinator(
             clock = MonotonicClock { 1_000 },
             secretGenerator = SessionSecretGenerator(JavaCryptographicRandom()),
-            scope = CoroutineScope(SupervisorJob() + Dispatchers.Default),
+            scope = scope,
         )
-        val textEventHub = TextSessionEventHub()
+        val eventDispatcher = SessionEventDispatcher()
         val textTransfers = TextTransferCoordinator(
             nowEpochMillis = { 1_000_000 },
             browserSessionState = { browserSessions.state.value },
-            eventGateway = textEventHub,
+            eventGateway = eventDispatcher,
+        )
+        val fileTransfers = FileTransferCoordinator(
+            browserSessionState = { browserSessions.state.value },
         )
         return KtorServerRuntimeFactory(
             networkSnapshotProvider = LanNetworkSnapshotProvider {
@@ -153,7 +163,18 @@ class KtorServerRuntimeFactoryTest {
             ),
             browserSessionCoordinator = browserSessions,
             textTransferCoordinator = textTransfers,
-            textSessionEventHub = textEventHub,
+            sessionEventDispatcher = eventDispatcher,
+            fileTransferCoordinator = fileTransfers,
+            uploadTargetFactory = FileUploadTargetFactory { _, _ -> error("not used") },
+            downloadSourceFactory = FileDownloadSourceFactory { error("not used") },
+            fileSourceRegistry = FileSourceRegistry(),
+            completedFileRegistry = CompletedFileRegistry(),
+            fileSessionEventBridge = FileSessionEventBridge(
+                scope = scope,
+                coordinator = fileTransfers,
+                dispatcher = eventDispatcher,
+                wallClockMs = { 1_000_000 },
+            ),
             monotonicClock = MonotonicClock { 1_000 },
         )
     }

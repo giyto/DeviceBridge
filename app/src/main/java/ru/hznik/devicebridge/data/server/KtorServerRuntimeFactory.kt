@@ -12,15 +12,23 @@ import ru.hznik.devicebridge.data.network.LanEndpointResolver
 import ru.hznik.devicebridge.data.network.LanNetworkSnapshotProvider
 import ru.hznik.devicebridge.domain.model.ServerEndpoint
 import ru.hznik.devicebridge.data.session.BrowserSessionCoordinator
+import ru.hznik.devicebridge.data.session.SessionEventDispatcher
 import ru.hznik.devicebridge.data.session.SessionGenerationHandle
-import ru.hznik.devicebridge.data.text.TextSessionEventHub
 import ru.hznik.devicebridge.data.text.TextTransferCoordinator
+import ru.hznik.devicebridge.data.file.FileTransferCoordinator
+import ru.hznik.devicebridge.data.file.FileUploadTargetFactory
+import ru.hznik.devicebridge.data.file.FileDownloadSourceFactory
+import ru.hznik.devicebridge.data.file.FileSourceRegistry
+import ru.hznik.devicebridge.data.file.CompletedFileRegistry
+import ru.hznik.devicebridge.data.file.FileDestinationLeaseRegistry
 import ru.hznik.devicebridge.domain.session.ServerGenerationId
 import ru.hznik.devicebridge.web.WebAssetProvider
 import ru.hznik.devicebridge.web.installSessionRoutes
 import ru.hznik.devicebridge.web.installTextRoutes
 import ru.hznik.devicebridge.web.RemoteClientAddress
 import ru.hznik.devicebridge.web.installWebRoutes
+import ru.hznik.devicebridge.web.installFileRoutes
+import ru.hznik.devicebridge.web.FileSessionEventBridge
 
 @Singleton
 class KtorServerRuntimeFactory @Inject constructor(
@@ -29,7 +37,14 @@ class KtorServerRuntimeFactory @Inject constructor(
     private val webAssetProvider: WebAssetProvider,
     private val browserSessionCoordinator: BrowserSessionCoordinator,
     private val textTransferCoordinator: TextTransferCoordinator,
-    private val textSessionEventHub: TextSessionEventHub,
+    private val sessionEventDispatcher: SessionEventDispatcher,
+    private val fileTransferCoordinator: FileTransferCoordinator,
+    private val uploadTargetFactory: FileUploadTargetFactory,
+    private val downloadSourceFactory: FileDownloadSourceFactory,
+    private val fileSourceRegistry: FileSourceRegistry,
+    private val completedFileRegistry: CompletedFileRegistry,
+    private val destinationLeaseRegistry: FileDestinationLeaseRegistry = FileDestinationLeaseRegistry(),
+    @Suppress("unused") private val fileSessionEventBridge: FileSessionEventBridge,
     private val monotonicClock: MonotonicClock,
 ) : ServerRuntimeFactory {
 
@@ -39,7 +54,13 @@ class KtorServerRuntimeFactory @Inject constructor(
         webAssetProvider = webAssetProvider,
         browserSessionCoordinator = browserSessionCoordinator,
         textTransferCoordinator = textTransferCoordinator,
-        textSessionEventHub = textSessionEventHub,
+        sessionEventDispatcher = sessionEventDispatcher,
+        fileTransferCoordinator = fileTransferCoordinator,
+        uploadTargetFactory = uploadTargetFactory,
+        downloadSourceFactory = downloadSourceFactory,
+        fileSourceRegistry = fileSourceRegistry,
+        completedFileRegistry = completedFileRegistry,
+        destinationLeaseRegistry = destinationLeaseRegistry,
         monotonicClock = monotonicClock,
     )
 }
@@ -50,7 +71,13 @@ private class KtorServerRuntime(
     private val webAssetProvider: WebAssetProvider,
     private val browserSessionCoordinator: BrowserSessionCoordinator,
     private val textTransferCoordinator: TextTransferCoordinator,
-    private val textSessionEventHub: TextSessionEventHub,
+    private val sessionEventDispatcher: SessionEventDispatcher,
+    private val fileTransferCoordinator: FileTransferCoordinator,
+    private val uploadTargetFactory: FileUploadTargetFactory,
+    private val downloadSourceFactory: FileDownloadSourceFactory,
+    private val fileSourceRegistry: FileSourceRegistry,
+    private val completedFileRegistry: CompletedFileRegistry,
+    private val destinationLeaseRegistry: FileDestinationLeaseRegistry,
     private val monotonicClock: MonotonicClock,
 ) : ServerRuntime {
 
@@ -90,7 +117,8 @@ private class KtorServerRuntime(
                     monotonicClockMs = monotonicClock::nowMs,
                     wallClockMs = System::currentTimeMillis,
                     textCoordinator = textTransferCoordinator,
-                    textEventHub = textSessionEventHub,
+                    eventDispatcher = sessionEventDispatcher,
+                    fileCoordinator = fileTransferCoordinator,
                 )
                 installTextRoutes(
                     sessionCoordinator = browserSessionCoordinator,
@@ -98,6 +126,15 @@ private class KtorServerRuntime(
                     generationHandle = { sessionHandle.get() },
                     allowedHosts = { allowedAuthorities.get() },
                     wallClockMs = System::currentTimeMillis,
+                )
+                installFileRoutes(
+                    sessionCoordinator = browserSessionCoordinator,
+                    fileCoordinator = fileTransferCoordinator,
+                    generationHandle = { sessionHandle.get() },
+                    allowedHosts = { allowedAuthorities.get() },
+                    wallClockMs = System::currentTimeMillis,
+                    uploadTargetFactory = uploadTargetFactory,
+                    downloadSourceFactory = downloadSourceFactory,
                 )
             },
         )
@@ -133,13 +170,18 @@ private class KtorServerRuntime(
         val generationId = ServerGenerationId(generation)
         val handle = browserSessionCoordinator.activate(generationId)
         textTransferCoordinator.activate(generationId)
+        fileTransferCoordinator.activate(generationId)
         sessionHandle.set(handle)
     }
 
     override suspend fun closeSessionGeneration() {
         val handle = sessionHandle.getAndSet(null) ?: return
+        fileTransferCoordinator.close(handle.generationId)
         textTransferCoordinator.close(handle.generationId)
         browserSessionCoordinator.closeGeneration(handle)
+        fileSourceRegistry.clear()
+        completedFileRegistry.clear()
+        destinationLeaseRegistry.releaseAll()
     }
 
     override suspend fun stop() {

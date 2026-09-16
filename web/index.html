@@ -163,13 +163,49 @@
             ></ol>
           </div>
 
-          <div class="file-unavailable" role="note">
-            <div>
-              <strong>Передача файлов — следующий этап</strong>
-              <p>На этом этапе доступен только текст и безопасные HTTP(S)-ссылки.</p>
+          <section
+            class="file-transfer"
+            data-role="file-transfer"
+            aria-labelledby="file-transfer-title"
+            hidden
+          >
+            <div class="file-transfer__heading">
+              <div>
+                <p class="stage-card__step">Потоковая передача</p>
+                <h2 id="file-transfer-title">Файлы между телефоном и браузером</h2>
+              </div>
+              <span class="text-transfer__privacy">До 1 ГиБ на файл</span>
             </div>
-            <button type="button" data-action="send-file" disabled>Отправить файл</button>
-          </div>
+
+            <label class="file-drop-zone" data-role="file-drop-zone" for="file-input" tabindex="0">
+              <strong>Выберите файлы или перетащите их сюда</strong>
+              <span>Передача начнётся только после подтверждения.</span>
+            </label>
+            <input id="file-input" type="file" multiple hidden />
+
+            <ul class="file-selection" data-role="file-selection" aria-label="Выбранные файлы"></ul>
+            <p class="text-form__error" data-role="file-error" role="alert" hidden></p>
+            <button class="primary-button" data-action="confirm-files" type="button" disabled>
+              Подтвердить отправку
+            </button>
+
+            <div class="file-transfer-panel">
+              <div class="text-feed-panel__heading">
+                <h3>Передачи этой сессии</h3>
+                <span data-role="file-transfer-count">0</span>
+              </div>
+              <p data-role="file-transfer-empty">
+                Здесь появятся входящие и исходящие файлы.
+              </p>
+              <ol
+                class="file-transfer-list"
+                data-role="file-transfer-list"
+                aria-label="Файловые передачи текущей сессии"
+              ></ol>
+            </div>
+            <input id="file-verification-input" type="file" hidden />
+            <p class="visually-hidden" data-role="file-announcer" aria-live="polite"></p>
+          </section>
         </section>
       </section>
     </main>

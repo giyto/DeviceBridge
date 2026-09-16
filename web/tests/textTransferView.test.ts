@@ -12,7 +12,7 @@ beforeEach(() => {
 });
 
 describe("createTextTransferView", () => {
-  it("shows an accessible form only for an active session and keeps files disabled", () => {
+  it("shows an accessible text form only for an active session without controlling file state", () => {
     const actions = createActions();
     const view = createTextTransferView(document, actions);
     const section = document.querySelector<HTMLElement>('[data-role="text-transfer"]')!;
@@ -27,8 +27,8 @@ describe("createTextTransferView", () => {
     expect(document.querySelector('[data-role="text-feed"]')?.getAttribute("aria-live")).toBe(
       "polite",
     );
-    expect(document.querySelector<HTMLButtonElement>('[data-action="send-file"]')?.disabled)
-      .toBe(true);
+    expect(document.querySelector<HTMLElement>('[data-role="file-transfer"]')?.hidden).toBe(true);
+    expect(document.querySelector('[data-action="send-file"]')).toBeNull();
   });
 
   it("supports keyboard form flow and renders sender, time, direction and status", () => {

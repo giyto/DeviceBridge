@@ -13,9 +13,13 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.runBlocking
 import ru.hznik.devicebridge.data.server.MonotonicClock
+import ru.hznik.devicebridge.data.file.FileTransferCoordinator
+import ru.hznik.devicebridge.data.file.FileUploadTargetFactory
+import ru.hznik.devicebridge.data.file.DownloadGrantRegistry
+import ru.hznik.devicebridge.data.file.FileDownloadSourceFactory
 import ru.hznik.devicebridge.data.session.BrowserSessionCoordinator
+import ru.hznik.devicebridge.data.session.SessionEventDispatcher
 import ru.hznik.devicebridge.data.session.SessionGenerationHandle
-import ru.hznik.devicebridge.data.text.TextSessionEventHub
 import ru.hznik.devicebridge.data.text.TextTransferCoordinator
 import ru.hznik.devicebridge.data.session.security.CryptographicRandom
 import ru.hznik.devicebridge.data.session.security.SessionSecretGenerator
@@ -28,9 +32,13 @@ internal class SessionRouteTestServer(
     maxChallenges: Int = 64,
     confirmWaitTimeoutMs: Long = 60_000,
     webSocketAuthTimeoutMs: Long = 5_000,
+    uploadTargetFactory: FileUploadTargetFactory? = null,
+    downloadSourceFactory: FileDownloadSourceFactory? = null,
+    enableFileEvents: Boolean = false,
 ) : AutoCloseable {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val clock = FixedClock(1_000)
+    private var grantNowEpochMillis = 1_000_000L
     val coordinator = BrowserSessionCoordinator(
         clock = clock,
         secretGenerator = SessionSecretGenerator(DeterministicRandom()),
@@ -41,13 +49,31 @@ internal class SessionRouteTestServer(
     val handle: SessionGenerationHandle = runBlocking {
         coordinator.activate(ServerGenerationId(1))
     }
-    val textEventHub = TextSessionEventHub()
+    val eventDispatcher = SessionEventDispatcher(scope = scope)
+    val fileCoordinator = FileTransferCoordinator(
+        browserSessionState = { coordinator.state.value },
+        downloadGrantRegistry = DownloadGrantRegistry(
+            nowEpochMillis = { grantNowEpochMillis },
+        ),
+    ).also { files ->
+        runBlocking { files.activate(handle.generationId) }
+    }
     val textCoordinator = TextTransferCoordinator(
         nowEpochMillis = { 1_000_000 },
         browserSessionState = { coordinator.state.value },
-        eventGateway = textEventHub,
+        eventGateway = eventDispatcher,
     ).also { text ->
         runBlocking { text.activate(handle.generationId) }
+    }
+    private val fileEventBridge = if (enableFileEvents) {
+        FileSessionEventBridge(
+            scope = scope,
+            coordinator = fileCoordinator,
+            dispatcher = eventDispatcher,
+            wallClockMs = { 1_000_000 },
+        )
+    } else {
+        null
     }
     val port: Int = ServerSocket(0).use { it.localPort }
     val authority: String = "127.0.0.1:$port"
@@ -65,7 +91,8 @@ internal class SessionRouteTestServer(
                 wallClockMs = { 1_000_000 },
                 webSocketAuthTimeoutMs = webSocketAuthTimeoutMs,
                 textCoordinator = textCoordinator,
-                textEventHub = textEventHub,
+                eventDispatcher = eventDispatcher,
+                fileCoordinator = fileCoordinator.takeIf { enableFileEvents },
             )
             installTextRoutes(
                 sessionCoordinator = coordinator,
@@ -73,6 +100,15 @@ internal class SessionRouteTestServer(
                 generationHandle = { handle },
                 allowedHosts = { setOf(authority) },
                 wallClockMs = { 1_000_000 },
+            )
+            installFileRoutes(
+                sessionCoordinator = coordinator,
+                fileCoordinator = fileCoordinator,
+                generationHandle = { handle },
+                allowedHosts = { setOf(authority) },
+                wallClockMs = { 1_000_000 },
+                uploadTargetFactory = uploadTargetFactory,
+                downloadSourceFactory = downloadSourceFactory,
             )
         },
     ).also { it.start(wait = false) }
@@ -111,8 +147,25 @@ internal class SessionRouteTestServer(
         return client.sendAsync(builder.build(), HttpResponse.BodyHandlers.ofString())
     }
 
+    fun requestBytes(
+        method: String,
+        path: String,
+        body: ByteArray,
+        headers: Map<String, String> = emptyMap(),
+    ): HttpResponse<String> {
+        val builder = HttpRequest.newBuilder().uri(URI("http://127.0.0.1:$port$path"))
+        headers.forEach(builder::header)
+        if (method == "POST") builder.POST(HttpRequest.BodyPublishers.ofByteArray(body))
+        else error("Unsupported byte request method: $method")
+        return client.send(builder.build(), HttpResponse.BodyHandlers.ofString())
+    }
+
     fun advanceClockTo(value: Long) {
         clock.value = value
+    }
+
+    fun advanceGrantClockTo(value: Long) {
+        grantNowEpochMillis = value
     }
 
     fun pairBrowser(label: String): SessionConfirmResponse {
@@ -147,7 +200,15 @@ internal class SessionRouteTestServer(
             "Content-Type" to "application/json",
         ) + extra
 
+    fun sameOriginBinaryHeaders(extra: Map<String, String> = emptyMap()): Map<String, String> =
+        mapOf(
+            "Origin" to "http://$authority",
+            "Content-Type" to "application/octet-stream",
+        ) + extra
+
     override fun close() {
+        fileEventBridge?.close()
+        runBlocking { fileCoordinator.close(handle.generationId) }
         runBlocking { textCoordinator.close(handle.generationId) }
         runBlocking { coordinator.closeGeneration(handle) }
         engine.stop(gracePeriodMillis = 0, timeoutMillis = 2_000)
@@ -170,9 +231,15 @@ internal inline fun <T> withSessionRouteServer(
     maxChallenges: Int = 64,
     confirmWaitTimeoutMs: Long = 60_000,
     webSocketAuthTimeoutMs: Long = 5_000,
+    uploadTargetFactory: FileUploadTargetFactory? = null,
+    downloadSourceFactory: FileDownloadSourceFactory? = null,
+    enableFileEvents: Boolean = false,
     block: (SessionRouteTestServer) -> T,
 ): T = SessionRouteTestServer(
     maxChallenges,
     confirmWaitTimeoutMs,
     webSocketAuthTimeoutMs,
+    uploadTargetFactory,
+    downloadSourceFactory,
+    enableFileEvents,
 ).use(block)

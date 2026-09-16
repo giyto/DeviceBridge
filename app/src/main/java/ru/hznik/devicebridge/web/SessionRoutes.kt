@@ -28,6 +28,10 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withTimeoutOrNull
 import ru.hznik.devicebridge.core.protocol.session.MAX_SESSION_JSON_BYTES
+import ru.hznik.devicebridge.core.protocol.file.FILE_PROTOCOL_VERSION
+import ru.hznik.devicebridge.core.protocol.file.FILE_SNAPSHOT_TYPE
+import ru.hznik.devicebridge.core.protocol.file.FileProtocolJson
+import ru.hznik.devicebridge.core.protocol.file.FileSnapshotEvent
 import ru.hznik.devicebridge.core.protocol.session.SESSION_PROTOCOL_VERSION
 import ru.hznik.devicebridge.core.protocol.session.SessionChallengeRequest
 import ru.hznik.devicebridge.core.protocol.session.SessionChallengeResponse
@@ -59,12 +63,14 @@ import ru.hznik.devicebridge.core.protocol.text.TextReceivedEvent
 import ru.hznik.devicebridge.core.protocol.text.TextSnapshotEvent
 import ru.hznik.devicebridge.core.protocol.text.TextSnapshotItem
 import ru.hznik.devicebridge.data.session.BrowserSessionCoordinator
+import ru.hznik.devicebridge.data.file.FileTransferCoordinator
 import ru.hznik.devicebridge.data.session.ChallengeCreationResult
+import ru.hznik.devicebridge.data.session.SessionEventConnection
+import ru.hznik.devicebridge.data.session.SessionEventDispatcher
 import ru.hznik.devicebridge.data.session.SessionGenerationHandle
 import ru.hznik.devicebridge.data.session.SessionConfirmationResult
 import ru.hznik.devicebridge.data.session.SessionConnection
-import ru.hznik.devicebridge.data.text.TextSessionEventConnection
-import ru.hznik.devicebridge.data.text.TextSessionEventHub
+import ru.hznik.devicebridge.data.session.SessionOutboundEvent
 import ru.hznik.devicebridge.data.text.TextTransferCoordinator
 import ru.hznik.devicebridge.domain.session.PairingChallengeId
 import ru.hznik.devicebridge.domain.session.BrowserSession
@@ -81,7 +87,8 @@ fun Application.installSessionRoutes(
     wallClockMs: () -> Long,
     webSocketAuthTimeoutMs: Long = 5_000,
     textCoordinator: TextTransferCoordinator? = null,
-    textEventHub: TextSessionEventHub? = null,
+    eventDispatcher: SessionEventDispatcher? = null,
+    fileCoordinator: FileTransferCoordinator? = null,
 ) {
     require(webSocketAuthTimeoutMs > 0)
     install(WebSockets) {
@@ -333,6 +340,10 @@ fun Application.installSessionRoutes(
                 generationHandle,
                 allowedHosts,
             ) ?: return@delete
+            fileCoordinator?.onSessionRevoked(
+                authorized.handle.generationId,
+                authorized.session.id,
+            )
             coordinator.revoke(authorized.session.id)
             call.respond(HttpStatusCode.NoContent)
         }
@@ -386,12 +397,17 @@ fun Application.installSessionRoutes(
             suspend fun sendSerialized(payload: String) {
                 sendMutex.withLock { send(Frame.Text(payload)) }
             }
-            val textConnection = TextSessionEventConnection { item ->
-                runCatching {
-                    sendSerialized(TextProtocolJson.encode(item.toReceivedEvent()))
-                }.isSuccess
+            val eventConnection = SessionEventConnection { event ->
+                val payload = when (event) {
+                    is SessionOutboundEvent.Text ->
+                        TextProtocolJson.encode(event.item.toReceivedEvent())
+                    is SessionOutboundEvent.Control -> event.payload
+                    is SessionOutboundEvent.FileProgress -> event.payload
+                    is SessionOutboundEvent.FileTerminal -> event.payload
+                }
+                runCatching { sendSerialized(payload) }.isSuccess
             }
-            var textConnectionAttached = false
+            var eventConnectionAttached = false
             try {
                 sendSerialized(
                     SessionProtocolJson.encode(
@@ -403,7 +419,7 @@ fun Application.installSessionRoutes(
                         ),
                     ),
                 )
-                if (textCoordinator != null && textEventHub != null) {
+                if (textCoordinator != null) {
                     val snapshot = textCoordinator.snapshotFor(handle.generationId, session.id)
                     sendSerialized(
                         TextProtocolJson.encode(
@@ -416,8 +432,27 @@ fun Application.installSessionRoutes(
                             ),
                         ),
                     )
-                    textEventHub.attach(session.id, textConnection)
-                    textConnectionAttached = true
+                }
+                if (fileCoordinator != null) {
+                    val fileSnapshot = fileCoordinator.snapshotFor(
+                        handle.generationId,
+                        session.id,
+                    )
+                    sendSerialized(
+                        FileProtocolJson.encode(
+                            FileSnapshotEvent(
+                                protocolVersion = FILE_PROTOCOL_VERSION,
+                                messageId = "server-file-snapshot-${wallClockMs()}",
+                                type = FILE_SNAPSHOT_TYPE,
+                                timestamp = wallClockMs(),
+                                items = fileSnapshot.items.map { it.toSnapshotItem() },
+                            ),
+                        ),
+                    )
+                }
+                if (eventDispatcher != null) {
+                    eventDispatcher.attach(session.id, eventConnection)
+                    eventConnectionAttached = true
                 }
                 for (frame in incoming) {
                     if (frame !is Frame.Text) continue
@@ -461,11 +496,12 @@ fun Application.installSessionRoutes(
                 }
             } finally {
                 if (
-                    textConnectionAttached &&
-                    textEventHub?.detach(session.id, textConnection) == true
+                    eventConnectionAttached &&
+                    eventDispatcher?.detach(session.id, eventConnection) == true
                 ) {
                     textCoordinator?.onConnectionLost(session.id)
                 }
+                fileCoordinator?.onSessionDisconnected(handle.generationId, session.id)
                 coordinator.detachConnection(session.id, connection)
             }
         }

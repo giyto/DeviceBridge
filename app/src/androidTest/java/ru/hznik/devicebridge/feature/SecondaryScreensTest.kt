@@ -61,7 +61,7 @@ class SecondaryScreensTest {
         composeRule.setContent {
             DeviceBridgeTheme {
                 DeviceBridgeApp(
-                    homeContent = { HomeScreen(ServerSessionUiState()) },
+                    homeContent = { _, _ -> HomeScreen(ServerSessionUiState()) },
                 )
             }
         }

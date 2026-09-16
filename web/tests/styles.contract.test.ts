@@ -32,12 +32,15 @@ describe("responsive style contract", () => {
     expect(css).toContain("@media (prefers-reduced-motion: reduce)");
   });
 
-  it("keeps the text form and feed inside viewports from 360 to 1920 pixels", () => {
+  it("keeps text and file actions inside viewports from 360 to 1920 pixels", () => {
     const css = readFileSync(stylesPath, "utf8");
 
     expect(css).toContain("@media (max-width: 30rem)");
     expect(css).toMatch(/\.text-transfer\s*\{[^}]*min-width:\s*0/s);
     expect(css).toMatch(/\.text-card\s*\{[^}]*min-width:\s*0/s);
+    expect(css).toMatch(/\.file-transfer\s*\{[^}]*min-width:\s*0/s);
+    expect(css).toMatch(/\.file-card\s*\{[^}]*min-width:\s*0/s);
+    expect(css).toMatch(/\.file-card__actions\s*\{[^}]*flex-wrap:\s*wrap/s);
     expect(css).toContain("overflow-x: hidden");
     expect(css).not.toMatch(/(?:min-)?width:\s*(?:360|1920)px/);
     expect(css).not.toContain("100vw");

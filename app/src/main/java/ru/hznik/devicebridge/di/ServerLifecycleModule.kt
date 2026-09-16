@@ -21,12 +21,23 @@ import ru.hznik.devicebridge.feature.home.HomeUptimeTicker
 import ru.hznik.devicebridge.server.AndroidServerNotificationController
 import ru.hznik.devicebridge.server.ServerNotificationController
 import ru.hznik.devicebridge.data.session.BrowserSessionCoordinator
+import ru.hznik.devicebridge.data.session.SessionEventDispatcher
 import ru.hznik.devicebridge.data.session.security.JavaCryptographicRandom
 import ru.hznik.devicebridge.data.session.security.SessionSecretGenerator
 import ru.hznik.devicebridge.domain.repository.BrowserSessionRepository
 import ru.hznik.devicebridge.domain.repository.TextTransferRepository
-import ru.hznik.devicebridge.data.text.TextSessionEventHub
 import ru.hznik.devicebridge.data.text.TextTransferCoordinator
+import ru.hznik.devicebridge.domain.repository.FileTransferRepository
+import ru.hznik.devicebridge.data.file.FileTransferCoordinator
+import ru.hznik.devicebridge.data.file.FileUploadTargetFactory
+import ru.hznik.devicebridge.data.file.AndroidFileUploadTargetFactory
+import ru.hznik.devicebridge.data.file.FileDownloadSourceFactory
+import ru.hznik.devicebridge.data.file.AndroidFileDownloadSourceFactory
+import ru.hznik.devicebridge.data.file.AndroidFileTransferWifiLock
+import ru.hznik.devicebridge.data.file.FileTransferWifiLock
+import ru.hznik.devicebridge.data.file.FileDestinationLeaseRegistry
+import ru.hznik.devicebridge.data.file.FileSourceRegistry
+import ru.hznik.devicebridge.web.FileSessionEventBridge
 import kotlinx.coroutines.CoroutineScope
 import ru.hznik.devicebridge.domain.usecase.ObserveTextTransfersUseCase
 import ru.hznik.devicebridge.domain.usecase.ReceiveTextFromBrowserUseCase
@@ -66,6 +77,12 @@ abstract class ServerLifecycleModule {
         implementation: DefaultHomeUptimeTicker,
     ): HomeUptimeTicker
 
+    @Binds
+    @Singleton
+    abstract fun bindFileTransferWifiLock(
+        implementation: AndroidFileTransferWifiLock,
+    ): FileTransferWifiLock
+
     companion object {
         @Provides
         @Singleton
@@ -90,17 +107,19 @@ abstract class ServerLifecycleModule {
 
         @Provides
         @Singleton
-        fun provideTextSessionEventHub(): TextSessionEventHub = TextSessionEventHub()
+        fun provideSessionEventDispatcher(
+            @ApplicationScope applicationScope: CoroutineScope,
+        ): SessionEventDispatcher = SessionEventDispatcher(scope = applicationScope)
 
         @Provides
         @Singleton
         fun provideTextTransferCoordinator(
             browserSessions: BrowserSessionCoordinator,
-            eventHub: TextSessionEventHub,
+            eventDispatcher: SessionEventDispatcher,
         ): TextTransferCoordinator = TextTransferCoordinator(
             nowEpochMillis = System::currentTimeMillis,
             browserSessionState = { browserSessions.state.value },
-            eventGateway = eventHub,
+            eventGateway = eventDispatcher,
         )
 
         @Provides
@@ -108,6 +127,77 @@ abstract class ServerLifecycleModule {
         fun provideTextTransferRepository(
             coordinator: TextTransferCoordinator,
         ): TextTransferRepository = coordinator
+
+        @Provides
+        @Singleton
+        fun provideFileTransferCoordinator(
+            browserSessions: BrowserSessionCoordinator,
+            wifiLock: FileTransferWifiLock,
+        ): FileTransferCoordinator = FileTransferCoordinator(
+            browserSessionState = { browserSessions.state.value },
+            wifiLock = wifiLock,
+        )
+
+        @Provides
+        @Singleton
+        fun provideFileTransferRepository(
+            coordinator: FileTransferCoordinator,
+        ): FileTransferRepository = coordinator
+
+        @Provides
+        @Singleton
+        fun provideFileUploadTargetFactory(
+            factory: AndroidFileUploadTargetFactory,
+        ): FileUploadTargetFactory = factory
+
+        @Provides
+        @Singleton
+        fun provideFileDownloadSourceFactory(
+            factory: AndroidFileDownloadSourceFactory,
+        ): FileDownloadSourceFactory = factory
+
+        @Provides
+        @Singleton
+        fun provideFileSessionEventBridge(
+            @ApplicationScope applicationScope: CoroutineScope,
+            coordinator: FileTransferCoordinator,
+            dispatcher: SessionEventDispatcher,
+            browserSessions: BrowserSessionCoordinator,
+            destinationLeases: FileDestinationLeaseRegistry,
+            fileSourceRegistry: FileSourceRegistry,
+        ): FileSessionEventBridge = FileSessionEventBridge(
+            scope = applicationScope,
+            coordinator = coordinator,
+            dispatcher = dispatcher,
+            wallClockMs = System::currentTimeMillis,
+            browserSessionState = browserSessions.state,
+            destinationLeases = destinationLeases,
+            sourceRegistry = fileSourceRegistry,
+        )
+
+        @Provides
+        fun provideObserveFileTransfersUseCase(repository: FileTransferRepository) =
+            ru.hznik.devicebridge.domain.usecase.ObserveFileTransfersUseCase(repository)
+
+        @Provides
+        fun provideCreateFileTransfersUseCase(repository: FileTransferRepository) =
+            ru.hznik.devicebridge.domain.usecase.CreateFileTransfersUseCase(repository)
+
+        @Provides
+        fun provideApproveFileTransferUseCase(repository: FileTransferRepository) =
+            ru.hznik.devicebridge.domain.usecase.ApproveFileTransferUseCase(repository)
+
+        @Provides
+        fun provideCancelFileTransferUseCase(repository: FileTransferRepository) =
+            ru.hznik.devicebridge.domain.usecase.CancelFileTransferUseCase(repository)
+
+        @Provides
+        fun provideRetryFileTransferUseCase(repository: FileTransferRepository) =
+            ru.hznik.devicebridge.domain.usecase.RetryFileTransferUseCase(repository)
+
+        @Provides
+        fun provideVerifyFileTransferUseCase(repository: FileTransferRepository) =
+            ru.hznik.devicebridge.domain.usecase.VerifyFileTransferUseCase(repository)
 
         @Provides
         fun provideObserveTextTransfersUseCase(

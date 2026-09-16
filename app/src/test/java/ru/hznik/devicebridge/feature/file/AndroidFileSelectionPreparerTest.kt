@@ -1,0 +1,127 @@
+package ru.hznik.devicebridge.feature.file
+
+import java.io.ByteArrayInputStream
+import java.nio.file.Files
+import kotlinx.coroutines.test.runTest
+import org.junit.Assert.assertArrayEquals
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
+import org.junit.Test
+import ru.hznik.devicebridge.data.file.AndroidChunkedFileCopier
+import ru.hznik.devicebridge.data.file.AndroidDocumentMetadata
+import ru.hznik.devicebridge.data.file.AndroidFileSourcePickerGateway
+import ru.hznik.devicebridge.data.file.FileSourceRegistry
+
+class AndroidFileSelectionPreparerTest {
+
+    @Test
+    fun temporaryShareIsStreamedIntoPrivateStageAndRegisteredWithoutSourceUri() = runTest {
+        val fixture = Fixture(bytes = "shared payload".encodeToByteArray())
+        try {
+            val result = fixture.preparer().prepare(
+                uris = listOf(fixture.uri),
+                stageTemporarySources = true,
+            )
+
+            assertEquals(0, result.rejectedCount)
+            val item = result.items.single()
+            val staged = fixture.registry.stagedFile(item.transferId)!!
+            assertNull(fixture.registry.sourceUri(item.transferId))
+            assertTrue(staged.canonicalPath.startsWith(fixture.directory.canonicalPath))
+            assertArrayEquals(fixture.bytes, staged.readBytes())
+        } finally {
+            fixture.close()
+        }
+    }
+
+    @Test
+    fun regularPickerKeepsScopedContentUriWithoutCreatingStage() = runTest {
+        val fixture = Fixture(bytes = byteArrayOf(1, 2, 3))
+        try {
+            val result = fixture.preparer().prepare(listOf(fixture.uri))
+
+            val item = result.items.single()
+            assertEquals(fixture.uri, fixture.registry.sourceUri(item.transferId))
+            assertNull(fixture.registry.stagedFile(item.transferId))
+            assertTrue(fixture.directory.listFiles().orEmpty().isEmpty())
+        } finally {
+            fixture.close()
+        }
+    }
+
+    @Test
+    fun temporaryShareIsRejectedBeforeReadWhenStageHasInsufficientSpace() = runTest {
+        val fixture = Fixture(bytes = byteArrayOf(1, 2, 3), availableBytes = 2)
+        try {
+            val result = fixture.preparer().prepare(
+                uris = listOf(fixture.uri),
+                stageTemporarySources = true,
+            )
+
+            assertEquals(1, result.rejectedCount)
+            assertTrue(result.items.isEmpty())
+            assertFalse(fixture.wasOpened)
+            assertTrue(fixture.directory.listFiles().orEmpty().isEmpty())
+        } finally {
+            fixture.close()
+        }
+    }
+
+    @Test
+    fun permissionLossOrSizeMismatchLeavesNoTemporaryPayload() = runTest {
+        val permissionLoss = Fixture(bytes = byteArrayOf(1), openAllowed = false)
+        val sizeMismatch = Fixture(bytes = byteArrayOf(1), declaredSize = 2)
+        try {
+            val lost = permissionLoss.preparer().prepare(
+                listOf(permissionLoss.uri),
+                stageTemporarySources = true,
+            )
+            val mismatched = sizeMismatch.preparer().prepare(
+                listOf(sizeMismatch.uri),
+                stageTemporarySources = true,
+            )
+
+            assertEquals(1, lost.rejectedCount)
+            assertEquals(1, mismatched.rejectedCount)
+            assertTrue(permissionLoss.directory.listFiles().orEmpty().isEmpty())
+            assertTrue(sizeMismatch.directory.listFiles().orEmpty().isEmpty())
+        } finally {
+            permissionLoss.close()
+            sizeMismatch.close()
+        }
+    }
+
+    private class Fixture(
+        val bytes: ByteArray,
+        private val declaredSize: Long = bytes.size.toLong(),
+        private val availableBytes: Long = Long.MAX_VALUE,
+        private val openAllowed: Boolean = true,
+    ) {
+        val uri = "content://fixture/shared"
+        val directory = Files.createTempDirectory("devicebridge-selection-stage").toFile()
+        val registry = FileSourceRegistry()
+        var wasOpened = false
+            private set
+
+        fun preparer() = AndroidFileSelectionPreparer(
+            pickerGateway = AndroidFileSourcePickerGateway {
+                AndroidDocumentMetadata("shared.bin", declaredSize, "application/octet-stream")
+            },
+            copier = AndroidChunkedFileCopier(),
+            sourceRegistry = registry,
+            stagingDirectory = directory,
+            openInputStream = {
+                wasOpened = true
+                if (openAllowed) ByteArrayInputStream(bytes) else null
+            },
+            availableBytes = { availableBytes },
+        )
+
+        fun close() {
+            registry.clear()
+            directory.deleteRecursively()
+        }
+    }
+}
