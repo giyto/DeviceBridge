@@ -8,6 +8,7 @@ import { TextTransferController } from "./textTransferController";
 import { createTextTransferView } from "./textTransferView";
 import { WebManifestClient } from "./webManifestClient";
 import { createBrowserLabel } from "./browserIdentity";
+import { createProtocolMessageId } from "./protocolMessageId";
 
 let controller: SessionController;
 let textController: TextTransferController;
@@ -24,7 +25,7 @@ const textView = createTextTransferView(document, {
 textController = new TextTransferController(
   new TextApiClient(),
   (state) => textView.render(state),
-  () => crypto.randomUUID(),
+  createProtocolMessageId,
   () => Date.now(),
   () => controller.handleTextUnauthorized(),
 );
