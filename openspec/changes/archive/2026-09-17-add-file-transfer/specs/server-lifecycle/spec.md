@@ -61,7 +61,7 @@ DeviceBridge MUST удерживать Wi-Fi lock только пока хотя
 
 ### Requirement: Production server не раскрывает debug diagnostics и будущие API
 
-Production lifecycle MUST раздавать встроенные web assets без внешнего backend и MUST публиковать только завершённые маршруты текущего этапа: public web manifest и pairing entry points, защищённые session/status/text/file control routes, авторизованный events WebSocket, scoped upload/download streams и cancellation. Production server MUST NOT публиковать diagnostics, trusted-browser credentials, history/settings APIs или другие незавершённые routes.
+Production lifecycle MUST раздавать встроенные web assets без внешнего backend и MUST публиковать только завершённые маршруты текущего этапа: public web manifest и pairing entry points, защищённые session/status/text/file control routes, авторизованный events WebSocket, scoped upload/download streams, cancellation и explicit retry. Production server MUST NOT публиковать diagnostics, trusted-browser credentials, history/settings APIs или другие незавершённые routes.
 
 #### Scenario: Browser открывает production endpoint
 
@@ -83,7 +83,7 @@ Production lifecycle MUST раздавать встроенные web assets б�
 
 #### Scenario: Авторизованный file route доступен
 
-- **WHEN** действующая session создаёт допустимый file offer, upload, download grant или cancellation
+- **WHEN** действующая session создаёт допустимый file offer, upload, download grant, cancellation или explicit retry
 - **THEN** server обрабатывает запрос по file protocol и ownership rules
 - **AND** возвращает определённое state без публикации filesystem path
 

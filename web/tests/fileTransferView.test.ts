@@ -63,7 +63,7 @@ describe("createFileTransferView", () => {
     expect(actions.onCancel).toHaveBeenCalledWith("file-1");
   });
 
-  it("exposes download, verification, retry and terminal-only live announcements", () => {
+  it("exposes download and retry without asking to reselect a downloaded file", () => {
     const actions = createActions();
     const view = createFileTransferView(document, actions);
     view.render(active({ transfers: [item("CONNECTING")] }));
@@ -71,15 +71,14 @@ describe("createFileTransferView", () => {
     expect(actions.onDownload).toHaveBeenCalledWith("file-1");
 
     view.render(active({ transfers: [item("VERIFYING")] }));
-    const verify = document.querySelector<HTMLButtonElement>('[data-action="verify-file"]')!;
-    expect(document.querySelector(".file-card__verification-note")?.textContent)
-      .toContain("локальном HTTP");
-    verify.click();
-    const verificationInput = document.querySelector<HTMLInputElement>("#file-verification-input")!;
-    const selected = new File(["data"], "report.bin");
-    Object.defineProperty(verificationInput, "files", { value: [selected], configurable: true });
-    verificationInput.dispatchEvent(new Event("change", { bubbles: true }));
-    expect(actions.onVerify).toHaveBeenCalledWith("file-1", selected);
+    expect(document.querySelector('[data-action="verify-file"]')).toBeNull();
+    expect(document.querySelector(".file-card__verification-note")).toBeNull();
+    expect(document.querySelector("#file-verification-input")).toBeNull();
+
+    view.render(active({ transfers: [item("COMPLETED")] }));
+    expect(document.querySelector('[data-transfer-id="file-1"]')?.textContent)
+      .toContain("Завершено");
+    expect(document.querySelector('[data-action="cancel-file"]')).toBeNull();
 
     view.render(active({ transfers: [item("FAILED")] }));
     document.querySelector<HTMLButtonElement>('[data-action="retry-file"]')?.click();
@@ -96,7 +95,6 @@ function createActions() {
     onCancel: vi.fn(),
     onRetry: vi.fn(),
     onDownload: vi.fn(),
-    onVerify: vi.fn(),
   };
 }
 
@@ -110,7 +108,7 @@ function active(overrides: Partial<Extract<FileTransferUiState, { kind: "active"
   };
 }
 
-function item(status: "CONNECTING" | "VERIFYING" | "FAILED") {
+function item(status: "CONNECTING" | "VERIFYING" | "COMPLETED" | "FAILED") {
   return {
     id: "file-1",
     metadata: {
@@ -119,7 +117,7 @@ function item(status: "CONNECTING" | "VERIFYING" | "FAILED") {
       direction: "ANDROID_TO_BROWSER" as const,
     },
     status,
-    bytesTransferred: status === "VERIFYING" ? 4 : 0,
+    bytesTransferred: status === "VERIFYING" || status === "COMPLETED" ? 4 : 0,
     speedBytesPerSecond: 0,
   };
 }

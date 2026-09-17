@@ -7,6 +7,7 @@ import {
 import {
   FileApiError,
   HARD_MAX_FILE_BYTES,
+  type FileOfferCommand,
   type FileSnapshotEvent,
 } from "../src/fileApiClient";
 
@@ -50,7 +51,7 @@ describe("FileTransferController", () => {
     expect(lastActive(states).transfers.filter((item) => item.id === id)).toHaveLength(1);
   });
 
-  it("uses one-time native download and acknowledges verification after a match", async () => {
+  it("uses a one-time native download without asking the user to reselect the file", async () => {
     const api = fakeApi();
     const downloader = { start: vi.fn() };
     const controller = createController(
@@ -69,30 +70,6 @@ describe("FileTransferController", () => {
     expect(downloader.start).toHaveBeenCalledWith(
       "/api/v1/files/phone-file?grant=one-time", "report.bin",
     );
-
-    await controller.verifyDownloaded("phone-file", new File(["data"], "report.bin"));
-    expect(api.verify).toHaveBeenCalledOnce();
-  });
-
-  it("reports size and checksum mismatch to the server before showing failed", async () => {
-    const api = fakeApi();
-    api.verify.mockRejectedValue(new FileApiError(422, "CHECKSUM_MISMATCH"));
-    const states: unknown[] = [];
-    const controller = createController(
-      api,
-      { upload: vi.fn().mockResolvedValue(snapshot("COMPLETED")) },
-      states,
-    );
-    controller.activate("token");
-    controller.receiveOffer({
-      protocolVersion: 1, messageId: "offer-phone", type: "file.offer", timestamp: 1_000,
-      batchId: "batch-phone", items: [metadata("phone-file", "ANDROID_TO_BROWSER")],
-    });
-
-    await controller.verifyDownloaded("phone-file", new File(["bad!"], "wrong.bin"));
-
-    expect(api.verify).toHaveBeenCalledOnce();
-    expect(lastActive(states).transfers[0]?.status).toBe("FAILED");
   });
 
   it("cancels operations, aborts active work on session loss and keeps text independent", async () => {
@@ -111,6 +88,86 @@ describe("FileTransferController", () => {
     expect(api.cancel).toHaveBeenCalledWith("token", "phone-file", expect.any(AbortSignal));
     controller.deactivate();
     expect(controller.currentState()).toEqual({ kind: "inactive" });
+  });
+
+  it("retries a cancelled phone file with the same item instead of dropping it", async () => {
+    const api = fakeApi();
+    const states: unknown[] = [];
+    const controller = createController(
+      api,
+      { upload: vi.fn().mockResolvedValue(snapshot("COMPLETED")) },
+      states,
+    );
+    controller.activate("token");
+    controller.receiveOffer({
+      protocolVersion: 1, messageId: "offer-phone", type: "file.offer", timestamp: 1_000,
+      batchId: "batch-phone", items: [metadata("phone-file", "ANDROID_TO_BROWSER")],
+    });
+    await controller.cancel("phone-file");
+
+    await controller.retry("phone-file");
+
+    expect(api.retry).toHaveBeenCalledWith("token", "phone-file", expect.any(AbortSignal));
+    expect(api.offer).not.toHaveBeenCalled();
+    expect(lastActive(states).transfers).toMatchObject([
+      { id: "phone-file", status: "CONNECTING" },
+    ]);
+  });
+
+  it("retries one cancelled browser file without recreating or losing the rest of its batch", async () => {
+    const api = fakeApi();
+    const states: unknown[] = [];
+    const controller = createController(
+      api,
+      { upload: vi.fn().mockResolvedValue(snapshot("COMPLETED")) },
+      states,
+    );
+    controller.activate("token");
+    controller.selectFiles([
+      new File(["one"], "one.txt"),
+      new File(["two"], "two.txt"),
+    ]);
+    await controller.confirmSelection();
+    const offered = api.offer.mock.calls[0]![1].items;
+    const firstId = offered[0]!.transferId;
+    const secondId = offered[1]!.transferId;
+    api.cancel.mockResolvedValueOnce(snapshotItems([
+      [firstId, "CANCELLED"],
+      [secondId, "CONNECTING"],
+    ]));
+    api.retry.mockResolvedValueOnce(snapshotItems([
+      [firstId, "QUEUED"],
+      [secondId, "CONNECTING"],
+    ]));
+    await controller.cancel(firstId);
+
+    await controller.retry(firstId);
+
+    expect(api.offer).toHaveBeenCalledOnce();
+    expect(api.retry).toHaveBeenCalledWith("token", firstId, expect.any(AbortSignal));
+    expect(lastActive(states).transfers.map((item) => item.id)).toEqual([firstId, secondId]);
+    expect(lastActive(states).transfers.map((item) => item.status)).toEqual(["QUEUED", "CONNECTING"]);
+  });
+
+  it("explains when a refreshed browser upload no longer has its source File", async () => {
+    const api = fakeApi();
+    const states: unknown[] = [];
+    const controller = createController(
+      api,
+      { upload: vi.fn().mockResolvedValue(snapshot("COMPLETED")) },
+      states,
+    );
+    controller.activate("token");
+    controller.applySnapshot(snapshot("CANCELLED", "browser-file"));
+
+    await controller.retry("browser-file");
+
+    expect(api.retry).not.toHaveBeenCalled();
+    expect(lastActive(states).transfers[0]).toMatchObject({
+      id: "browser-file",
+      status: "FAILED",
+      localError: "Исходный файл больше недоступен. Выберите его заново.",
+    });
   });
 
   it("deactivates file state and reports an unauthorized API response to the session", async () => {
@@ -177,13 +234,18 @@ function createController(
 
 function fakeApi() {
   return {
-    offer: vi.fn().mockImplementation(async (_token, command) => snapshot("CONNECTING", command.items[0].transferId)),
+    offer: vi.fn().mockImplementation(async (_token: string, command: FileOfferCommand) => snapshotItems(
+      command.items.map((item, index) => [
+        item.transferId,
+        index === 0 ? "CONNECTING" : "QUEUED",
+      ] as const),
+    )),
     requestDownloadGrant: vi.fn().mockResolvedValue({
       protocolVersion: 1, messageId: "grant-1", type: "file.download_grant", timestamp: 1_000,
       transferId: "phone-file", downloadPath: "/api/v1/files/phone-file?grant=one-time", expiresAt: 31_000,
     }),
-    verify: vi.fn().mockResolvedValue(snapshot("COMPLETED", "phone-file")),
     cancel: vi.fn().mockResolvedValue(snapshot("CANCELLED", "phone-file")),
+    retry: vi.fn().mockResolvedValue(snapshot("CONNECTING", "phone-file")),
   };
 }
 
@@ -206,6 +268,20 @@ function snapshot(status: string, id = "id-1"): FileSnapshotEvent {
   };
 }
 
+function snapshotItems(
+  entries: ReadonlyArray<readonly [string, string]>,
+): FileSnapshotEvent {
+  return {
+    protocolVersion: 1, messageId: "snapshot-many", type: "file.snapshot", timestamp: 1_000,
+    items: entries.map(([id, status]) => ({
+      metadata: metadata(id, id === "phone-file" ? "ANDROID_TO_BROWSER" : "BROWSER_TO_ANDROID"),
+      status: status as FileSnapshotEvent["items"][number]["status"],
+      bytesTransferred: status === "COMPLETED" ? 4 : 0,
+      speedBytesPerSecond: 0,
+    })),
+  };
+}
+
 function progress(id: string, status: "TRANSFERRING", bytes: number) {
   return {
     protocolVersion: 1 as const, messageId: "progress-1", type: "file.progress" as const,
@@ -217,6 +293,6 @@ function progress(id: string, status: "TRANSFERRING", bytes: number) {
 function lastActive(states: unknown[]) {
   return states.at(-1) as {
     kind: "active"; selection: Array<{ error?: string }>;
-    transfers: Array<{ id: string; status: string }>;
+    transfers: Array<{ id: string; status: string; localError?: string }>;
   };
 }

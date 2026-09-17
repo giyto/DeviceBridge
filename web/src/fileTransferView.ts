@@ -9,7 +9,6 @@ export interface FileTransferActions {
   readonly onCancel: (transferId: string) => void;
   readonly onRetry: (transferId: string) => void;
   readonly onDownload: (transferId: string) => void;
-  readonly onVerify: (transferId: string, file: File) => void;
 }
 
 export interface FileTransferView {
@@ -30,9 +29,7 @@ export function createFileTransferView(
   const list = required<HTMLOListElement>(documentRef, '[data-role="file-transfer-list"]');
   const empty = required<HTMLElement>(documentRef, '[data-role="file-transfer-empty"]');
   const count = required<HTMLElement>(documentRef, '[data-role="file-transfer-count"]');
-  const verification = required<HTMLInputElement>(documentRef, "#file-verification-input");
   const announcer = required<HTMLElement>(documentRef, '[data-role="file-announcer"]');
-  let verificationTransferId: string | undefined;
   const knownStatuses = new Map<string, string>();
 
   const select = (files: FileList | readonly File[] | null): void => {
@@ -55,20 +52,11 @@ export function createFileTransferView(
       input.click();
     }
   };
-  const onVerification = (): void => {
-    const transferId = verificationTransferId;
-    const file = verification.files?.[0];
-    verification.value = "";
-    verificationTransferId = undefined;
-    if (transferId !== undefined && file !== undefined) actions.onVerify(transferId, file);
-  };
-
   input.addEventListener("change", onInput);
   confirm.addEventListener("click", onConfirm);
   dropZone.addEventListener("dragover", onDragOver);
   dropZone.addEventListener("drop", onDrop);
   dropZone.addEventListener("keydown", onDropKey);
-  verification.addEventListener("change", onVerification);
 
   const render = (state: FileTransferUiState): void => {
     if (state.kind === "inactive") {
@@ -115,12 +103,7 @@ export function createFileTransferView(
     count.textContent = String(state.transfers.length);
     empty.hidden = state.transfers.length > 0;
     list.replaceChildren(
-      ...state.transfers.map((item) =>
-        createTransferCard(documentRef, item, actions, () => {
-          verificationTransferId = item.id;
-          verification.click();
-        })
-      ),
+      ...state.transfers.map((item) => createTransferCard(documentRef, item, actions)),
     );
     announceTerminalChanges(state.transfers, knownStatuses, announcer);
   };
@@ -134,7 +117,6 @@ export function createFileTransferView(
       dropZone.removeEventListener("dragover", onDragOver);
       dropZone.removeEventListener("drop", onDrop);
       dropZone.removeEventListener("keydown", onDropKey);
-      verification.removeEventListener("change", onVerification);
     },
   };
 }
@@ -143,7 +125,6 @@ function createTransferCard(
   documentRef: Document,
   item: FileTransferUiItem,
   actions: FileTransferActions,
-  chooseVerification: () => void,
 ): HTMLLIElement {
   const card = documentRef.createElement("li");
   card.className = "file-card";
@@ -203,23 +184,6 @@ function createTransferCard(
       "Скачать",
       "download-file",
       () => actions.onDownload(item.id),
-    ));
-  }
-  if (
-    item.metadata.direction === "ANDROID_TO_BROWSER" &&
-    item.status === "VERIFYING"
-  ) {
-    const verificationNote = documentRef.createElement("p");
-    verificationNote.className = "file-card__verification-note";
-    verificationNote.textContent =
-      "На локальном HTTP браузер не может безопасно проверить нативную загрузку автоматически. " +
-      "Выберите сохранённый файл для потоковой проверки SHA-256.";
-    card.append(verificationNote);
-    actionsRow.append(actionButton(
-      documentRef,
-      "Выбрать скачанный файл",
-      "verify-file",
-      chooseVerification,
     ));
   }
   if (!isTerminal(item.status)) {
@@ -293,7 +257,7 @@ function statusLabel(status: FileTransferUiItem["status"]): string {
     case "QUEUED": return "В очереди";
     case "CONNECTING": return "Ожидает подтверждения";
     case "TRANSFERRING": return "Передаётся";
-    case "VERIFYING": return "Нужна проверка";
+    case "VERIFYING": return "Проверяется";
     case "COMPLETED": return "Завершено";
     case "CANCELLED": return "Отменено";
     case "FAILED": return "Ошибка";

@@ -35,7 +35,6 @@ const fileView = createFileTransferView(document, {
   onCancel: (transferId) => void fileController.cancel(transferId),
   onRetry: (transferId) => void fileController.retry(transferId),
   onDownload: (transferId) => void fileController.download(transferId),
-  onVerify: (transferId, file) => void fileController.verifyDownloaded(transferId, file),
 });
 textController = new TextTransferController(
   new TextApiClient(),

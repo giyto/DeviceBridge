@@ -65,7 +65,6 @@ import ru.hznik.devicebridge.data.file.FileSourceRegistry
 import ru.hznik.devicebridge.data.file.AndroidCompletedFileOpener
 import ru.hznik.devicebridge.data.file.CompletedFileOpenResult
 import ru.hznik.devicebridge.data.file.ContextExternalFileViewerGateway
-import ru.hznik.devicebridge.domain.file.FileDestinationId
 import ru.hznik.devicebridge.domain.file.FileTransferId
 import kotlinx.coroutines.launch
 
@@ -370,11 +369,11 @@ private fun FileRoute(
                         approval.lease.release()
                         viewModel.onAction(FileAction.DestinationUnavailable(transferId))
                     } else {
-                        leases.register(transferId, approval.lease)
+                        val destinationId = leases.register(transferId, approval.lease)
                         viewModel.onAction(
                             FileAction.DestinationSelected(
                                 transferId,
-                                FileDestinationId(approval.lease.uri),
+                                destinationId,
                             ),
                         )
                     }

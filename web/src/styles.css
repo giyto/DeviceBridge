@@ -856,15 +856,9 @@ h2 {
 
 .file-card__details,
 .file-card__progress,
-.file-card__error,
-.file-card__verification-note {
+.file-card__error {
   margin: 0 !important;
   overflow-wrap: anywhere;
-}
-
-.file-card__verification-note {
-  color: var(--text-muted);
-  font-size: 0.8rem;
 }
 
 .file-card progress {

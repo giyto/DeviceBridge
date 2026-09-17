@@ -1,7 +1,7 @@
 ## 1. Browser feasibility gates
 
 - [x] 1.1 Добавить изолированный Chromium integration fixture для нативной LAN HTTP загрузки по одноразовому grant; проверить Playwright-тестом, что download создаёт файл без Blob/ArrayBuffer и не разрывает основную session page.
-- [x] 1.2 Автоматизировать повторный выбор скачанного файла и checksum acknowledgement в Chrome fixture; проверить success, wrong file, expired grant и reused grant до начала production implementation.
+- [x] 1.2 Обновить Chrome fixture: после полного native download transfer завершается без повторного выбора файла; проверить success, interrupted download, expired grant и reused grant.
 - [x] 1.3 Выбрать bundled incremental SHA-256 adapter для web после license, bundle-size и memory benchmark; проверить standard vectors, разные границы chunks и deterministic 500 МБ fixture без пропорционального роста JS heap.
 - [x] 1.4 Зафиксировать результат feasibility gate в docs/verification/file-transfer.md; если native download или bounded SHA-256 не проходят, остановить change и описать требуемый пересмотр ТЗ вместо ослабления требований.
 
@@ -21,6 +21,7 @@
 - [x] 3.3 Реализовать file snapshot текущей session и проверить тестами refresh без дубликатов, отсутствие чужих items и запрет автоматического возобновления оборванного payload.
 - [x] 3.4 Реализовать random single-use DownloadGrantRegistry с TTL 30 секунд и scope session + transfer + generation; проверить expiry, replay, revoke, stop и отсутствие session bearer в download URL.
 - [x] 3.5 Реализовать cancellation/cleanup orchestration и проверить тестами queued cancel, active cancel, disconnect, session revoke, network error и server stop с закрытием jobs/streams и запуском следующего queued item.
+- [x] 3.6 Сохранить Android source для cancelled/failed item до explicit retry, completed, revoke или server stop; проверить, что retry использует тот же transferId, не создаёт дубликат и не теряет остальные items batch.
 
 ## 4. Android storage и streaming adapters
 
@@ -37,9 +38,10 @@
 - [x] 5.1 Добавить защищённый POST /api/v1/files для batch offers; проверить Ktor integration-тестами authorization, schema/size bounds, idempotency, ownership и отсутствие output до Android approval.
 - [x] 5.2 Добавить raw POST /api/v1/files/{transferId} upload stream; проверить 401/403/404, content length, premature EOF, oversize, cancellation, incremental SHA-256 и partial cleanup.
 - [x] 5.3 Добавить POST download-grant и потоковый GET /api/v1/files/{transferId}; проверить safe Content-Disposition, no-referrer, grant TTL/replay, revoke, bytes progress и закрытие source descriptor при disconnect.
-- [x] 5.4 Добавить verify acknowledgement и DELETE /api/v1/transfers/{id}; проверить size/SHA match, mismatch, duplicate verification, queued/active cancellation и запрет действий чужой session.
+- [x] 5.4 Удалить публичный post-download verify acknowledgement, сохранить DELETE /api/v1/transfers/{id}; проверить автоматический completed после полного stream, запуск следующего queued item, cancellation и запрет действий чужой session.
 - [x] 5.5 Расширить events WebSocket file offers/progress/snapshot/terminal events; проверить совместную доставку text во время file stream, reconnect snapshot и bounded event rate.
 - [x] 5.6 Обновить production route policy deny-by-default; проверить release/negative tests, что file routes открыты только по контракту, diagnostics/history/settings/trusted-browser routes остаются 404 и filesystem URI/path не раскрываются.
+- [x] 5.7 Добавить защищённый POST /api/v1/transfers/{id}/retry с ownership и same-origin проверками; проверить cancelled/failed success, active conflict, foreign session 404 и возврат snapshot всей session.
 
 ## 6. Android file flow
 
@@ -52,14 +54,15 @@
 
 ## 7. Web file flow
 
-- [x] 7.1 Добавить TypeScript file protocol types и API client для offer, grant, verify, cancel и snapshot; проверить Vitest-тестами Authorization, strict response validation, session loss и safe errors.
+- [x] 7.1 Удалить post-download verify из TypeScript file protocol и API client; сохранить offer, grant, cancel и snapshot с Authorization, strict response validation, session loss и safe errors.
 - [x] 7.2 Реализовать XHR raw upload adapter с progress/abort и File body; проверить Vitest/browser fixture тестами monotonic bytes, network error, cancellation и отсутствие ложного completed до server terminal event.
 - [x] 7.3 Реализовать native download handoff по одноразовому grant; проверить Chrome/Edge integration-тестами attachment filename, expired/reused grant, server disconnect и отсутствие bearer token в URL/history.
-- [x] 7.4 Реализовать chunked verification выбранного downloaded file через StreamingSha256; проверить size mismatch, checksum mismatch, cancellation, 500 МБ memory bound и acknowledgement только после match.
+- [x] 7.4 Удалить повторный выбор и chunked verification скачанного файла; подтвердить, что StreamingSha256 используется только для Browser → Android source upload и native download не блокирует очередь.
 - [x] 7.5 Реализовать FileTransferController с two-direction queue state, snapshot deduplication и explicit retry; проверить Vitest-тестами multiple files, refresh, revoke, protocol error и text availability во время transfer.
 - [x] 7.6 Реализовать file input multiple, drag-and-drop и preview на общем validation path; проверить DOM-тестами keyboard alternative, unsupported/oversize items и отсутствие auto-upload.
-- [x] 7.7 Реализовать incoming offers и transfer cards с progress, speed, cancel, retry, download и verify actions; проверить DOM-тестами все states и отсутствие HTML interpretation в filenames/errors.
+- [x] 7.7 Обновить incoming offers и transfer cards с progress, speed, cancel, retry и download без verify action; проверить DOM-тестами автоматический completed и отсутствие HTML interpretation в filenames/errors.
 - [x] 7.8 Обновить responsive/light/dark styles и accessibility announcements; проверить contract tests на viewport 360/1920, focus visibility, accessible names, aria-live без progress spam и отсутствие горизонтальной прокрутки основных действий.
+- [x] 7.9 Подключить web retry к server endpoint для Android → Browser и Browser → Android; проверить, что отменённый item повторно встаёт в очередь, retained browser File используется повторно, а отсутствие source после refresh даёт понятную ошибку.
 
 ## 8. Lifecycle, DI и resource safety
 
@@ -79,7 +82,7 @@
 
 ## 10. Manual acceptance и завершение OpenSpec
 
-- [ ] 10.1 На физическом телефоне и компьютере проверить в Chrome и Edge single/multiple uploads/downloads, drag-and-drop, Android picker, ACTION_SEND/ACTION_SEND_MULTIPLE, progress, speed, cancel, retry, open file и manual checksum verification.
-- [ ] 10.2 Проверить при активной file transfer двусторонний text flow, несколько browser sessions, refresh текущей вкладки, revoke, остановку/перезапуск server и отсутствие доступа из чужой session.
-- [ ] 10.3 Проверить keyboard-only, screen reader announcements, light/dark theme, viewport 360–1920 и крупный системный шрифт; записать результаты и известные ограничения в docs/verification/file-transfer.md.
-- [ ] 10.4 После подтверждённой ручной приёмки отметить выполненные tasks, запустить openspec validate add-file-transfer --strict, синхронизировать main specs и архивировать change через OpenSpec archive workflow.
+- [x] 10.1 На физическом телефоне и компьютере проверить в Chrome и Edge single/multiple uploads/downloads без повторного выбора скачанного файла, drag-and-drop, Android picker, ACTION_SEND/ACTION_SEND_MULTIPLE, progress, speed, cancel, retry и open file.
+- [x] 10.2 Проверить при активной file transfer двусторонний text flow, несколько browser sessions, refresh текущей вкладки, revoke, остановку/перезапуск server и отсутствие доступа из чужой session.
+- [x] 10.3 Проверить keyboard-only, screen reader announcements, light/dark theme, viewport 360–1920 и крупный системный шрифт; записать результаты и известные ограничения в docs/verification/file-transfer.md.
+- [x] 10.4 После подтверждённой ручной приёмки отметить выполненные tasks, запустить openspec validate add-file-transfer --strict, синхронизировать main specs и архивировать change через OpenSpec archive workflow.

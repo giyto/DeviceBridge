@@ -1,7 +1,6 @@
 import { createHash, randomBytes } from "node:crypto";
 import {
   createServer as createHttpServer,
-  type IncomingMessage,
   type ServerResponse,
 } from "node:http";
 import { resolve } from "node:path";
@@ -20,6 +19,7 @@ export interface FileTransferGateServer {
 
 export interface FileTransferGateServerOptions {
   grantTtlMs?: number;
+  truncateDownload?: boolean;
 }
 
 export async function startFileTransferGateServer(
@@ -29,7 +29,6 @@ export async function startFileTransferGateServer(
   const grantIssuedAt = Date.now();
   const grantTtlMs = options.grantTtlMs ?? 30_000;
   let grantConsumed = false;
-  let verificationAcks = 0;
   const eventStreams = new Set<ServerResponse>();
   const vite = await createViteServer({
     appType: "custom",
@@ -46,10 +45,7 @@ export async function startFileTransferGateServer(
     if (request.method === "GET" && url.pathname === "/") {
       response.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
       response.end(
-        renderPage(
-          grant,
-          createHash("sha256").update(FILE_CONTENT).digest("hex"),
-        ),
+        renderPage(grant),
       );
       return;
     }
@@ -82,30 +78,12 @@ export async function startFileTransferGateServer(
         "Content-Type": "application/octet-stream",
         "Referrer-Policy": "no-referrer",
       });
+      if (options.truncateDownload === true) {
+        response.end(FILE_CONTENT.subarray(0, 8));
+        return;
+      }
       response.write(FILE_CONTENT.subarray(0, 16));
       response.end(FILE_CONTENT.subarray(16));
-      return;
-    }
-
-    if (request.method === "POST" && url.pathname === "/verify") {
-      void readJson(request)
-        .then((body) => {
-          const valid =
-            body.size === FILE_CONTENT.byteLength &&
-            body.sha256 ===
-              createHash("sha256").update(FILE_CONTENT).digest("hex");
-          if (!valid) {
-            response
-              .writeHead(422, { "Content-Type": "application/json" })
-              .end('{"error":"checksum_mismatch"}');
-            return;
-          }
-          verificationAcks += 1;
-          response
-            .writeHead(200, { "Content-Type": "application/json" })
-            .end(JSON.stringify({ acknowledgements: verificationAcks }));
-        })
-        .catch(() => response.writeHead(400).end());
       return;
     }
 
@@ -143,19 +121,13 @@ export async function startFileTransferGateServer(
   };
 }
 
-function renderPage(grant: string, sha256: string): string {
+function renderPage(grant: string): string {
   return `<!doctype html>
 <html lang="en">
-  <body data-expected-size="${FILE_CONTENT.byteLength}" data-expected-sha256="${sha256}">
+  <body>
     <p data-testid="session-state">connecting</p>
     <p data-testid="session-events">0</p>
     <a href="/download?grant=${grant}">Download fixture</a>
-    <label>
-      Verify downloaded file
-      <input type="file" data-testid="verification-file">
-    </label>
-    <p data-testid="verification-state">idle</p>
-    <p data-testid="verification-acks">0</p>
     <script>
       let eventCount = 0;
       const events = new EventSource('/events');
@@ -174,17 +146,4 @@ function renderPage(grant: string, sha256: string): string {
     <script type="module" src="/integration/fixtures/file-transfer/main.ts"></script>
   </body>
 </html>`;
-}
-
-async function readJson(
-  request: IncomingMessage,
-): Promise<Record<string, unknown>> {
-  const chunks: Buffer[] = [];
-  for await (const chunk of request) {
-    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
-  }
-  return JSON.parse(Buffer.concat(chunks).toString("utf8")) as Record<
-    string,
-    unknown
-  >;
 }

@@ -167,6 +167,7 @@ class FileTransferCoordinator(
         if (!isCurrent(item) || item.phase.isTerminal) {
             return@withLock FileTransferOperationResult.InvalidState
         }
+        downloadGrantRegistry.invalidateTransfer(item.generationId, transferId)
         cleanupResources(transferId)
         transitionWithWifiLock(transferId, FileTransferEvent.Cancelled)
         destinations.remove(transferId)
@@ -193,6 +194,7 @@ class FileTransferCoordinator(
                 FileTransferFailure.SessionUnavailable,
             )
         }
+        downloadGrantRegistry.invalidateTransfer(item.generationId, transferId)
         cleanupResources(transferId)
         destinations.remove(transferId)
         val retried = scheduler.retry(transferId)
@@ -332,6 +334,7 @@ class FileTransferCoordinator(
         mutex.withLock {
             val item = state.value.item(transferId) ?: return@withLock
             if (!isCurrent(item) || item.phase.isTerminal) return@withLock
+            downloadGrantRegistry.invalidateTransfer(item.generationId, transferId)
             cleanupResources(transferId)
             transitionWithWifiLock(
                 transferId,

@@ -112,6 +112,16 @@ class DownloadGrantRegistry(
         }
     }
 
+    suspend fun invalidateTransfer(
+        generationId: ServerGenerationId,
+        transferId: FileTransferId,
+    ) = mutex.withLock {
+        grants.entries.removeAll { (_, grant) ->
+            grant.scope.generationId == generationId &&
+                grant.scope.transferId == transferId
+        }
+    }
+
     suspend fun invalidateGeneration(generationId: ServerGenerationId) = mutex.withLock {
         grants.entries.removeAll { (_, grant) -> grant.scope.generationId == generationId }
     }

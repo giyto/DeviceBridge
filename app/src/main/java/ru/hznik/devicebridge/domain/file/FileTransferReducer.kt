@@ -9,6 +9,7 @@ sealed interface FileTransferEvent {
         val speedBytesPerSecond: Long,
     ) : FileTransferEvent
 
+    data object Delivered : FileTransferEvent
     data object Verifying : FileTransferEvent
     data object Completed : FileTransferEvent
     data object Cancelled : FileTransferEvent
@@ -39,6 +40,20 @@ object FileTransferReducer {
                     current.evolve(
                         bytesTransferred = event.bytesTransferred,
                         speedBytesPerSecond = event.speedBytesPerSecond,
+                    )
+                } else {
+                    current
+                }
+
+            FileTransferEvent.Delivered ->
+                if (
+                    current.metadata.direction == FileTransferDirection.ANDROID_TO_BROWSER &&
+                    current.phase == FileTransferPhase.TRANSFERRING &&
+                    current.bytesTransferred == current.metadata.sizeBytes
+                ) {
+                    current.evolve(
+                        phase = FileTransferPhase.COMPLETED,
+                        speedBytesPerSecond = 0,
                     )
                 } else {
                     current

@@ -1,27 +1,5 @@
 import { createStreamingSha256 } from "./streamingSha256";
 
-export type FileVerificationResult =
-  | Readonly<{ kind: "match"; sizeBytes: number; sha256: string }>
-  | Readonly<{ kind: "size-mismatch"; actualSizeBytes: number }>
-  | Readonly<{ kind: "checksum-mismatch"; actualSha256: string }>;
-
-export async function verifyDownloadedFile(
-  file: File,
-  expectedSizeBytes: number,
-  expectedSha256: string,
-  onProgress: (bytesRead: number, totalBytes: number) => void = () => undefined,
-  signal?: AbortSignal,
-): Promise<FileVerificationResult> {
-  if (file.size !== expectedSizeBytes) {
-    return { kind: "size-mismatch", actualSizeBytes: file.size };
-  }
-  const sha256 = await hashFileStreaming(file, onProgress, signal);
-  if (sha256.toLowerCase() !== expectedSha256.toLowerCase()) {
-    return { kind: "checksum-mismatch", actualSha256: sha256 };
-  }
-  return { kind: "match", sizeBytes: file.size, sha256 };
-}
-
 export async function hashFileStreaming(
   file: File,
   onProgress: (bytesRead: number, totalBytes: number) => void = () => undefined,

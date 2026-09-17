@@ -141,33 +141,6 @@ export class FileApiClient {
     ));
   }
 
-  async verify(
-    token: string,
-    transferId: string,
-    messageId: string,
-    timestamp: number,
-    sizeBytes: number,
-    sha256: string,
-    signal?: AbortSignal,
-  ): Promise<FileSnapshotEvent> {
-    requireProtocolId(transferId);
-    return parseFileSnapshot(await this.requestJson(
-      `/api/v1/files/${encodeURIComponent(transferId)}/verify`, token, {
-        method: "POST",
-        body: JSON.stringify({
-          protocolVersion: FILE_PROTOCOL_VERSION,
-          messageId,
-          type: "file.verify",
-          timestamp,
-          transferId,
-          sizeBytes,
-          sha256,
-        }),
-        signal,
-      },
-    ));
-  }
-
   async cancel(token: string, transferId: string, signal?: AbortSignal): Promise<FileSnapshotEvent> {
     requireProtocolId(transferId);
     return parseFileSnapshot(await this.requestJson(
@@ -175,6 +148,15 @@ export class FileApiClient {
       token,
       { method: "DELETE", signal },
       false,
+    ));
+  }
+
+  async retry(token: string, transferId: string, signal?: AbortSignal): Promise<FileSnapshotEvent> {
+    requireProtocolId(transferId);
+    return parseFileSnapshot(await this.requestJson(
+      `/api/v1/transfers/${encodeURIComponent(transferId)}/retry`,
+      token,
+      { method: "POST", body: "{}", signal },
     ));
   }
 

@@ -50,26 +50,41 @@ test("native download keeps the session page alive without page-side payload buf
   }
 });
 
-test("explicit file selection acknowledges only a matching downloaded file", async ({
+test("native download completes without a repeated file selection or verify request", async ({
   page,
 }, testInfo) => {
   const fixture = await startFileTransferGateServer();
 
   try {
-    await page.goto(fixture.pageUrl);
-    const { savedPath } = await downloadFixture(page, testInfo, fixture);
-
-    await page.getByLabel("Verify downloaded file").setInputFiles({
-      name: fixture.fileName,
-      mimeType: "application/octet-stream",
-      buffer: Buffer.from("wrong file"),
+    const requestedPaths: string[] = [];
+    page.on("request", (request) => {
+      requestedPaths.push(new URL(request.url()).pathname);
     });
-    await expect(page.getByTestId("verification-state")).toHaveText("mismatch");
-    await expect(page.getByTestId("verification-acks")).toHaveText("0");
+    await page.goto(fixture.pageUrl);
+    await downloadFixture(page, testInfo, fixture);
 
-    await page.getByLabel("Verify downloaded file").setInputFiles(savedPath);
-    await expect(page.getByTestId("verification-state")).toHaveText("verified");
-    await expect(page.getByTestId("verification-acks")).toHaveText("1");
+    await expect(page.locator('input[type="file"]')).toHaveCount(0);
+    await expect(page.getByTestId("session-state")).toHaveText("connected");
+    expect(requestedPaths).not.toContain("/verify");
+  } finally {
+    await fixture.close();
+  }
+});
+
+test("interrupted native download fails without a false verification step", async ({
+  page,
+}) => {
+  const fixture = await startFileTransferGateServer({ truncateDownload: true });
+
+  try {
+    await page.goto(fixture.pageUrl);
+    const downloadStarted = page.waitForEvent("download");
+    await page.getByRole("link", { name: "Download fixture" }).click();
+    const download = await downloadStarted;
+
+    expect(await download.failure()).not.toBeNull();
+    await expect(page.locator('input[type="file"]')).toHaveCount(0);
+    await expect(page.getByTestId("session-state")).toHaveText("connected");
   } finally {
     await fixture.close();
   }

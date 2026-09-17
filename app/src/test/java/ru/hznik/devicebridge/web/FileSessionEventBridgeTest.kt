@@ -7,6 +7,7 @@ import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import ru.hznik.devicebridge.data.file.FileSourceRegistry
 import ru.hznik.devicebridge.data.file.FileTransferCoordinator
@@ -14,6 +15,7 @@ import ru.hznik.devicebridge.data.session.SessionEventDispatcher
 import ru.hznik.devicebridge.domain.file.CreateFileTransfersRequest
 import ru.hznik.devicebridge.domain.file.FileCommandId
 import ru.hznik.devicebridge.domain.file.FileTransferDirection
+import ru.hznik.devicebridge.domain.file.FileTransferEvent
 import ru.hznik.devicebridge.domain.file.FileTransferId
 import ru.hznik.devicebridge.domain.file.FileTransferMetadata
 import ru.hznik.devicebridge.domain.file.FileTransferPhase
@@ -27,7 +29,7 @@ import ru.hznik.devicebridge.domain.session.ServerGenerationId
 class FileSessionEventBridgeTest {
 
     @Test
-    fun terminalTransferDeletesItsPrivateStagedSource() = runTest {
+    fun cancelledSourceIsRetainedForRetryAndDeletedAfterCompletion() = runTest {
         val generation = ServerGenerationId(1)
         val session = BrowserSession(
             id = BrowserSessionId("session-1"),
@@ -61,6 +63,7 @@ class FileSessionEventBridgeTest {
         val stage = Files.createTempFile("devicebridge-bridge", ".stage").toFile()
             .apply { writeBytes(byteArrayOf(1)) }
         registry.registerStaged(transferId, stage)
+        assertTrue("staged source should exist after registration", stage.exists())
         val bridge = FileSessionEventBridge(
             scope = this,
             coordinator = files,
@@ -70,8 +73,16 @@ class FileSessionEventBridgeTest {
             sourceRegistry = registry,
         )
         runCurrent()
+        assertTrue("initial observation must not delete the staged source", stage.exists())
 
         files.cancel(transferId)
+        runCurrent()
+
+        assertTrue("cancellation must retain the staged source for retry", stage.exists())
+        files.retry(transferId)
+        files.transition(transferId, FileTransferEvent.Started)
+        files.transition(transferId, FileTransferEvent.Progressed(1, 1))
+        files.transition(transferId, FileTransferEvent.Delivered)
         runCurrent()
 
         assertFalse(stage.exists())
@@ -108,12 +119,18 @@ class FileSessionEventBridgeTest {
                 ),
             ),
         )
+        val transferId = FileTransferId("file-1")
+        val registry = FileSourceRegistry()
+        val stage = Files.createTempFile("devicebridge-revoke", ".stage").toFile()
+            .apply { writeBytes(byteArrayOf(1)) }
+        registry.registerStaged(transferId, stage)
         val bridge = FileSessionEventBridge(
             scope = this,
             coordinator = files,
             dispatcher = SessionEventDispatcher(this),
             wallClockMs = { 1_000 },
             browserSessionState = sessionState,
+            sourceRegistry = registry,
         )
         runCurrent()
 
@@ -122,8 +139,9 @@ class FileSessionEventBridgeTest {
 
         assertEquals(
             FileTransferPhase.CANCELLED,
-            files.state.value.item(FileTransferId("file-1"))?.phase,
+            files.state.value.item(transferId)?.phase,
         )
+        assertFalse(stage.exists())
         bridge.close()
     }
 

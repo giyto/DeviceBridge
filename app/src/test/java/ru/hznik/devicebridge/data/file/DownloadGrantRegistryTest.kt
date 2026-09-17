@@ -84,6 +84,21 @@ class DownloadGrantRegistryTest {
         )
     }
 
+    @Test
+    fun transferCancellationInvalidatesOnlyThatTransfersOutstandingGrants() = runTest {
+        val cancelled = registry.issue(generation, session, transfer)
+        val retainedTransfer = FileTransferId("transfer-2")
+        val retained = registry.issue(generation, session, retainedTransfer)
+
+        registry.invalidateTransfer(generation, transfer)
+
+        assertNull(registry.consume(cancelled.token, generation, session, transfer))
+        assertEquals(
+            DownloadGrantScope(generation, session, retainedTransfer),
+            registry.consume(retained.token, generation, session, retainedTransfer),
+        )
+    }
+
     private class CountingGrantTokenSource : DownloadGrantTokenSource {
         private var value = 0
 
