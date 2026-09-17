@@ -54,18 +54,20 @@ describe("FileApiClient", () => {
     expect(fetcher.mock.calls[0]?.[0]).toBe("/api/v1/files/transfer-1/download-grant");
   });
 
-  it("verifies and cancels through their protected endpoints", async () => {
+  it("cancels and retries through protected transfer endpoints and has no manual verify API", async () => {
     const fetcher = vi.fn<typeof fetch>()
-      .mockResolvedValueOnce(jsonResponse(snapshot("COMPLETED")))
-      .mockResolvedValueOnce(jsonResponse(snapshot("CANCELLED")));
+      .mockResolvedValueOnce(jsonResponse(snapshot("CANCELLED")))
+      .mockResolvedValueOnce(jsonResponse(snapshot("CONNECTING")));
     const client = new FileApiClient(fetcher);
 
-    await client.verify("token", "transfer-1", "verify-1", 1_000, 4, "a".repeat(64));
     await client.cancel("token", "transfer-1");
+    await client.retry("token", "transfer-1");
 
-    expect(fetcher.mock.calls[0]?.[0]).toBe("/api/v1/files/transfer-1/verify");
-    expect(fetcher.mock.calls[1]?.[0]).toBe("/api/v1/transfers/transfer-1");
-    expect(fetcher.mock.calls[1]?.[1]?.method).toBe("DELETE");
+    expect("verify" in client).toBe(false);
+    expect(fetcher.mock.calls[0]?.[0]).toBe("/api/v1/transfers/transfer-1");
+    expect(fetcher.mock.calls[0]?.[1]?.method).toBe("DELETE");
+    expect(fetcher.mock.calls[1]?.[0]).toBe("/api/v1/transfers/transfer-1/retry");
+    expect(fetcher.mock.calls[1]?.[1]?.method).toBe("POST");
   });
 
   it("rejects malformed successful responses instead of trusting them", async () => {

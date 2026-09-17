@@ -23,14 +23,14 @@ object ProductionRoutePolicy {
         method == "POST" && FILE_ITEM.matches(path) -> RouteAccess.PROTECTED
         method == "POST" && FILE_GRANT.matches(path) -> RouteAccess.PROTECTED
         method == "GET" && FILE_ITEM.matches(path) -> RouteAccess.ONE_TIME_GRANT
-        method == "POST" && FILE_VERIFY.matches(path) -> RouteAccess.PROTECTED
         method == "DELETE" && TRANSFER_ITEM.matches(path) -> RouteAccess.PROTECTED
+        method == "POST" && TRANSFER_RETRY.matches(path) -> RouteAccess.PROTECTED
         else -> RouteAccess.NOT_FOUND
     }
 
     private val ID = "[A-Za-z0-9_-]{1,64}"
     private val FILE_ITEM = Regex("^/api/v1/files/$ID$")
     private val FILE_GRANT = Regex("^/api/v1/files/$ID/download-grant$")
-    private val FILE_VERIFY = Regex("^/api/v1/files/$ID/verify$")
     private val TRANSFER_ITEM = Regex("^/api/v1/transfers/$ID$")
+    private val TRANSFER_RETRY = Regex("^/api/v1/transfers/$ID/retry$")
 }

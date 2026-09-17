@@ -1,27 +1,15 @@
 import { describe, expect, it, vi } from "vitest";
-import { hashFileStreaming, verifyDownloadedFile } from "../src/fileVerifier";
+import { hashFileStreaming } from "../src/fileVerifier";
 
 describe("fileVerifier", () => {
-  it("verifies selected downloaded bytes through bounded streaming SHA-256", async () => {
-    const file = new File(["abc"], "download.bin");
+  it("hashes selected upload bytes through bounded streaming SHA-256", async () => {
+    const file = new File(["abc"], "upload.bin");
     const progress = vi.fn();
 
-    const result = await verifyDownloadedFile(
-      file,
-      3,
-      "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
-      progress,
-    );
+    const result = await hashFileStreaming(file, progress);
 
-    expect(result).toEqual({ kind: "match", sizeBytes: 3, sha256: expect.any(String) });
+    expect(result).toBe("ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
     expect(progress).toHaveBeenLastCalledWith(3, 3);
-  });
-
-  it("rejects size before reading and reports checksum mismatch", async () => {
-    await expect(verifyDownloadedFile(new File(["abc"], "wrong.bin"), 4, "a".repeat(64)))
-      .resolves.toEqual({ kind: "size-mismatch", actualSizeBytes: 3 });
-    await expect(verifyDownloadedFile(new File(["abc"], "wrong.bin"), 3, "a".repeat(64)))
-      .resolves.toMatchObject({ kind: "checksum-mismatch" });
   });
 
   it("cancels an in-progress stream without acknowledging it", async () => {

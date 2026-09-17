@@ -303,11 +303,6 @@ internal class ProductionFileTransferBenchmarkHarness : Closeable {
             assertEquals(sizeBytes, digest.bytesProcessed)
             val hash = digest.digestHex()
             assertEquals(expectedHash, hash)
-            val verify = postJson(
-                path = "/api/v1/files/${transferId.value}/verify",
-                body = """{"protocolVersion":1,"messageId":"verify-${transferId.value}","type":"file.verify","timestamp":123,"transferId":"${transferId.value}","sizeBytes":$sizeBytes,"sha256":"$hash"}""",
-            )
-            assertEquals(verify.body, 200, verify.code)
             return TransferRun("android-to-browser", sizeBytes, hash, elapsed)
         } finally {
             connection.disconnect()

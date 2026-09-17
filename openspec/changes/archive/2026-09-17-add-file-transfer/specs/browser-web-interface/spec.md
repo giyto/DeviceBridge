@@ -22,9 +22,9 @@
 - **THEN** web UI отправляет cancellation и показывает terminal state
 - **AND** не сообщает completed по локальному событию завершения request без server result
 
-### Requirement: Web shell предоставляет проверяемый download flow
+### Requirement: Web shell предоставляет неблокирующий native download flow
 
-Входящее Android → Browser предложение MUST показывать sender, имя, размер и действия скачивания и отклонения. После нативной загрузки web UI MUST предоставить выбор скачанного файла для потоковой SHA-256 verification и MUST различать transferring, verifying и completed.
+Входящее Android → Browser предложение MUST показывать sender, имя, размер и действия скачивания и отклонения. После успешной отдачи заявленного количества байтов server MUST отметить item completed, а web UI MUST NOT требовать повторно выбирать уже скачанный файл.
 
 #### Scenario: Пользователь начинает download
 
@@ -32,21 +32,28 @@
 - **THEN** browser начинает загрузку по одноразовому разрешению текущей session
 - **AND** page продолжает показывать server progress без хранения полного payload
 
-#### Scenario: Требуется проверка
+#### Scenario: Download stream завершён
 
 - **WHEN** download stream передан полностью
-- **THEN** web UI просит явно выбрать сохранённый файл
-- **AND** объясняет, что это ограничение безопасной проверки на локальном HTTP
-
-#### Scenario: Checksum совпал
-
-- **WHEN** выбранный файл имеет ожидаемые size и SHA-256
 - **THEN** web UI показывает completed
-- **AND** результат отправляется server как acknowledgement текущей operation
+- **AND** следующий queued item направления может быть обработан без дополнительного подтверждения
+
+#### Scenario: Download stream прерван
+
+- **WHEN** response завершился до передачи заявленного количества байтов либо соединение потеряно
+- **THEN** item не получает completed
+- **AND** web UI показывает failed и безопасное действие повтора
+- **AND** явный повтор возвращает тот же item в очередь без повторного выбора файла на Android
+
+#### Scenario: Download отменён пользователем
+
+- **WHEN** пользователь отменяет queued или active Android → Browser item
+- **THEN** item показывает cancelled и действие «Повторить»
+- **AND** повтор переводит тот же item обратно в очередь, не создавая дубликат и не теряя остальные файлы batch
 
 ### Requirement: File controls доступны и адаптивны
 
-File input, drop zone, queue cards, progress, cancel, retry и verify controls MUST оставаться доступными с клавиатуры, экранного диктора и при ширине viewport от 360 до 1920 пикселей в светлой и тёмной теме.
+File input, drop zone, queue cards, progress, cancel, retry и download controls MUST оставаться доступными с клавиатуры, экранного диктора и при ширине viewport от 360 до 1920 пикселей в светлой и тёмной теме.
 
 #### Scenario: Управление с клавиатуры
 

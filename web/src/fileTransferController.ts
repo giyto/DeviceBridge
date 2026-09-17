@@ -46,8 +46,8 @@ export type FileTransferUiState =
 export interface FileApi {
   offer: FileApiClient["offer"];
   requestDownloadGrant: FileApiClient["requestDownloadGrant"];
-  verify: FileApiClient["verify"];
   cancel: FileApiClient["cancel"];
+  retry: FileApiClient["retry"];
 }
 
 export interface FileUploader {
@@ -274,50 +274,6 @@ export class FileTransferController {
     }
   }
 
-  async verifyDownloaded(transferId: string, file: File): Promise<void> {
-    const context = this.operationContext(transferId);
-    if (context === undefined) return;
-    const item = this.transfer(transferId);
-    if (item === undefined || item.metadata.direction !== "ANDROID_TO_BROWSER") {
-      this.finishOperation(transferId, context.controller);
-      return;
-    }
-    try {
-      if (file.size > HARD_MAX_FILE_BYTES) {
-        this.failLocal(transferId, "Выбранный файл превышает лимит проверки 1 ГиБ.");
-        return;
-      }
-      const sha256 = await this.hashFile(file, undefined, context.controller.signal);
-      if (!this.isCurrent(context.generation, context.token)) return;
-      const sizeMatches = file.size === item.metadata.sizeBytes;
-      const checksumMatches = sha256.toLowerCase() === item.metadata.sha256.toLowerCase();
-      const snapshot = await this.api.verify(
-        context.token,
-        transferId,
-        this.createId(),
-        this.now(),
-        file.size,
-        sha256,
-        context.controller.signal,
-      );
-      if (!this.isCurrent(context.generation, context.token)) return;
-      if (sizeMatches && checksumMatches) {
-        this.applySnapshot(snapshot);
-      } else {
-        this.failLocal(
-          transferId,
-          sizeMatches
-            ? "Контрольная сумма выбранного файла не совпала."
-            : "Размер выбранного файла не совпадает.",
-        );
-      }
-    } catch (error: unknown) {
-      if (!isAbortError(error)) this.handleOperationError(error, transferId);
-    } finally {
-      this.finishOperation(transferId, context.controller);
-    }
-  }
-
   async cancel(transferId: string): Promise<void> {
     if (this.state.kind !== "active" || this.token === undefined) return;
     this.operations.get(transferId)?.abort();
@@ -336,26 +292,38 @@ export class FileTransferController {
   }
 
   async retry(transferId: string): Promise<void> {
+    if (this.state.kind !== "active" || this.token === undefined) return;
     const item = this.transfer(transferId);
-    const source = this.sourceFiles.get(transferId);
     if (
-      this.state.kind !== "active" ||
       item === undefined ||
-      source === undefined ||
-      item.metadata.direction !== "BROWSER_TO_ANDROID"
+      item.status !== "FAILED" && item.status !== "CANCELLED"
     ) return;
-    this.selectedFiles = [source];
-    this.emit({
-      ...this.state,
-      selection: [{
-        key: "retry-" + transferId,
-        displayName: source.name,
-        sizeBytes: source.size,
-        mimeType: source.type || "application/octet-stream",
-      }],
-      error: undefined,
-    });
-    await this.confirmSelection();
+    if (
+      item.metadata.direction === "BROWSER_TO_ANDROID" &&
+      !this.sourceFiles.has(transferId)
+    ) {
+      this.failLocal(
+        transferId,
+        "Исходный файл больше недоступен. Выберите его заново.",
+      );
+      return;
+    }
+    const context = this.operationContext(transferId);
+    if (context === undefined) return;
+    try {
+      const snapshot = await this.api.retry(
+        context.token,
+        transferId,
+        context.controller.signal,
+      );
+      if (this.isCurrent(context.generation, context.token)) {
+        this.applySnapshot(snapshot);
+      }
+    } catch (error: unknown) {
+      if (!isAbortError(error)) this.handleOperationError(error, transferId);
+    } finally {
+      this.finishOperation(transferId, context.controller);
+    }
   }
 
   private startUpload(transferId: string): void {

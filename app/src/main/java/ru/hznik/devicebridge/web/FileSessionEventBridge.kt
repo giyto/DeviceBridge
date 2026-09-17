@@ -18,6 +18,7 @@ import ru.hznik.devicebridge.data.file.FileSourceRegistry
 import ru.hznik.devicebridge.data.session.SessionEventDispatcher
 import ru.hznik.devicebridge.data.session.SessionOutboundEvent
 import ru.hznik.devicebridge.domain.file.FileTransferId
+import ru.hznik.devicebridge.domain.file.FileTransferPhase
 import ru.hznik.devicebridge.domain.file.FileTransferState
 import ru.hznik.devicebridge.domain.session.BrowserSessionState
 
@@ -39,6 +40,11 @@ class FileSessionEventBridge(
                 val prior = previous[item.metadata.id]
                 if (item.phase.isTerminal && prior?.phase?.isTerminal != true) {
                     destinationLeases?.release(item.metadata.id)
+                }
+                if (
+                    item.phase == FileTransferPhase.COMPLETED &&
+                    prior?.phase != FileTransferPhase.COMPLETED
+                ) {
                     sourceRegistry?.remove(item.metadata.id)
                 }
                 when {
@@ -62,7 +68,18 @@ class FileSessionEventBridge(
                         .asSequence()
                         .filterNot { it.id in currentIds }
                         .forEach { removed ->
+                            val ownedTransferIds = coordinator.state.value.items
+                                .asSequence()
+                                .filter { item ->
+                                    item.generationId == previousGeneration &&
+                                        item.ownerSessionId == removed.id
+                                }
+                                .map { item -> item.metadata.id }
+                                .toList()
                             coordinator.onSessionRevoked(previousGeneration, removed.id)
+                            ownedTransferIds.forEach { transferId ->
+                                sourceRegistry?.remove(transferId)
+                            }
                         }
                 }
                 previous = current

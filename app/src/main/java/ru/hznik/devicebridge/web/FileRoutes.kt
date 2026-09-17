@@ -37,7 +37,6 @@ import ru.hznik.devicebridge.core.protocol.file.FileProtocolValidator
 import ru.hznik.devicebridge.core.protocol.file.FileSnapshotEvent
 import ru.hznik.devicebridge.core.protocol.file.FileSnapshotItem
 import ru.hznik.devicebridge.core.protocol.file.FileTransferStatusDto
-import ru.hznik.devicebridge.core.protocol.file.FileVerificationMessage
 import ru.hznik.devicebridge.core.protocol.session.SessionErrorCode
 import ru.hznik.devicebridge.data.file.FileTransferCoordinator
 import ru.hznik.devicebridge.data.file.FileDownloadSourceFactory
@@ -345,76 +344,6 @@ fun Application.installFileRoutes(
             )
         }
 
-        post("/api/v1/files/{transferId}/verify") {
-            val authorized = call.authorizeSession(
-                coordinator = sessionCoordinator,
-                generationHandle = generationHandle,
-                allowedHosts = allowedHosts,
-            ) ?: return@post
-            if (!call.requireFileJsonRequest(allowedHosts(), wallClockMs)) return@post
-            val transferId = call.parameters["transferId"]
-                ?.let { value -> runCatching { FileTransferId(value) }.getOrNull() }
-            val item = transferId?.let {
-                fileCoordinator.ownedTransfer(
-                    authorized.handle.generationId,
-                    authorized.session.id,
-                    it,
-                )
-            }
-            if (transferId == null || item == null) {
-                call.respondFileError(HttpStatusCode.NotFound, FileProtocolErrorCode.INVALID_PAYLOAD, wallClockMs)
-                return@post
-            }
-            val body = call.receiveBoundedJson(MAX_FILE_CONTROL_JSON_BYTES)
-            val verification = body?.let {
-                runCatching { FileProtocolJson.decode<FileVerificationMessage>(it) }.getOrNull()
-            }
-            if (
-                verification == null ||
-                FileProtocolValidator.validate(verification) != FileProtocolValidationError.NONE ||
-                verification.transferId != transferId.value
-            ) {
-                call.respondFileError(HttpStatusCode.BadRequest, FileProtocolErrorCode.INVALID_PAYLOAD, wallClockMs)
-                return@post
-            }
-            when (
-                fileCoordinator.verify(
-                    VerifyFileTransferRequest(
-                        transferId = transferId,
-                        sizeBytes = verification.sizeBytes,
-                        sha256 = verification.sha256,
-                    ),
-                )
-            ) {
-                FileTransferOperationResult.Accepted -> call.respondOwnedFileSnapshot(
-                    fileCoordinator,
-                    authorized,
-                    verification.messageId,
-                    wallClockMs,
-                )
-                is FileTransferOperationResult.Rejected -> call.respondFileError(
-                    HttpStatusCode.UnprocessableEntity,
-                    FileProtocolErrorCode.CHECKSUM_MISMATCH,
-                    wallClockMs,
-                    verification.messageId,
-                )
-                FileTransferOperationResult.NotFound -> call.respondFileError(
-                    HttpStatusCode.NotFound,
-                    FileProtocolErrorCode.INVALID_PAYLOAD,
-                    wallClockMs,
-                    verification.messageId,
-                )
-                FileTransferOperationResult.InvalidState,
-                FileTransferOperationResult.Conflict,
-                -> call.respondFileError(
-                    HttpStatusCode.Conflict,
-                    FileProtocolErrorCode.MESSAGE_CONFLICT,
-                    wallClockMs,
-                    verification.messageId,
-                )
-            }
-        }
-
         delete("/api/v1/transfers/{transferId}") {
             val authorized = call.authorizeSession(
                 coordinator = sessionCoordinator,
@@ -449,6 +378,59 @@ fun Application.installFileRoutes(
                 else -> call.respondFileError(
                     HttpStatusCode.Conflict,
                     FileProtocolErrorCode.CANCELLED,
+                    wallClockMs,
+                    transferId.value,
+                )
+            }
+        }
+
+        post("/api/v1/transfers/{transferId}/retry") {
+            val authorized = call.authorizeSession(
+                coordinator = sessionCoordinator,
+                generationHandle = generationHandle,
+                allowedHosts = allowedHosts,
+            ) ?: return@post
+            if (!call.requireFileJsonRequest(allowedHosts(), wallClockMs)) return@post
+            val transferId = call.parameters["transferId"]
+                ?.let { value -> runCatching { FileTransferId(value) }.getOrNull() }
+            val item = transferId?.let {
+                fileCoordinator.ownedTransfer(
+                    authorized.handle.generationId,
+                    authorized.session.id,
+                    it,
+                )
+            }
+            if (transferId == null || item == null) {
+                call.respondFileError(
+                    HttpStatusCode.NotFound,
+                    FileProtocolErrorCode.INVALID_PAYLOAD,
+                    wallClockMs,
+                )
+                return@post
+            }
+            when (fileCoordinator.retry(transferId)) {
+                FileTransferOperationResult.Accepted -> call.respondOwnedFileSnapshot(
+                    fileCoordinator,
+                    authorized,
+                    transferId.value,
+                    wallClockMs,
+                )
+                FileTransferOperationResult.NotFound -> call.respondFileError(
+                    HttpStatusCode.NotFound,
+                    FileProtocolErrorCode.INVALID_PAYLOAD,
+                    wallClockMs,
+                )
+                is FileTransferOperationResult.Rejected -> call.respondFileError(
+                    HttpStatusCode.Conflict,
+                    FileProtocolErrorCode.SESSION_UNAVAILABLE,
+                    wallClockMs,
+                    transferId.value,
+                )
+                FileTransferOperationResult.InvalidState,
+                FileTransferOperationResult.Conflict,
+                -> call.respondFileError(
+                    HttpStatusCode.Conflict,
+                    FileProtocolErrorCode.MESSAGE_CONFLICT,
                     wallClockMs,
                     transferId.value,
                 )
@@ -528,7 +510,7 @@ fun Application.installFileRoutes(
                     }
                     if (total != item.metadata.sizeBytes) error("Download source ended before declared size")
                     flush()
-                    fileCoordinator.transition(transferId, FileTransferEvent.Verifying)
+                    fileCoordinator.transition(transferId, FileTransferEvent.Delivered)
                 }
             } catch (failure: Throwable) {
                 fileCoordinator.onNetworkFailure(transferId)

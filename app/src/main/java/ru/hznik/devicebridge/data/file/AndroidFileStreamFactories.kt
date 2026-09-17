@@ -36,8 +36,10 @@ class AndroidFileUploadTargetFactory @Inject constructor(
         metadata: FileTransferMetadata,
     ): FileUploadTarget {
         try {
+            val treeUri = destinationLeases.uri(metadata.id, destinationId)
+                ?: error("Destination lease is unavailable")
             val handle = manager.create(
-                treeUri = destinationId.value,
+                treeUri = treeUri,
                 requestedName = metadata.displayName,
                 fallbackId = metadata.id.value,
                 mimeType = metadata.mimeType,

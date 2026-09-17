@@ -15,7 +15,7 @@ import ru.hznik.devicebridge.domain.session.BrowserSessionId
 class FileControlRouteTest {
 
     @Test
-    fun matchingVerificationCompletesAndDuplicateIsRejected() =
+    fun postDownloadVerificationRouteIsNotPublished() =
         withSessionRouteServer { server ->
             val paired = server.pairBrowser("Chrome")
             prepareVerifying(server, paired.sessionId, "verify-1", "a".repeat(64))
@@ -23,41 +23,13 @@ class FileControlRouteTest {
                 mapOf("Authorization" to "Bearer ${paired.token}"),
             )
 
-            val accepted = server.request(
-                "POST", "/api/v1/files/verify-1/verify", verifyBody("verify-1", "a".repeat(64)), headers,
-            )
-            val duplicate = server.request(
+            val response = server.request(
                 "POST", "/api/v1/files/verify-1/verify", verifyBody("verify-1", "a".repeat(64)), headers,
             )
 
-            assertEquals(200, accepted.statusCode())
-            assertEquals(409, duplicate.statusCode())
+            assertEquals(404, response.statusCode())
             assertEquals(
-                FileTransferPhase.COMPLETED,
-                server.fileCoordinator.state.value.item(FileTransferId("verify-1"))?.phase,
-            )
-        }
-
-    @Test
-    fun checksumMismatchFailsAndForeignSessionCannotVerify() =
-        withSessionRouteServer { server ->
-            val owner = server.pairBrowser("Chrome")
-            val foreign = server.pairBrowser("Edge")
-            prepareVerifying(server, owner.sessionId, "verify-1", "a".repeat(64))
-
-            val foreignResponse = server.request(
-                "POST", "/api/v1/files/verify-1/verify", verifyBody("verify-1", "a".repeat(64)),
-                server.sameOriginJsonHeaders(mapOf("Authorization" to "Bearer ${foreign.token}")),
-            )
-            val mismatch = server.request(
-                "POST", "/api/v1/files/verify-1/verify", verifyBody("verify-1", "b".repeat(64)),
-                server.sameOriginJsonHeaders(mapOf("Authorization" to "Bearer ${owner.token}")),
-            )
-
-            assertEquals(404, foreignResponse.statusCode())
-            assertEquals(422, mismatch.statusCode())
-            assertEquals(
-                FileTransferPhase.FAILED,
+                FileTransferPhase.VERIFYING,
                 server.fileCoordinator.state.value.item(FileTransferId("verify-1"))?.phase,
             )
         }
@@ -85,6 +57,55 @@ class FileControlRouteTest {
             assertEquals(200, active.statusCode())
             assertEquals(FileTransferPhase.CANCELLED, server.fileCoordinator.state.value.item(FileTransferId("queued"))?.phase)
             assertEquals(FileTransferPhase.CANCELLED, server.fileCoordinator.state.value.item(FileTransferId("active"))?.phase)
+        }
+
+    @Test
+    fun ownerCanRetryCancelledItemWithoutDuplicatingOrDroppingItsBatch() =
+        withSessionRouteServer { server ->
+            val owner = server.pairBrowser("Chrome")
+            val foreign = server.pairBrowser("Edge")
+            createOffers(server, owner.sessionId, "first", "second")
+            val ownerHeaders = server.sameOriginJsonHeaders(
+                mapOf("Authorization" to "Bearer ${owner.token}"),
+            )
+            val foreignHeaders = server.sameOriginJsonHeaders(
+                mapOf("Authorization" to "Bearer ${foreign.token}"),
+            )
+
+            assertEquals(
+                200,
+                server.request("DELETE", "/api/v1/transfers/first", headers = ownerHeaders).statusCode(),
+            )
+            assertEquals(
+                403,
+                server.request(
+                    "POST",
+                    "/api/v1/transfers/first/retry",
+                    "{}",
+                    mapOf(
+                        "Authorization" to "Bearer ${owner.token}",
+                        "Content-Type" to "application/json",
+                    ),
+                ).statusCode(),
+            )
+            assertEquals(
+                404,
+                server.request("POST", "/api/v1/transfers/first/retry", "{}", foreignHeaders).statusCode(),
+            )
+            assertEquals(
+                409,
+                server.request("POST", "/api/v1/transfers/second/retry", "{}", ownerHeaders).statusCode(),
+            )
+
+            val retried = server.request(
+                "POST", "/api/v1/transfers/first/retry", "{}", ownerHeaders,
+            )
+
+            assertEquals(200, retried.statusCode())
+            val items = server.fileCoordinator.state.value.items
+            assertEquals(listOf("first", "second"), items.map { it.metadata.id.value })
+            assertEquals(FileTransferPhase.QUEUED, items[0].phase)
+            assertEquals(FileTransferPhase.CONNECTING, items[1].phase)
         }
 
     private fun prepareVerifying(

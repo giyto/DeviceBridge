@@ -47,6 +47,27 @@ class FileTransferSchedulerTest {
     }
 
     @Test
+    fun deliveredDownloadImmediatelyPromotesNextQueuedDownload() = runTest {
+        val scheduler = FileTransferScheduler()
+        val first = transfer("first", FileTransferDirection.ANDROID_TO_BROWSER)
+        val second = transfer("second", FileTransferDirection.ANDROID_TO_BROWSER)
+        scheduler.enqueue(listOf(first, second))
+
+        scheduler.transition(first.metadata.id, FileTransferEvent.Started)
+        scheduler.transition(first.metadata.id, FileTransferEvent.Progressed(1, 1))
+        scheduler.transition(first.metadata.id, FileTransferEvent.Delivered)
+
+        assertEquals(
+            FileTransferPhase.COMPLETED,
+            scheduler.state.value.item(first.metadata.id)?.phase,
+        )
+        assertEquals(
+            FileTransferPhase.CONNECTING,
+            scheduler.state.value.item(second.metadata.id)?.phase,
+        )
+    }
+
+    @Test
     fun oppositeDirectionsMayBeActiveAtTheSameTime() = runTest {
         val scheduler = FileTransferScheduler()
         scheduler.enqueue(

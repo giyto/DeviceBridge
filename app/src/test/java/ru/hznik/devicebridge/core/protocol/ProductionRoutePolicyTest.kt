@@ -24,8 +24,8 @@ class ProductionRoutePolicyTest {
         assertEquals(RouteAccess.PROTECTED, ProductionRoutePolicy.classify("POST", "/api/v1/files/id"))
         assertEquals(RouteAccess.PROTECTED, ProductionRoutePolicy.classify("POST", "/api/v1/files/id/download-grant"))
         assertEquals(RouteAccess.ONE_TIME_GRANT, ProductionRoutePolicy.classify("GET", "/api/v1/files/id"))
-        assertEquals(RouteAccess.PROTECTED, ProductionRoutePolicy.classify("POST", "/api/v1/files/id/verify"))
         assertEquals(RouteAccess.PROTECTED, ProductionRoutePolicy.classify("DELETE", "/api/v1/transfers/id"))
+        assertEquals(RouteAccess.PROTECTED, ProductionRoutePolicy.classify("POST", "/api/v1/transfers/id/retry"))
     }
 
     @Test
@@ -36,6 +36,7 @@ class ProductionRoutePolicyTest {
             "GET" to "/api/v1/history",
             "GET" to "/api/v1/settings",
             "POST" to "/api/v1/files/id/retry",
+            "POST" to "/api/v1/files/id/verify",
             "GET" to "/api/v1/files/content://secret",
         )
 

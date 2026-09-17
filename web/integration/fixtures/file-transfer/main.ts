@@ -1,63 +1,8 @@
 import { createStreamingSha256 } from "../../../src/streamingSha256";
 
-const input = requiredElement<HTMLInputElement>(
-  "[data-testid=verification-file]",
-);
-const state = requiredElement<HTMLElement>("[data-testid=verification-state]");
-const acknowledgements = requiredElement<HTMLElement>(
-  "[data-testid=verification-acks]",
-);
-const expectedSize = Number(document.body.dataset.expectedSize);
-const expectedSha256 = document.body.dataset.expectedSha256;
-
 (globalThis as typeof globalThis & {
   runFileHashBenchmark?: typeof runFileHashBenchmark;
 }).runFileHashBenchmark = runFileHashBenchmark;
-
-input.addEventListener("change", () => {
-  const file = input.files?.item(0);
-  if (!file) return;
-  void verify(file);
-});
-
-async function verify(file: File): Promise<void> {
-  state.textContent = "verifying";
-  if (file.size !== expectedSize) {
-    state.textContent = "mismatch";
-    return;
-  }
-
-  const digest = createStreamingSha256();
-  const reader = file.stream().getReader();
-  try {
-    while (true) {
-      const result = await reader.read();
-      if (result.done) break;
-      digest.update(result.value);
-    }
-  } finally {
-    reader.releaseLock();
-  }
-
-  const sha256 = digest.digestHex();
-  if (sha256 !== expectedSha256) {
-    state.textContent = "mismatch";
-    return;
-  }
-
-  const response = await fetch("/verify", {
-    body: JSON.stringify({ sha256, size: file.size }),
-    headers: { "Content-Type": "application/json" },
-    method: "POST",
-  });
-  if (!response.ok) {
-    state.textContent = "failed";
-    return;
-  }
-  const result = (await response.json()) as { acknowledgements: number };
-  acknowledgements.textContent = String(result.acknowledgements);
-  state.textContent = "verified";
-}
 
 async function runFileHashBenchmark(sizeMiB: number): Promise<{
   digest: string;
@@ -91,10 +36,4 @@ async function runFileHashBenchmark(sizeMiB: number): Promise<{
     elapsedMs: performance.now() - startedAt,
     heapGrowthBytes: Math.max(0, peakHeap - heapBefore),
   };
-}
-
-function requiredElement<T extends Element>(selector: string): T {
-  const element = document.querySelector<T>(selector);
-  if (!element) throw new Error(`Missing fixture element: ${selector}`);
-  return element;
 }

@@ -63,6 +63,42 @@ class FileTransferReducerTest {
     }
 
     @Test
+    fun deliveredCompletesOnlyFullyStreamedAndroidToBrowserTransfer() {
+        val queued = transfer(direction = FileTransferDirection.ANDROID_TO_BROWSER)
+        val transferring = FileTransferReducer.reduce(
+            FileTransferReducer.reduce(queued, FileTransferEvent.Connecting),
+            FileTransferEvent.Started,
+        )
+        val incomplete = FileTransferReducer.reduce(
+            transferring,
+            FileTransferEvent.Progressed(511, 20),
+        )
+        assertSame(
+            incomplete,
+            FileTransferReducer.reduce(incomplete, FileTransferEvent.Delivered),
+        )
+
+        val fullyStreamed = FileTransferReducer.reduce(
+            incomplete,
+            FileTransferEvent.Progressed(512, 20),
+        )
+        assertEquals(
+            FileTransferPhase.COMPLETED,
+            FileTransferReducer.reduce(fullyStreamed, FileTransferEvent.Delivered).phase,
+        )
+
+        val upload = transfer(direction = FileTransferDirection.BROWSER_TO_ANDROID)
+        val uploaded = FileTransferReducer.reduce(
+            FileTransferReducer.reduce(
+                FileTransferReducer.reduce(upload, FileTransferEvent.Connecting),
+                FileTransferEvent.Started,
+            ),
+            FileTransferEvent.Progressed(512, 20),
+        )
+        assertSame(uploaded, FileTransferReducer.reduce(uploaded, FileTransferEvent.Delivered))
+    }
+
+    @Test
     fun terminalStateIsImmutableAndOwnershipNeverChanges() {
         val initial = transfer()
         val owner = initial.ownerSessionId
@@ -110,7 +146,9 @@ class FileTransferReducerTest {
         }
     }
 
-    private fun transfer() = FileTransferState.queued(
+    private fun transfer(
+        direction: FileTransferDirection = FileTransferDirection.BROWSER_TO_ANDROID,
+    ) = FileTransferState.queued(
         generationId = ServerGenerationId(7),
         ownerSessionId = BrowserSessionId("session-1"),
         metadata = FileTransferMetadata(
@@ -119,7 +157,7 @@ class FileTransferReducerTest {
             sizeBytes = 512,
             mimeType = "image/jpeg",
             sha256 = "a".repeat(64),
-            direction = FileTransferDirection.BROWSER_TO_ANDROID,
+            direction = direction,
         ),
     )
 }

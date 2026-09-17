@@ -1,8 +1,10 @@
+# file-transfer Specification
+
 ## Purpose
 
-Определить безопасную, потоковую и проверяемую передачу одного или нескольких файлов между Android host и выбранной browser session без внешнего backend и без буферизации полного файла в памяти.
+Определить безопасную и потоковую передачу одного или нескольких файлов между Android host и выбранной browser session без внешнего backend и без буферизации полного файла в памяти.
 
-## ADDED Requirements
+## Requirements
 
 ### Requirement: Файлы передаются только через активную browser session
 
@@ -120,9 +122,9 @@ DeviceBridge MUST читать, передавать, записывать и х
 - **THEN** transfer завершается контролируемой ошибкой
 - **AND** приложение предлагает повторно выбрать location без crash
 
-### Requirement: Browser download требует явного сохранения и проверки
+### Requirement: Browser download завершается без повторного выбора файла
 
-Android → Browser item MUST оставаться предложением до явного действия пользователя в web UI. На LAN HTTP web shell MUST запускать нативную загрузку без помещения полного response в память, а completed MUST устанавливаться только после явного выбора пользователем скачанного файла и совпадения вычисленного SHA-256.
+Android → Browser item MUST оставаться предложением до явного действия пользователя в web UI. На LAN HTTP web shell MUST запускать нативную загрузку без помещения полного response в память. После успешной отдачи заявленного количества байтов server MUST установить completed и MUST NOT требовать повторного выбора скачанного файла.
 
 #### Scenario: Browser принимает предложение
 
@@ -133,20 +135,14 @@ Android → Browser item MUST оставаться предложением до
 #### Scenario: Download stream завершён
 
 - **WHEN** server передал заявленное число байтов
-- **THEN** item переходит в verifying и просит выбрать сохранённый файл
-- **AND** не сообщает completed до checksum comparison
-
-#### Scenario: Пользователь выбирает скачанный файл
-
-- **WHEN** выбранный локальный файл имеет ожидаемый размер и SHA-256
 - **THEN** item переходит в completed
-- **AND** web UI показывает успешную проверку
+- **AND** следующий queued item того же направления больше не блокируется
 
-#### Scenario: Выбран другой или повреждённый файл
+#### Scenario: Download stream прерван
 
-- **WHEN** размер либо SHA-256 выбранного файла не совпадает
-- **THEN** item переходит в failed с checksum mismatch
-- **AND** пользователь может явно начать новую загрузку
+- **WHEN** response оборван до передачи заявленного числа байтов
+- **THEN** item переходит в failed
+- **AND** пользователь может явно повторить загрузку без повторного выбора исходного файла
 
 ### Requirement: Прогресс и terminal state наблюдаемы
 
@@ -179,6 +175,12 @@ Android → Browser item MUST оставаться предложением до
 - **WHEN** пользователь отменяет item до начала потока
 - **THEN** item удаляется из executable queue и становится cancelled
 - **AND** сетевое тело или output не открывается
+
+#### Scenario: Пользователь повторяет отменённый или failed item
+
+- **WHEN** владеющая session явно запрашивает retry в том же server generation
+- **THEN** тот же item с сохранёнными metadata возвращается в FIFO с нулевым progress
+- **AND** доступный Android source сохраняется до completed, revoke или server stop, а дубликат item не создаётся
 
 #### Scenario: Отменён active upload
 

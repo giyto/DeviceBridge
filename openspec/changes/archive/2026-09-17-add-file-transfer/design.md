@@ -2,7 +2,7 @@
 
 См. proposal.md — Why. Текущий production stack уже имеет Ktor 3.5.2/CIO, foreground service, active browser sessions, защищённые HTTP/WebSocket routes и двусторонний text protocol. Диагностический spike подтвердил на API 29 и API 37.1 потоковые upload/download по 500 МБ, cancellation, SHA-256 и запас по памяти; production file routes пока намеренно возвращают 404.
 
-ТЗ 2.0 требует одно Android-приложение, LAN HTTP/WebSocket, отсутствие desktop companion и service worker, передачу в обе стороны, одну активную операцию каждого направления, SAF, progress, cancellation и end-to-end SHA-256. Для текущего change зафиксирован диапазон одного файла от 0 байт до 1 ГиБ включительно и обязательная 500 МБ проверка. История, постоянная папка назначения, уменьшаемая пользователем file-size setting и trusted browsers относятся к следующему change.
+ТЗ 2.0 требует одно Android-приложение, LAN HTTP/WebSocket, отсутствие desktop companion и service worker, передачу в обе стороны, одну активную сетевую операцию каждого направления, SAF, progress и cancellation. Browser → Android payload проверяется по SHA-256; Android → Browser завершается после успешной потоковой отдачи заявленного количества байтов без повторного выбора скачанного файла. Для текущего change зафиксирован диапазон одного файла от 0 байт до 1 ГиБ включительно и обязательная 500 МБ проверка потоковой передачи. История, постоянная папка назначения, уменьшаемая пользователем file-size setting и trusted browsers относятся к следующему change.
 
 Web stack: TypeScript 7.0.2, Vite 8.3.0, Vitest 5.0.0 без UI framework. Android stack: Kotlin 2.2.10, Compose, Hilt 2.59.2, Coroutines 1.10.2 и Ktor 3.5.2 в одном app module.
 
@@ -14,7 +14,7 @@ Web stack: TypeScript 7.0.2, Vite 8.3.0, Vitest 5.0.0 без UI framework. Andro
 
 - сохранить Clean Architecture, MVVM, SOLID и один process-wide source of truth для transfer state;
 - обрабатывать payload от 0 байт до hard limit 1 ГиБ ограниченными chunks, обязательно проверять 500 МБ и не блокировать main/UI thread;
-- дать обоим направлениям одинаковые terminal semantics, ownership, progress, cancellation и SHA-256;
+- дать обоим направлениям одинаковые terminal semantics, ownership, progress и cancellation, сохранив SHA-256 для Browser → Android payload;
 - использовать только user-granted content URI на Android и нативный download manager браузера на LAN HTTP;
 - обеспечить тестируемый protocol и воспроизводимую API 29/API 37.1 + Chrome/Edge матрицу.
 
@@ -46,9 +46,11 @@ Android → Browser:
 1. Android создаёт offers после выбора recipient и files.
 2. Browser запрашивает POST /api/v1/files/{transferId}/download-grant.
 3. Нативный download выполняет GET /api/v1/files/{transferId} с одноразовым grant.
-4. POST /api/v1/files/{transferId}/verify фиксирует checksum result.
+4. После успешной отдачи заявленного количества байтов server переводит item в completed и запускает следующий queued item направления.
 
 DELETE /api/v1/transfers/{transferId} отменяет queued или active operation. Все control commands и events имеют protocolVersion, messageId, timestamp и idempotency semantics, совместимые с text protocol.
+
+POST /api/v1/transfers/{transferId}/retry выполняет только явный повтор принадлежащего session terminal item. Команда возвращает тот же item в очередь с обнулённым progress; payload не запускается автоматически. Для Android → Browser повтор доступен, пока Android сохраняет исходный content URI или private staged source текущего server generation.
 
 Альтернатива — multipart batch. Она отклонена: один большой multipart усложняет независимую очередь, progress, cancellation и cleanup отдельных файлов.
 
@@ -58,9 +60,11 @@ DELETE /api/v1/transfers/{transferId} отменяет queued или active oper
 
 State machine:
 
-queued → connecting → transferring → verifying → completed
+queued → connecting → transferring → completed
 
-Из любого non-terminal state разрешены cancelled или failed. Terminal state неизменяем. Reducer проверяет монотонность bytes, допустимые переходы и ownership. Queue и terminal metadata ограничены по количеству, очищаются при server stop и не записываются в Room.
+Промежуточный verifying сохраняется только там, где принимающая сторона внутри DeviceBridge действительно вычисляет SHA-256, прежде всего для Browser → Android upload. Android → Browser не ожидает ручного post-download acknowledgement.
+
+Из любого non-terminal state разрешены cancelled или failed. Terminal state неизменяем внутри reducer; только отдельная явная retry-команда scheduler создаёт новую попытку того же item из сохранённых metadata и сбрасывает progress. Reducer проверяет монотонность bytes, допустимые переходы и ownership. Queue и terminal metadata ограничены по количеству, очищаются при server stop и не записываются в Room.
 
 Альтернатива — отдельная очередь на browser session. Она отклонена, поскольку несколько sessions смогли бы параллельно перегрузить один телефон и нарушить FR-06.
 
@@ -80,7 +84,7 @@ Android показывает incoming offer и запускает ACTION_OPEN_DO
 
 Для picker URI берётся временный/persistable read grant только на срок нужных operations и затем освобождается. Для share URI, которые нельзя persist, source descriptor открывается при подтверждении; если grant недостаточен для queued lifetime, содержимое потоково staging-ится в no-backup internal storage и удаляется в terminal cleanup. Полный payload никогда не хранится в памяти.
 
-### 5. Android → Browser использует native download и явную post-download verification
+### 5. Android → Browser использует native download без повторного выбора файла
 
 Android selection использует OpenMultipleDocuments; ACTION_SEND и ACTION_SEND_MULTIPLE открывают тот же preview без auto-send. Android guidance требует дать пользователю возможность подтвердить shared content и документирует оба share actions: [Receive shared content](https://developer.android.com/develop/ui/compose/sharing/receive).
 
@@ -88,13 +92,15 @@ Coordinator делает первый потоковый pass по source URI д
 
 Ktor отдаёт ContentResolver InputStream через respondOutputStream/ByteWriteChannel с content length и считает фактически записанные bytes. Ktor 3.5 поддерживает incremental request/response I/O, не требующее полного payload: [Ktor I/O interoperability](https://ktor.io/docs/io-interoperability.html), [respondOutputStream API](https://api.ktor.io/ktor-server-core/io.ktor.server.response/respond-output-stream.html).
 
-После server-side stream completion item остаётся verifying. Web UI просит выбрать уже скачанный файл обычным input type=file, повторно читает File.stream() chunks и сравнивает size/SHA-256. Только совпадение отправляет verify acknowledgement и переводит item в completed.
+После server-side stream completion item сразу становится completed. Критерий успеха — source stream закончился ровно на заявленном размере, response не был прерван и все байты были переданы в native download response. Web UI не просит повторно выбирать сохранённый файл и не удерживает очередь в verifying.
 
-Trade-off: пользователь повторно выбирает скачанный файл. Это единственный вариант в текущих границах LAN HTTP + no service worker, который одновременно сохраняет native streaming download, bounded memory и реальную проверку bytes на диске. Chromium integration test обязан доказать, что one-time download handoff не буферизует payload и работает в Chrome/Edge; если gate не пройден, implementation останавливается и ТЗ пересматривается, а checksum не ослабляется молча.
+При пользовательской отмене или сетевой ошибке source URI/private staged source не удаляется немедленно: он остаётся привязанным к terminal item для explicit retry в текущем server generation. Источник удаляется после completed, при revoke владельца или общем server stop. Retry снова ставит тот же item в FIFO и требует нового действия «Скачать», поэтому отмена не теряет файл и не запускает скрытый повтор.
+
+Trade-off: на обычном LAN HTTP web page не может подтвердить фактическую запись файла на диск после нативной загрузки. UI честно сообщает только о завершении передачи сервером; пользователь при необходимости проверяет сохранённый файл средствами ОС. Chromium integration test обязан доказать, что one-time download handoff не буферизует payload и работает в Chrome/Edge.
 
 ### 6. SHA-256 абстрагирован от платформы
 
-Domain видит только digest value и verification result. Android adapter использует java.security.MessageDigest по chunks на Dispatchers.IO. Web получает StreamingSha256 interface; реализация поставляется внутри bundled assets, не делает внешних запросов и проверяется стандартными vectors, boundary chunks и 500 МБ deterministic fixture.
+Domain видит digest value и verification result для потоков, где DeviceBridge контролирует принимающую сторону. Android adapter использует java.security.MessageDigest по chunks на Dispatchers.IO. Web получает StreamingSha256 interface для подготовки Browser → Android upload; реализация поставляется внутри bundled assets, не делает внешних запросов и проверяется standard vectors, boundary chunks и 500 МБ deterministic fixture.
 
 Web Crypto digest не выбирается для больших файлов, потому что его one-shot input потребовал бы полный ArrayBuffer. Конкретная pure TypeScript или bundled WASM реализация выбирается после license/size/security benchmark, не меняя protocol или tasks.
 
@@ -129,17 +135,16 @@ Web file controller отделяет DOM rendering от API/XHR/hash adapters. D
 
 - Domain/unit: reducer, queue ordering, concurrency, 0-byte/1-GiB boundaries, filename normalization, collision, idempotency, checksum и cleanup.
 - Server integration: authorization/ownership, raw streaming, one-time grant, cancellation, disconnect, size mismatch, checksum mismatch, text during file transfer.
-- Web/Vitest: selection, drag-and-drop, XHR progress/abort, download handoff, hash vectors, verification UX, refresh snapshot и accessibility contracts.
+- Web/Vitest: selection, drag-and-drop, XHR progress/abort, download handoff, отсутствие post-download picker, hash vectors для upload, refresh snapshot и accessibility contracts.
 - Compose/instrumented: picker gateways, ACTION_SEND/ACTION_SEND_MULTIPLE preview, destination denial, progress/cancel/open actions и notification.
 - API 29/API 37.1: 500 МБ upload/download, memory bounds, cancellation recovery, 20 start/stop cycles и descriptor/Wi-Fi-lock cleanup.
-- Chrome/Edge on Windows: single/multiple files, 500 МБ native download, manual verification, upload, cancellation, refresh and LAN HTTP.
+- Chrome/Edge on Windows: single/multiple files, 500 МБ native download без повторного выбора, upload, cancellation, refresh and LAN HTTP.
 
 Playwright может быть добавлен как pinned dev dependency только для Chromium integration fixture; production web bundle не получает runtime dependency или внешнюю сеть.
 
 ## Risks / Trade-offs
 
-- [Повторный выбор скачанного файла ухудшает UX] → объяснить причину LAN HTTP рядом с verify action и сохранить один короткий workflow; улучшение потребует отдельного HTTPS/desktop decision.
-- [Native download не сообщает странице локальный disk completion] → server completion переводит state только в verifying, а completed выдаётся после явного hash comparison.
+- [Native download не сообщает странице локальный disk completion] → completed означает успешную отдачу полного response сервером, а не подтверждённую запись на диск; повторный выбор файла намеренно отсутствует.
 - [Download grant присутствует в request URL] → отдельный random single-use grant на 30 секунд, no-referrer, отсутствие request-query logging, ownership check и немедленная invalidation.
 - [Provider не поддерживает rename/delete partial document] → создавать уникальный temporary display name, попытаться delete, иначе показать failed partial item и инструкцию очистки; никогда не отмечать completed.
 - [Двойной pass для source hash увеличивает время и I/O] → вычислять на background dispatcher, показывать preparation/verifying phase и сохранять bounded memory; correctness важнее скрытой задержки.

@@ -21,14 +21,20 @@ import ru.hznik.devicebridge.domain.session.BrowserSessionId
 class FileDownloadRouteTest {
 
     @Test
-    fun ownerGetsSingleUseGrantAndNativeGetStreamsThenWaitsForVerification() {
+    fun completedNativeDownloadPromotesNextQueuedFileWithoutVerification() {
         val payload = "download-payload".encodeToByteArray()
         val source = RecordingSource(payload)
         withSessionRouteServer(
             downloadSourceFactory = FileDownloadSourceFactory { source },
         ) { server ->
             val paired = server.pairBrowser("Edge")
-            createDownloadOffer(server, paired.sessionId, payload, "report.txt")
+            createDownloadOffers(
+                server,
+                paired.sessionId,
+                payload,
+                "download-1" to "report.txt",
+                "download-2" to "next.txt",
+            )
 
             val grantResponse = server.request(
                 "POST",
@@ -50,8 +56,12 @@ class FileDownloadRouteTest {
             assertEquals(404, replay.statusCode())
             assertTrue(source.closed)
             assertEquals(
-                FileTransferPhase.VERIFYING,
+                FileTransferPhase.COMPLETED,
                 server.fileCoordinator.state.value.item(FileTransferId("download-1"))?.phase,
+            )
+            assertEquals(
+                FileTransferPhase.CONNECTING,
+                server.fileCoordinator.state.value.item(FileTransferId("download-2"))?.phase,
             )
         }
     }
@@ -68,7 +78,12 @@ class FileDownloadRouteTest {
             val owner = server.pairBrowser("Chrome")
             val foreign = server.pairBrowser("Edge")
             val payload = "x".encodeToByteArray()
-            createDownloadOffer(server, owner.sessionId, payload, "../unsafe\".txt")
+            createDownloadOffers(
+                server,
+                owner.sessionId,
+                payload,
+                "download-1" to "../unsafe\".txt",
+            )
 
             val missing = server.request(
                 "POST", "/api/v1/files/download-1/download-grant", grantBody(), server.sameOriginJsonHeaders(),
@@ -92,27 +107,27 @@ class FileDownloadRouteTest {
         }
     }
 
-    private fun createDownloadOffer(
+    private fun createDownloadOffers(
         server: SessionRouteTestServer,
         sessionId: String,
         payload: ByteArray,
-        displayName: String,
+        vararg files: Pair<String, String>,
     ) = runBlocking {
         server.fileCoordinator.create(
             CreateFileTransfersRequest(
                 commandId = FileCommandId("android-offer-1"),
                 generationId = server.handle.generationId,
                 ownerSessionId = BrowserSessionId(sessionId),
-                files = listOf(
+                files = files.map { (id, displayName) ->
                     FileTransferMetadata(
-                        id = FileTransferId("download-1"),
+                        id = FileTransferId(id),
                         displayName = displayName,
                         sizeBytes = payload.size.toLong(),
                         mimeType = "text/plain",
                         sha256 = sha256(payload),
                         direction = FileTransferDirection.ANDROID_TO_BROWSER,
-                    ),
-                ),
+                    )
+                },
             ),
         )
     }
