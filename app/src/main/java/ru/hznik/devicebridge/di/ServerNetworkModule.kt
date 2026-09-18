@@ -15,6 +15,8 @@ import ru.hznik.devicebridge.data.network.LanNetworkObserver
 import ru.hznik.devicebridge.data.network.LanNetworkSnapshotProvider
 import ru.hznik.devicebridge.data.network.NetworkCallbackRegistrar
 import ru.hznik.devicebridge.data.server.KtorServerRuntimeFactory
+import ru.hznik.devicebridge.data.server.DEFAULT_PRODUCTION_SERVER_PORT
+import ru.hznik.devicebridge.data.server.ProductionServerPort
 import ru.hznik.devicebridge.data.server.ServerRuntimeFactory
 import ru.hznik.devicebridge.web.AssetManagerWebAssetProvider
 import ru.hznik.devicebridge.web.WebAssetProvider
@@ -48,6 +50,10 @@ abstract class ServerNetworkModule {
     ): ServerRuntimeFactory
 
     companion object {
+        @Provides
+        @ProductionServerPort
+        fun provideProductionServerPort(): Int = DEFAULT_PRODUCTION_SERVER_PORT
+
         @Provides
         @Singleton
         fun provideWebAssetProvider(

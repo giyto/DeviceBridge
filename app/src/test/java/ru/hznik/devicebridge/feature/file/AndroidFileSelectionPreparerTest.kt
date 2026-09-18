@@ -13,6 +13,8 @@ import ru.hznik.devicebridge.data.file.AndroidChunkedFileCopier
 import ru.hznik.devicebridge.data.file.AndroidDocumentMetadata
 import ru.hznik.devicebridge.data.file.AndroidFileSourcePickerGateway
 import ru.hznik.devicebridge.data.file.FileSourceRegistry
+import ru.hznik.devicebridge.domain.file.FileDraftId
+import ru.hznik.devicebridge.domain.file.FileTransferId
 
 class AndroidFileSelectionPreparerTest {
 
@@ -27,8 +29,8 @@ class AndroidFileSelectionPreparerTest {
 
             assertEquals(0, result.rejectedCount)
             val item = result.items.single()
-            val staged = fixture.registry.stagedFile(item.transferId)!!
-            assertNull(fixture.registry.sourceUri(item.transferId))
+            val staged = fixture.registry.draftStagedFile(item.id)!!
+            assertNull(fixture.registry.draftSourceUri(item.id))
             assertTrue(staged.canonicalPath.startsWith(fixture.directory.canonicalPath))
             assertArrayEquals(fixture.bytes, staged.readBytes())
         } finally {
@@ -43,9 +45,29 @@ class AndroidFileSelectionPreparerTest {
             val result = fixture.preparer().prepare(listOf(fixture.uri))
 
             val item = result.items.single()
-            assertEquals(fixture.uri, fixture.registry.sourceUri(item.transferId))
-            assertNull(fixture.registry.stagedFile(item.transferId))
+            assertEquals(fixture.uri, fixture.registry.draftSourceUri(item.id))
+            assertNull(fixture.registry.draftStagedFile(item.id))
             assertTrue(fixture.directory.listFiles().orEmpty().isEmpty())
+        } finally {
+            fixture.close()
+        }
+    }
+
+    @Test
+    fun sourceLeasePromotesOnlyOnConfirmAndCanRollbackWithoutDeletingSource() = runTest {
+        val fixture = Fixture(bytes = byteArrayOf(1, 2, 3))
+        try {
+            val item = fixture.preparer().prepare(listOf(fixture.uri)).items.single()
+            val transferId = FileTransferId("confirmed-transfer")
+
+            assertNull(fixture.registry.sourceUri(transferId))
+            assertTrue(item.sourceLease.promote(transferId))
+            assertNull(fixture.registry.draftSourceUri(item.id))
+            assertEquals(fixture.uri, fixture.registry.sourceUri(transferId))
+
+            item.sourceLease.rollback(transferId)
+            assertNull(fixture.registry.sourceUri(transferId))
+            assertEquals(fixture.uri, fixture.registry.draftSourceUri(item.id))
         } finally {
             fixture.close()
         }
@@ -64,6 +86,23 @@ class AndroidFileSelectionPreparerTest {
             assertTrue(result.items.isEmpty())
             assertFalse(fixture.wasOpened)
             assertTrue(fixture.directory.listFiles().orEmpty().isEmpty())
+        } finally {
+            fixture.close()
+        }
+    }
+
+    @Test
+    fun effectiveLimitRejectsSelectionBeforeOpeningItsPayload() = runTest {
+        val fixture = Fixture(bytes = byteArrayOf(1, 2, 3))
+        try {
+            val result = fixture.preparer().prepare(
+                uris = listOf(fixture.uri),
+                effectiveFileLimitBytes = 2,
+            )
+
+            assertEquals(1, result.rejectedCount)
+            assertTrue(result.items.isEmpty())
+            assertFalse(fixture.wasOpened)
         } finally {
             fixture.close()
         }
@@ -90,6 +129,33 @@ class AndroidFileSelectionPreparerTest {
         } finally {
             permissionLoss.close()
             sizeMismatch.close()
+        }
+    }
+
+    @Test
+    fun startupCleanupDeletesOnlyOrphanStageFiles() {
+        val directory = Files.createTempDirectory("devicebridge-orphan-stage").toFile()
+        val registry = FileSourceRegistry()
+        val retained = directory.resolve("source-retained.devicebridge-stage")
+        val orphan = directory.resolve("source-orphan.devicebridge-stage")
+        retained.writeBytes(byteArrayOf(1))
+        orphan.writeBytes(byteArrayOf(2))
+        registry.registerDraftStaged(FileDraftId("retained"), retained)
+        try {
+            AndroidFileSelectionPreparer(
+                pickerGateway = AndroidFileSourcePickerGateway { null },
+                copier = AndroidChunkedFileCopier(),
+                sourceRegistry = registry,
+                stagingDirectory = directory,
+                openInputStream = { null },
+                availableBytes = { Long.MAX_VALUE },
+            )
+
+            assertTrue(retained.exists())
+            assertFalse(orphan.exists())
+        } finally {
+            registry.clear()
+            directory.deleteRecursively()
         }
     }
 

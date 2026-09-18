@@ -83,6 +83,33 @@ class FileMetadataValidatorTest {
         )
     }
 
+    @Test
+    fun effectiveLimitAcceptsZeroAndBoundaryButRejectsBoundaryPlusOne() {
+        val limit = 512L
+
+        assertTrue(
+            FileMetadataValidator.validate(candidate(sizeBytes = 0), limit)
+                is FileMetadataValidation.Valid,
+        )
+        assertTrue(
+            FileMetadataValidator.validate(candidate(sizeBytes = limit), limit)
+                is FileMetadataValidation.Valid,
+        )
+        assertEquals(
+            FileMetadataError.FILE_TOO_LARGE,
+            (
+                FileMetadataValidator.validate(candidate(sizeBytes = limit + 1), limit)
+                    as FileMetadataValidation.Invalid
+                ).error,
+        )
+    }
+
+    @Test
+    fun requestedLimitIsAlwaysClampedToHardLimit() {
+        assertEquals(HARD_MAX_FILE_BYTES, effectiveFileLimitBytes(Long.MAX_VALUE))
+        assertEquals(1L, effectiveFileLimitBytes(0))
+    }
+
     private fun assertInvalid(size: Long, expected: FileMetadataError) {
         val result = FileMetadataValidator.validate(candidate(sizeBytes = size))
         assertEquals(expected, (result as FileMetadataValidation.Invalid).error)

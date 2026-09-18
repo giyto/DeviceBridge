@@ -23,8 +23,10 @@ describe("createFileTransferView", () => {
     ];
     const input = document.querySelector<HTMLInputElement>("#file-input")!;
     Object.defineProperty(input, "files", { value: files });
+    Object.defineProperty(input, "value", { value: "selected", writable: true });
     input.dispatchEvent(new Event("change", { bubbles: true }));
     expect(actions.onSelect).toHaveBeenCalledWith(files);
+    expect(input.value).toBe("");
     expect(actions.onConfirm).not.toHaveBeenCalled();
 
     const zone = document.querySelector<HTMLElement>('[data-role="file-drop-zone"]')!;
@@ -33,6 +35,33 @@ describe("createFileTransferView", () => {
     zone.dispatchEvent(drop);
     expect(actions.onSelect).toHaveBeenLastCalledWith(files);
     expect(zone.tabIndex).toBe(0);
+  });
+
+  it("exposes accessible remove, clear, add and disabled empty confirm controls", () => {
+    const actions = createActions();
+    const view = createFileTransferView(document, actions);
+    view.render(active());
+    expect(document.querySelector<HTMLButtonElement>('[data-action="confirm-files"]')?.disabled)
+      .toBe(true);
+    expect(document.querySelector('label[for="file-input"]')?.textContent)
+      .toContain("Выберите файлы");
+
+    view.render(active({
+      selection: [{
+        key: "draft-1",
+        displayName: "report.txt",
+        sizeBytes: 3,
+        mimeType: "text/plain",
+      }],
+    }));
+    const remove = document.querySelector<HTMLButtonElement>('[data-action="remove-draft-file"]')!;
+    expect(remove.getAttribute("aria-label")).toBe("Удалить report.txt из выбранных");
+    remove.click();
+    expect(actions.onRemoveDraft).toHaveBeenCalledWith("draft-1");
+    const clear = document.querySelector<HTMLButtonElement>('[data-action="clear-file-draft"]')!;
+    expect(clear.hidden).toBe(false);
+    clear.click();
+    expect(actions.onClearDraft).toHaveBeenCalledOnce();
   });
 
   it("renders progress and safe actions without interpreting filenames as HTML", () => {
@@ -60,6 +89,28 @@ describe("createFileTransferView", () => {
     expect(card.querySelector("img")).toBeNull();
     expect(card.textContent).toContain("50%");
     card.querySelector<HTMLButtonElement>('[data-action="cancel-file"]')?.click();
+    expect(actions.onCancel).toHaveBeenCalledWith("file-1");
+  });
+
+  it("keeps the cancel control connected while upload progress is rendered", () => {
+    const actions = createActions();
+    const view = createFileTransferView(document, actions);
+    view.render(active({ transfers: [{
+      ...item("TRANSFERRING"),
+      bytesTransferred: 1,
+    }] }));
+    const cancel = document.querySelector<HTMLButtonElement>(
+      '[data-action="cancel-file"]',
+    )!;
+
+    view.render(active({ transfers: [{
+      ...item("TRANSFERRING"),
+      bytesTransferred: 3,
+    }] }));
+
+    expect(cancel.isConnected).toBe(true);
+    expect(document.querySelector('[data-action="cancel-file"]')).toBe(cancel);
+    cancel.click();
     expect(actions.onCancel).toHaveBeenCalledWith("file-1");
   });
 
@@ -92,6 +143,8 @@ function createActions() {
   return {
     onSelect: vi.fn(),
     onConfirm: vi.fn(),
+    onRemoveDraft: vi.fn(),
+    onClearDraft: vi.fn(),
     onCancel: vi.fn(),
     onRetry: vi.fn(),
     onDownload: vi.fn(),
@@ -108,7 +161,9 @@ function active(overrides: Partial<Extract<FileTransferUiState, { kind: "active"
   };
 }
 
-function item(status: "CONNECTING" | "VERIFYING" | "COMPLETED" | "FAILED") {
+function item(
+  status: "CONNECTING" | "TRANSFERRING" | "VERIFYING" | "COMPLETED" | "FAILED",
+) {
   return {
     id: "file-1",
     metadata: {

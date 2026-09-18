@@ -105,6 +105,13 @@
           <span id="pairing-help" class="field-help">
             После отправки подтвердите этот браузер в приложении DeviceBridge.
           </span>
+          <label class="remember-browser" for="remember-browser">
+            <input id="remember-browser" name="remember-browser" type="checkbox" />
+            <span>
+              Запомнить этот браузер
+              <small>Доступ можно отозвать на телефоне; срок — не более 30 дней.</small>
+            </span>
+          </label>
           <button class="primary-button" data-action="pair" type="submit">
             Подключить браузер
           </button>
@@ -183,6 +190,17 @@
             </label>
             <input id="file-input" type="file" multiple hidden />
 
+            <div class="file-draft__heading">
+              <span>Выбранные файлы</span>
+              <button
+                class="secondary-button"
+                data-action="clear-file-draft"
+                type="button"
+                hidden
+              >
+                Очистить
+              </button>
+            </div>
             <ul class="file-selection" data-role="file-selection" aria-label="Выбранные файлы"></ul>
             <p class="text-form__error" data-role="file-error" role="alert" hidden></p>
             <button class="primary-button" data-action="confirm-files" type="button" disabled>

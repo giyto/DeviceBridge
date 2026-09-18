@@ -20,6 +20,23 @@ value class FileTransferId(val value: String) {
 }
 
 @JvmInline
+value class FileDraftId(val value: String) {
+    init {
+        require(value.isNotBlank()) { "Draft identifier must not be blank" }
+        require(value.length <= MAX_FILE_TRANSFER_ID_LENGTH) { "Draft identifier is too long" }
+        require(value.none(Char::isISOControl)) { "Draft identifier contains control characters" }
+        require(FILE_TRANSFER_ID.matches(value)) { "Draft identifier contains unsupported characters" }
+    }
+}
+
+interface DraftSourceLease {
+    fun promote(transferId: FileTransferId): Boolean
+    fun rollback(transferId: FileTransferId)
+    fun commit(transferId: FileTransferId)
+    fun release()
+}
+
+@JvmInline
 value class FileDestinationId(val value: String) {
     init {
         require(value.isNotBlank()) { "Destination identifier must not be blank" }

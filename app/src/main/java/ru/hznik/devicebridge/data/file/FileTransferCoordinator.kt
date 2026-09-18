@@ -23,6 +23,10 @@ import ru.hznik.devicebridge.domain.session.BrowserSessionId
 import ru.hznik.devicebridge.domain.session.BrowserSessionState
 import ru.hznik.devicebridge.domain.session.ServerGenerationId
 
+fun interface FileTerminalHistoryRecorder {
+    suspend fun recordTerminal(item: FileTransferState)
+}
+
 class FileTransferCoordinator(
     private val browserSessionState: () -> BrowserSessionState,
     private val maxItems: Int = 100,
@@ -31,6 +35,8 @@ class FileTransferCoordinator(
         nowEpochMillis = System::currentTimeMillis,
     ),
     private val wifiLock: FileTransferWifiLock = NoOpFileTransferWifiLock,
+    private val historyRecorder: FileTerminalHistoryRecorder =
+        FileTerminalHistoryRecorder { },
 ) : FileTransferRepository {
     private data class OperationKey(
         val generationId: ServerGenerationId,
@@ -402,6 +408,14 @@ class FileTransferCoordinator(
             updated?.phase != FileTransferPhase.TRANSFERRING
         ) {
             wifiLock.release(transferId)
+        }
+        if (
+            previous?.phase?.isTerminal != true &&
+            updated?.phase?.isTerminal == true
+        ) {
+            runCatching {
+                historyRecorder.recordTerminal(updated)
+            }
         }
         return updated
     }

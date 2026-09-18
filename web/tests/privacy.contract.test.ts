@@ -48,13 +48,21 @@ describe("built web privacy contract", () => {
     ).toBe(true);
   });
 
-  it("does not persist credentials in local storage, cookies, URLs or logs", () => {
+  it("persists only trusted credentials locally and keeps session bearers out of cookies, URLs and logs", () => {
     const scripts = outputFiles()
       .filter((path) => path.endsWith(".js"))
       .map((path) => readFileSync(resolve(outputRoot, path), "utf8"))
       .join("\n");
 
-    expect(scripts).not.toContain("localStorage");
+    const sessionStoreSource = readFileSync(resolve(process.cwd(), "src/sessionTokenStore.ts"), "utf8");
+    const trustedStoreSource = readFileSync(
+      resolve(process.cwd(), "src/browserTrustedCredentialStore.ts"),
+      "utf8",
+    );
+    expect(sessionStoreSource).toContain("sessionStorage");
+    expect(sessionStoreSource).not.toContain("localStorage");
+    expect(trustedStoreSource).toContain("localStorage");
+    expect(trustedStoreSource).not.toMatch(/sessionToken|bearer/i);
     expect(scripts).not.toContain("document.cookie");
     expect(scripts).not.toMatch(/[?&](?:token|bearer)=/i);
     expect(scripts).not.toMatch(/console\.(?:log|info|debug)\(/);

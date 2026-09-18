@@ -175,6 +175,25 @@ describe("createTextTransferView", () => {
     document.querySelector<HTMLButtonElement>('[data-open-message-id="safe-link"]')?.click();
     expect(opener.open).toHaveBeenCalledWith("https://example.com/path", "LINK");
   });
+
+  it("groups link actions in a responsive row inside the card", () => {
+    const view = createTextTransferView(document, createActions());
+    view.render(activeState({
+      items: [{
+        ...incomingItem("responsive-link", "https://www.youtube.com/watch?v=example"),
+        contentKind: "LINK",
+      }],
+    }));
+
+    const card = document.querySelector('[data-message-id="responsive-link"]')!;
+    const actionRow = card.querySelector(".text-card__actions");
+    const open = card.querySelector('[data-open-message-id="responsive-link"]');
+    const copy = card.querySelector('[data-copy-message-id="responsive-link"]');
+
+    expect(actionRow).not.toBeNull();
+    expect(open?.parentElement).toBe(actionRow);
+    expect(copy?.parentElement).toBe(actionRow);
+  });
 });
 
 function createActions() {

@@ -4,6 +4,7 @@ import {
   type SessionApi,
   type SessionEventChannel,
   type SessionTokenStore,
+  type TrustedCredentialStore,
   type SessionUiState,
 } from "../src/sessionController";
 import { SessionApiError } from "../src/sessionApiClient";
@@ -33,7 +34,9 @@ describe("SessionController", () => {
     ]);
     expect(JSON.stringify(fixture.states)).not.toContain("secret-token");
     expect(fixture.store.saved).toBe("secret-token");
+    expect(fixture.fileSession.effectiveFileLimitBytes).toBe(1_073_741_824);
     expect(fixture.events.connectedWith).toBe("secret-token");
+    expect(fixture.trustedStore.saved).toBeUndefined();
   });
 
   it("blocks conflicting submissions and maps rate-limit, denied and expired errors", async () => {
@@ -106,6 +109,7 @@ describe("SessionController", () => {
         sessionId: "session-1",
         connected: true,
         activeSessionCount: 1,
+        effectiveFileLimitBytes: 1_073_741_824,
       })
       .mockRejectedValueOnce(
         new SessionApiError(401, "UNAUTHORIZED", "Недействительная сессия"),
@@ -180,6 +184,107 @@ describe("SessionController", () => {
     expect(loader.load).toHaveBeenCalledTimes(5);
     fixture.controller.dispose();
   });
+
+  it("recovers through trusted exchange once after sessionStorage and saves a fresh tab token", async () => {
+    const api = fakeApi();
+    const trusted = new FakeTrustedStore({
+      credential: "trusted-token",
+      expiresAtEpochMillis: 99_000,
+    });
+    const fixture = createFixture(
+      api,
+      new FakeTokenStore(),
+      { load: vi.fn().mockResolvedValue(manifest) },
+      new FakeTextSession(),
+      new FakeFileSession(),
+      trusted,
+    );
+
+    fixture.controller.start();
+    await vi.waitFor(() => expect(fixture.states.at(-1)?.kind).toBe("connected"));
+
+    expect(api.exchangeTrusted).toHaveBeenCalledWith("trusted-token", expect.any(AbortSignal));
+    expect(api.createChallenge).not.toHaveBeenCalled();
+    expect(fixture.store.saved).toBe("trusted-session-token");
+    expect(trusted.saved?.credential).toBe("trusted-token");
+  });
+
+  it("clears revoked trust then pairs, while a network failure does not exchange in a retry loop", async () => {
+    const revokedApi = fakeApi();
+    revokedApi.exchangeTrusted = vi.fn().mockRejectedValue(
+      new SessionApiError(401, "UNAUTHORIZED", "Отозвано"),
+    );
+    const revokedTrust = new FakeTrustedStore({
+      credential: "revoked-token",
+      expiresAtEpochMillis: 99_000,
+    });
+    const revoked = createFixture(
+      revokedApi,
+      new FakeTokenStore(),
+      { load: vi.fn().mockResolvedValue(manifest) },
+      new FakeTextSession(),
+      new FakeFileSession(),
+      revokedTrust,
+    );
+
+    revoked.controller.start();
+    await vi.waitFor(() => expect(revoked.states.at(-1)?.kind).toBe("ready"));
+    expect(revokedTrust.saved).toBeUndefined();
+    expect(revokedApi.createChallenge).toHaveBeenCalledOnce();
+
+    vi.useFakeTimers();
+    const offlineApi = fakeApi();
+    offlineApi.exchangeTrusted = vi.fn().mockRejectedValue(new TypeError("offline"));
+    offlineApi.createChallenge = vi.fn().mockRejectedValue(new TypeError("offline"));
+    const offline = createFixture(
+      offlineApi,
+      new FakeTokenStore(),
+      { load: vi.fn().mockResolvedValue(manifest) },
+      new FakeTextSession(),
+      new FakeFileSession(),
+      new FakeTrustedStore({ credential: "trusted-token", expiresAtEpochMillis: 99_000 }),
+    );
+    offline.controller.start();
+    await vi.advanceTimersByTimeAsync(1_000 + 2_000 + 4_000);
+    expect(offlineApi.exchangeTrusted).toHaveBeenCalledOnce();
+    offline.controller.dispose();
+  });
+
+  it("requests remember on submit and persists only a credential approved by the phone", async () => {
+    const api = fakeApi();
+    api.confirm = vi.fn().mockResolvedValue({
+      protocolVersion: 1,
+      sessionId: "session-remembered",
+      token: "session-token",
+      serverTimeEpochMillis: 11_000,
+      trustedCredential: "trusted-token",
+      trustedCredentialExpiresAtEpochMillis: 99_000,
+    });
+    const trusted = new FakeTrustedStore();
+    const fixture = createFixture(
+      api,
+      new FakeTokenStore(),
+      { load: vi.fn().mockResolvedValue(manifest) },
+      new FakeTextSession(),
+      new FakeFileSession(),
+      trusted,
+    );
+    fixture.controller.start();
+    await vi.waitFor(() => expect(fixture.states.at(-1)?.kind).toBe("ready"));
+
+    fixture.controller.submitCode("123456", true);
+    await vi.waitFor(() => expect(fixture.states.at(-1)?.kind).toBe("connected"));
+
+    expect(api.createChallenge).toHaveBeenLastCalledWith(
+      "Edge on Windows",
+      true,
+      expect.any(AbortSignal),
+    );
+    expect(trusted.saved).toEqual({
+      credential: "trusted-token",
+      expiresAtEpochMillis: 99_000,
+    });
+  });
 });
 
 function createFixture(
@@ -187,6 +292,8 @@ function createFixture(
   store = new FakeTokenStore(),
   loader = { load: vi.fn().mockResolvedValue(manifest) },
   textSession = new FakeTextSession(),
+  fileSession = new FakeFileSession(),
+  trustedStore = new FakeTrustedStore(),
 ) {
   const states: SessionUiState[] = [];
   const events = new FakeEventChannel();
@@ -198,8 +305,10 @@ function createFixture(
     (state) => states.push(state),
     "Edge on Windows",
     textSession,
+    fileSession,
+    trustedStore,
   );
-  return { controller, states, api, store, events, textSession };
+  return { controller, states, api, store, events, textSession, fileSession, trustedStore };
 }
 
 function fakeApi(): SessionApi {
@@ -217,11 +326,18 @@ function fakeApi(): SessionApi {
       token: "secret-token",
       serverTimeEpochMillis: 11_000,
     }),
+    exchangeTrusted: vi.fn().mockResolvedValue({
+      protocolVersion: 1,
+      sessionId: "trusted-session",
+      token: "trusted-session-token",
+      serverTimeEpochMillis: 11_000,
+    }),
     status: vi.fn().mockResolvedValue({
       protocolVersion: 1,
       sessionId: "session-1",
       connected: true,
       activeSessionCount: 1,
+      effectiveFileLimitBytes: 1_073_741_824,
     }),
     close: vi.fn().mockResolvedValue(undefined),
   };
@@ -231,6 +347,15 @@ class FakeTokenStore implements SessionTokenStore {
   constructor(public saved?: string) {}
   read(): string | undefined { return this.saved; }
   save(token: string): void { this.saved = token; }
+  clear(): void { this.saved = undefined; }
+}
+
+class FakeTrustedStore implements TrustedCredentialStore {
+  constructor(public saved?: { credential: string; expiresAtEpochMillis: number }) {}
+  read() { return this.saved; }
+  save(value: { credential: string; expiresAtEpochMillis: number }): void {
+    this.saved = value;
+  }
   clear(): void { this.saved = undefined; }
 }
 
@@ -258,6 +383,20 @@ class FakeTextSession {
   receive(event: TextReceivedEvent): void { this.received.push(event); }
   applySnapshot(event: TextSnapshotEvent): void { this.snapshots.push(event); }
   receiveError(event: TextErrorEvent): void { this.errors.push(event); }
+}
+
+class FakeFileSession {
+  activeToken?: string;
+  effectiveFileLimitBytes?: number;
+  activate(token: string, effectiveFileLimitBytes?: number): void {
+    this.activeToken = token;
+    this.effectiveFileLimitBytes = effectiveFileLimitBytes;
+  }
+  deactivate(): void { this.activeToken = undefined; }
+  receiveOffer(): void {}
+  receiveProgress(): void {}
+  applySnapshot(): void {}
+  receiveError(): void {}
 }
 
 const textReceived: TextReceivedEvent = {

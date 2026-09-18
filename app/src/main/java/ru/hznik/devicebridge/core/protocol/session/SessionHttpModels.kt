@@ -9,11 +9,13 @@ const val SESSION_PROTOCOL_VERSION = 1
 const val MAX_SESSION_JSON_BYTES = 4 * 1024
 const val MAX_CLIENT_LABEL_LENGTH = 64
 const val MAX_CHALLENGE_ID_LENGTH = 64
+const val MAX_TRUSTED_CREDENTIAL_LENGTH = 256
 
 @Serializable
 data class SessionChallengeRequest(
     val protocolVersion: Int,
     val clientLabel: String,
+    val rememberBrowserRequested: Boolean = false,
 )
 
 @Serializable
@@ -39,6 +41,14 @@ data class SessionConfirmResponse(
     val sessionId: String,
     val token: String,
     val serverTimeEpochMillis: Long,
+    val trustedCredential: String? = null,
+    val trustedCredentialExpiresAtEpochMillis: Long? = null,
+)
+
+@Serializable
+data class TrustedSessionExchangeRequest(
+    val protocolVersion: Int,
+    val trustedCredential: String,
 )
 
 @Serializable
@@ -47,6 +57,7 @@ data class SessionStatusResponse(
     val sessionId: String,
     val connected: Boolean,
     val activeSessionCount: Int,
+    val effectiveFileLimitBytes: Long,
 )
 
 @Serializable
@@ -67,6 +78,7 @@ enum class SessionErrorCode {
     INVALID_PAYLOAD,
     UNSUPPORTED_VERSION,
     INVALID_CODE,
+    INVALID_TRUSTED_CREDENTIAL,
     EXPIRED,
     DENIED,
     RATE_LIMITED,
@@ -93,6 +105,7 @@ enum class SessionValidationError {
     INVALID_CLIENT_LABEL,
     INVALID_CHALLENGE_ID,
     INVALID_CODE,
+    INVALID_TRUSTED_CREDENTIAL,
 }
 
 object SessionPayloadValidator {
@@ -110,6 +123,13 @@ object SessionPayloadValidator {
         !PAIRING_CODE.matches(request.code) -> SessionValidationError.INVALID_CODE
         !request.clientLabel.isValidBoundedText(MAX_CLIENT_LABEL_LENGTH) ->
             SessionValidationError.INVALID_CLIENT_LABEL
+        else -> SessionValidationError.NONE
+    }
+
+    fun validate(request: TrustedSessionExchangeRequest): SessionValidationError = when {
+        request.protocolVersion != SESSION_PROTOCOL_VERSION -> SessionValidationError.UNSUPPORTED_VERSION
+        !request.trustedCredential.isValidOpaqueId(MAX_TRUSTED_CREDENTIAL_LENGTH) ->
+            SessionValidationError.INVALID_TRUSTED_CREDENTIAL
         else -> SessionValidationError.NONE
     }
 }

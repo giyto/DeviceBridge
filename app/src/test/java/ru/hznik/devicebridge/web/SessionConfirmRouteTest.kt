@@ -15,6 +15,40 @@ import ru.hznik.devicebridge.core.protocol.session.SessionProtocolJson
 class SessionConfirmRouteTest {
 
     @Test
+    fun rememberBrowserRequestIsPropagatedWhileLegacyRequestDefaultsToAllowOnce() =
+        withSessionRouteServer { server ->
+            val rememberedChallenge = server.challenge("Edge", rememberBrowser = true)
+            val rememberedFuture = server.requestAsync(
+                "POST",
+                "/api/v1/session/confirm",
+                server.confirmBody(rememberedChallenge.challengeId, "123456", "Edge"),
+                server.sameOriginJsonHeaders(),
+            )
+            server.awaitPendingRequest()
+
+            assertTrue(server.coordinator.state.value.pendingRequests.single().rememberBrowserRequested)
+            runBlocking {
+                server.coordinator.deny(server.coordinator.state.value.pendingRequests.single().id)
+            }
+            assertEquals(403, rememberedFuture.get(2, TimeUnit.SECONDS).statusCode())
+
+            val legacyChallenge = server.challenge("Chrome")
+            val legacyFuture = server.requestAsync(
+                "POST",
+                "/api/v1/session/confirm",
+                server.confirmBody(legacyChallenge.challengeId, "123456", "Chrome"),
+                server.sameOriginJsonHeaders(),
+            )
+            server.awaitPendingRequest()
+
+            assertFalse(server.coordinator.state.value.pendingRequests.single().rememberBrowserRequested)
+            runBlocking {
+                server.coordinator.deny(server.coordinator.state.value.pendingRequests.single().id)
+            }
+            assertEquals(403, legacyFuture.get(2, TimeUnit.SECONDS).statusCode())
+        }
+
+    @Test
     fun confirmLongPollReturnsTokenOnlyAfterPhoneApproval() = withSessionRouteServer { server ->
         val challenge = server.challenge("Chrome")
         val future = server.requestAsync(
@@ -130,11 +164,14 @@ class SessionConfirmRouteTest {
             assertEquals(403, future.get(2, TimeUnit.SECONDS).statusCode())
         }
 
-    private fun SessionRouteTestServer.challenge(label: String): SessionChallengeResponse {
+    private fun SessionRouteTestServer.challenge(
+        label: String,
+        rememberBrowser: Boolean = false,
+    ): SessionChallengeResponse {
         val response = request(
             "POST",
             "/api/v1/session/challenge",
-            """{"protocolVersion":1,"clientLabel":"$label"}""",
+            """{"protocolVersion":1,"clientLabel":"$label","rememberBrowserRequested":$rememberBrowser}""",
             sameOriginJsonHeaders(),
         )
         assertEquals(200, response.statusCode())

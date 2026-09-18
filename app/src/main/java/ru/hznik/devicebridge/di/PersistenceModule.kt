@@ -1,0 +1,208 @@
+package ru.hznik.devicebridge.di
+
+import android.content.Context
+import androidx.datastore.core.DataStore
+import androidx.datastore.preferences.core.PreferenceDataStoreFactory
+import androidx.datastore.preferences.core.Preferences
+import androidx.datastore.preferences.preferencesDataStoreFile
+import androidx.room.Room
+import dagger.Module
+import dagger.hilt.EntryPoint
+import dagger.Provides
+import dagger.hilt.InstallIn
+import dagger.hilt.android.qualifiers.ApplicationContext
+import dagger.hilt.components.SingletonComponent
+import java.time.Clock
+import javax.inject.Singleton
+import kotlinx.coroutines.CoroutineScope
+import ru.hznik.devicebridge.data.persistence.datastore.DataStoreSettingsRepository
+import ru.hznik.devicebridge.data.persistence.room.DeviceBridgeDatabase
+import ru.hznik.devicebridge.data.persistence.room.HistoryDao
+import ru.hznik.devicebridge.data.persistence.room.RoomHistoryRepository
+import ru.hznik.devicebridge.data.persistence.room.TrustedBrowserDao
+import ru.hznik.devicebridge.data.history.TextTransferHistoryRecorder
+import ru.hznik.devicebridge.data.history.HistoryPersistenceEventBus
+import ru.hznik.devicebridge.data.history.HistoryPersistenceFailureReporter
+import ru.hznik.devicebridge.data.text.TextTerminalHistoryRecorder
+import ru.hznik.devicebridge.domain.repository.HistoryRepository
+import ru.hznik.devicebridge.domain.repository.SettingsRepository
+import ru.hznik.devicebridge.domain.repository.TrustedBrowserRepository
+import ru.hznik.devicebridge.data.trust.AndroidKeystoreTrustedHmacKeyProvider
+import ru.hznik.devicebridge.data.trust.HmacSha256TrustedCredentialVerifier
+import ru.hznik.devicebridge.data.trust.RoomTrustedBrowserRepository
+import ru.hznik.devicebridge.data.trust.SecureRandomTrustedCredentialGenerator
+import ru.hznik.devicebridge.data.trust.TrustedCredentialGenerator
+import ru.hznik.devicebridge.data.trust.TrustedCredentialVerifier
+import ru.hznik.devicebridge.data.trust.TrustedHmacKeyProvider
+import ru.hznik.devicebridge.domain.usecase.ClearHistoryUseCase
+import ru.hznik.devicebridge.domain.usecase.DeleteHistoryRecordUseCase
+import ru.hznik.devicebridge.domain.usecase.ObserveHistoryUseCase
+import ru.hznik.devicebridge.domain.usecase.ObserveSettingsUseCase
+import ru.hznik.devicebridge.domain.usecase.UpdateDestinationTreeUseCase
+import ru.hznik.devicebridge.domain.usecase.UpdateDeviceNameUseCase
+import ru.hznik.devicebridge.domain.usecase.UpdateFileLimitUseCase
+import ru.hznik.devicebridge.domain.usecase.UpdateRetentionDaysUseCase
+
+private const val DATABASE_NAME = "devicebridge.db"
+private const val SETTINGS_FILE_NAME = "devicebridge_settings"
+
+@Module
+@InstallIn(SingletonComponent::class)
+object PersistenceModule {
+    @Provides
+    @Singleton
+    fun provideDeviceBridgeDatabase(
+        @ApplicationContext context: Context,
+    ): DeviceBridgeDatabase = Room.databaseBuilder(
+        context,
+        DeviceBridgeDatabase::class.java,
+        DATABASE_NAME,
+    ).build()
+
+    @Provides
+    @Singleton
+    fun provideHistoryDao(database: DeviceBridgeDatabase): HistoryDao =
+        database.historyDao()
+
+    @Provides
+    @Singleton
+    fun provideTrustedBrowserDao(database: DeviceBridgeDatabase): TrustedBrowserDao =
+        database.trustedBrowserDao()
+
+    @Provides
+    @Singleton
+    fun provideSettingsDataStore(
+        @ApplicationContext context: Context,
+    ): DataStore<Preferences> = PreferenceDataStoreFactory.create(
+        produceFile = { context.preferencesDataStoreFile(SETTINGS_FILE_NAME) },
+    )
+
+    @Provides
+    @Singleton
+    fun provideSettingsRepository(
+        dataStore: DataStore<Preferences>,
+    ): SettingsRepository = DataStoreSettingsRepository(dataStore)
+
+    @Provides
+    @Singleton
+    fun provideUtcClock(): Clock = Clock.systemUTC()
+
+    @Provides
+    @Singleton
+    fun provideHistoryRepository(
+        dao: HistoryDao,
+        settingsRepository: SettingsRepository,
+        clock: Clock,
+        @ApplicationScope applicationScope: CoroutineScope,
+    ): HistoryRepository = RoomHistoryRepository(
+        dao = dao,
+        settingsRepository = settingsRepository,
+        clock = clock,
+        applicationScope = applicationScope,
+    )
+
+    @Provides
+    @Singleton
+    fun provideTrustedCredentialGenerator(
+        implementation: SecureRandomTrustedCredentialGenerator,
+    ): TrustedCredentialGenerator = implementation
+
+    @Provides
+    @Singleton
+    fun provideTrustedHmacKeyProvider(
+        implementation: AndroidKeystoreTrustedHmacKeyProvider,
+    ): TrustedHmacKeyProvider = implementation
+
+    @Provides
+    @Singleton
+    fun provideTrustedCredentialVerifier(
+        implementation: HmacSha256TrustedCredentialVerifier,
+    ): TrustedCredentialVerifier = implementation
+
+    @Provides
+    @Singleton
+    fun provideTrustedBrowserRepository(
+        dao: TrustedBrowserDao,
+        credentialGenerator: TrustedCredentialGenerator,
+        credentialVerifier: TrustedCredentialVerifier,
+        clock: Clock,
+        @ApplicationScope applicationScope: CoroutineScope,
+    ): TrustedBrowserRepository = RoomTrustedBrowserRepository(
+        dao = dao,
+        credentialGenerator = credentialGenerator,
+        credentialVerifier = credentialVerifier,
+        clock = clock,
+        applicationScope = applicationScope,
+    )
+
+    @Provides
+    @Singleton
+    fun provideTextTerminalHistoryRecorder(
+        historyRepository: HistoryRepository,
+        @ApplicationScope applicationScope: CoroutineScope,
+        failureReporter: HistoryPersistenceFailureReporter,
+    ): TextTerminalHistoryRecorder = TextTransferHistoryRecorder(
+        repository = historyRepository,
+        applicationScope = applicationScope,
+        failureReporter = failureReporter,
+    )
+
+    @Provides
+    @Singleton
+    fun provideHistoryPersistenceEventBus(): HistoryPersistenceEventBus =
+        HistoryPersistenceEventBus()
+
+    @Provides
+    @Singleton
+    fun provideHistoryPersistenceFailureReporter(
+        eventBus: HistoryPersistenceEventBus,
+    ): HistoryPersistenceFailureReporter = eventBus
+
+    @Provides
+    fun provideObserveHistoryUseCase(
+        repository: HistoryRepository,
+    ): ObserveHistoryUseCase = ObserveHistoryUseCase(repository)
+
+    @Provides
+    fun provideDeleteHistoryRecordUseCase(
+        repository: HistoryRepository,
+    ): DeleteHistoryRecordUseCase = DeleteHistoryRecordUseCase(repository)
+
+    @Provides
+    fun provideClearHistoryUseCase(
+        repository: HistoryRepository,
+    ): ClearHistoryUseCase = ClearHistoryUseCase(repository)
+
+    @Provides
+    fun provideObserveSettingsUseCase(
+        repository: SettingsRepository,
+    ): ObserveSettingsUseCase = ObserveSettingsUseCase(repository)
+
+    @Provides
+    fun provideUpdateDeviceNameUseCase(
+        repository: SettingsRepository,
+    ): UpdateDeviceNameUseCase = UpdateDeviceNameUseCase(repository)
+
+    @Provides
+    fun provideUpdateRetentionDaysUseCase(
+        repository: SettingsRepository,
+    ): UpdateRetentionDaysUseCase = UpdateRetentionDaysUseCase(repository)
+
+    @Provides
+    fun provideUpdateDestinationTreeUseCase(
+        repository: SettingsRepository,
+    ): UpdateDestinationTreeUseCase = UpdateDestinationTreeUseCase(repository)
+
+    @Provides
+    fun provideUpdateFileLimitUseCase(
+        repository: SettingsRepository,
+    ): UpdateFileLimitUseCase = UpdateFileLimitUseCase(repository)
+}
+
+@EntryPoint
+@InstallIn(SingletonComponent::class)
+interface PersistenceEntryPoint {
+    fun database(): DeviceBridgeDatabase
+    fun settingsRepository(): SettingsRepository
+    fun trustedBrowserRepository(): TrustedBrowserRepository
+}

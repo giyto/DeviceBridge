@@ -33,6 +33,67 @@ describe("FileTransferController", () => {
     expect(uploader.upload).not.toHaveBeenCalled();
   });
 
+  it("appends picker and drop files, deduplicates the same source, and keeps same-name files distinct", () => {
+    const states: unknown[] = [];
+    const controller = createController(
+      fakeApi(),
+      { upload: vi.fn().mockResolvedValue(snapshot("COMPLETED")) },
+      states,
+    );
+    const original = new File(["one"], "same.txt", { type: "text/plain" });
+    const differentSource = new File(["two"], "same.txt", { type: "text/plain" });
+    controller.activate("token");
+
+    controller.addFiles([original]);
+    controller.addFiles([original, differentSource]);
+
+    expect(lastActive(states).selection).toHaveLength(2);
+    expect(lastActive(states).selection.map((item) => item.displayName))
+      .toEqual(["same.txt", "same.txt"]);
+  });
+
+  it("removes one draft, clears all drafts, and keeps the draft when a picker is cancelled", () => {
+    const states: unknown[] = [];
+    const controller = createController(
+      fakeApi(),
+      { upload: vi.fn().mockResolvedValue(snapshot("COMPLETED")) },
+      states,
+    );
+    controller.activate("token");
+    controller.addFiles([new File(["one"], "one.txt"), new File(["two"], "two.txt")]);
+    const firstKey = lastActive(states).selection[0]!.key;
+
+    controller.addFiles([]);
+    expect(lastActive(states).selection).toHaveLength(2);
+    controller.removeDraft(firstKey);
+    expect(lastActive(states).selection.map((item) => item.displayName)).toEqual(["two.txt"]);
+    controller.clearDraft();
+    expect(lastActive(states).selection).toEqual([]);
+  });
+
+  it("removes only server-accepted drafts and retains rejected drafts for retry", async () => {
+    const api = fakeApi();
+    api.offer.mockImplementationOnce(async (_token: string, command: FileOfferCommand) =>
+      snapshotItems([[command.items[0]!.transferId, "CONNECTING"]]),
+    );
+    const states: unknown[] = [];
+    const controller = createController(
+      api,
+      { upload: vi.fn().mockResolvedValue(snapshot("COMPLETED")) },
+      states,
+    );
+    controller.activate("token");
+    controller.addFiles([new File(["one"], "one.txt"), new File(["two"], "two.txt")]);
+
+    await controller.confirmSelection();
+
+    expect(lastActive(states).selection).toMatchObject([{
+      displayName: "two.txt",
+      error: "Телефон не принял этот файл. Его можно отправить повторно.",
+    }]);
+    expect(lastActive(states).transfers).toHaveLength(1);
+  });
+
   it("starts raw upload on approved progress, deduplicates snapshots and preserves queue state", async () => {
     const api = fakeApi();
     const uploader = { upload: vi.fn().mockResolvedValue(snapshot("COMPLETED")) };
@@ -212,6 +273,25 @@ describe("FileTransferController", () => {
       api.offer.mock.calls[0]?.[1].items.map((item: { displayName: string }) => item.displayName),
     ).toEqual(["ok.txt"]);
   });
+
+  it("uses the authorized effective limit for new browser drafts", async () => {
+    const states: unknown[] = [];
+    const controller = createController(
+      fakeApi(),
+      { upload: vi.fn().mockResolvedValue(snapshot("COMPLETED")) },
+      states,
+    );
+    controller.activate("token", 4);
+
+    controller.selectFiles([new File(["12345"], "five-bytes.txt")]);
+
+    expect(lastActive(states).selection).toMatchObject([
+      {
+        displayName: "five-bytes.txt",
+        error: "Файл превышает установленный лимит 4 Б.",
+      },
+    ]);
+  });
 });
 
 function createController(
@@ -292,7 +372,7 @@ function progress(id: string, status: "TRANSFERRING", bytes: number) {
 
 function lastActive(states: unknown[]) {
   return states.at(-1) as {
-    kind: "active"; selection: Array<{ error?: string }>;
+    kind: "active"; selection: Array<{ key: string; displayName: string; error?: string }>;
     transfers: Array<{ id: string; status: string; localError?: string }>;
   };
 }

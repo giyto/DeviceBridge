@@ -35,11 +35,19 @@ export interface ManifestLoader {
 }
 
 export interface SessionApi {
-  createChallenge(clientLabel: string, signal?: AbortSignal): Promise<SessionChallenge>;
+  createChallenge(
+    clientLabel: string,
+    rememberBrowserRequested?: boolean,
+    signal?: AbortSignal,
+  ): Promise<SessionChallenge>;
   confirm(
     challengeId: string,
     code: string,
     clientLabel: string,
+    signal?: AbortSignal,
+  ): Promise<SessionConfirmation>;
+  exchangeTrusted(
+    trustedCredential: string,
     signal?: AbortSignal,
   ): Promise<SessionConfirmation>;
   status(token: string, signal?: AbortSignal): Promise<SessionStatus>;
@@ -49,6 +57,12 @@ export interface SessionApi {
 export interface SessionTokenStore {
   read(): string | undefined;
   save(token: string): void;
+  clear(): void;
+}
+
+export interface TrustedCredentialStore {
+  read(): { readonly credential: string; readonly expiresAtEpochMillis: number } | undefined;
+  save(value: { readonly credential: string; readonly expiresAtEpochMillis: number }): void;
   clear(): void;
 }
 
@@ -75,7 +89,7 @@ export interface TextSessionLifecycle {
 }
 
 export interface FileSessionLifecycle {
-  activate(token: string): void;
+  activate(token: string, effectiveFileLimitBytes: number): void;
   deactivate(): void;
   receiveOffer(event: FileOfferEvent): void;
   receiveProgress(event: FileProgressEvent): void;
@@ -109,6 +123,11 @@ const noFileSession: FileSessionLifecycle = {
   applySnapshot: () => undefined,
   receiveError: () => undefined,
 };
+const noTrustedCredentialStore: TrustedCredentialStore = {
+  read: () => undefined,
+  save: () => undefined,
+  clear: () => undefined,
+};
 
 export class SessionController {
   private generation = 0;
@@ -118,6 +137,8 @@ export class SessionController {
   private challenge?: SessionChallenge;
   private activeToken?: string;
   private busy = false;
+  private challengeRememberRequested = false;
+  private trustedExchangeAttempted = false;
 
   constructor(
     private readonly manifestLoader: ManifestLoader,
@@ -128,6 +149,7 @@ export class SessionController {
     private readonly clientLabel: string,
     private readonly textSession: TextSessionLifecycle = noTextSession,
     private readonly fileSession: FileSessionLifecycle = noFileSession,
+    private readonly trustedCredentialStore: TrustedCredentialStore = noTrustedCredentialStore,
     private readonly scheduler: ControllerScheduler = browserScheduler,
   ) {}
 
@@ -139,7 +161,7 @@ export class SessionController {
     this.beginNewCycle();
   }
 
-  submitCode(code: string): void {
+  submitCode(code: string, rememberBrowserRequested = false): void {
     if (this.currentState.kind !== "ready" || this.busy) return;
     if (!/^\d{6}$/.test(code)) return;
     const generation = this.generation;
@@ -147,7 +169,13 @@ export class SessionController {
     const challengeId = this.currentState.challenge.challengeId;
     this.busy = true;
     this.emit({ kind: "submitting", manifest });
-    void this.confirm(generation, manifest, challengeId, code);
+    void this.confirm(
+      generation,
+      manifest,
+      challengeId,
+      code,
+      rememberBrowserRequested,
+    );
   }
 
   disconnect(): void {
@@ -206,6 +234,8 @@ export class SessionController {
     this.textSession.deactivate();
     this.fileSession.deactivate();
     this.busy = false;
+    this.challengeRememberRequested = false;
+    this.trustedExchangeAttempted = false;
     void this.boot(this.generation, 0);
   }
 
@@ -238,7 +268,30 @@ export class SessionController {
           this.clearSession();
         }
       }
-      await this.createChallenge(generation, manifest);
+      const trusted = this.trustedCredentialStore.read();
+      if (trusted !== undefined && !this.trustedExchangeAttempted) {
+        this.trustedExchangeAttempted = true;
+        try {
+          const confirmation = await this.api.exchangeTrusted(
+            trusted.credential,
+            controller.signal,
+          );
+          if (!this.isCurrent(generation)) return;
+          this.tokenStore.save(confirmation.token);
+          this.activeToken = confirmation.token;
+          const status = await this.api.status(confirmation.token, controller.signal);
+          if (!this.isCurrent(generation)) return;
+          this.connect(manifest, confirmation.token, status);
+          return;
+        } catch (error: unknown) {
+          if (isTrustedCredentialRejected(error)) {
+            this.trustedCredentialStore.clear();
+          } else {
+            throw error;
+          }
+        }
+      }
+      await this.createChallenge(generation, manifest, false);
     } catch (error: unknown) {
       if (!this.isCurrent(generation) || isAbortError(error)) return;
       if (error instanceof ManifestCompatibilityError) {
@@ -258,14 +311,17 @@ export class SessionController {
   private async createChallenge(
     generation: number,
     manifest: WebManifest,
+    rememberBrowserRequested = false,
   ): Promise<void> {
     try {
       const challenge = await this.api.createChallenge(
         this.clientLabel,
+        rememberBrowserRequested,
         this.abortController?.signal,
       );
       if (this.isCurrent(generation)) {
         this.challenge = challenge;
+        this.challengeRememberRequested = rememberBrowserRequested;
         this.emit({ kind: "ready", manifest, challenge });
       }
     } catch (error: unknown) {
@@ -279,20 +335,46 @@ export class SessionController {
     manifest: WebManifest,
     challengeId: string,
     code: string,
+    rememberBrowserRequested: boolean,
   ): Promise<void> {
     await Promise.resolve();
     if (!this.isCurrent(generation)) return;
-    this.emit({ kind: "awaiting", manifest });
     const controller = new AbortController();
     this.abortController = controller;
     try {
+      let activeChallengeId = challengeId;
+      if (rememberBrowserRequested !== this.challengeRememberRequested) {
+        const challenge = await this.api.createChallenge(
+          this.clientLabel,
+          rememberBrowserRequested,
+          controller.signal,
+        );
+        if (!this.isCurrent(generation)) return;
+        this.challenge = challenge;
+        this.challengeRememberRequested = rememberBrowserRequested;
+        activeChallengeId = challenge.challengeId;
+      }
+      this.emit({ kind: "awaiting", manifest });
       const confirmation = await this.api.confirm(
-        challengeId,
+        activeChallengeId,
         code,
         this.clientLabel,
         controller.signal,
       );
       if (!this.isCurrent(generation)) return;
+      if (
+        confirmation.trustedCredential !== undefined &&
+        confirmation.trustedCredentialExpiresAtEpochMillis !== undefined
+      ) {
+        try {
+          this.trustedCredentialStore.save({
+            credential: confirmation.trustedCredential,
+            expiresAtEpochMillis: confirmation.trustedCredentialExpiresAtEpochMillis,
+          });
+        } catch {
+          this.trustedCredentialStore.clear();
+        }
+      }
       this.tokenStore.save(confirmation.token);
       this.activeToken = confirmation.token;
       const status = await this.api.status(confirmation.token, controller.signal);
@@ -311,7 +393,7 @@ export class SessionController {
   private connect(manifest: WebManifest, token: string, status: SessionStatus): void {
     this.activeToken = token;
     this.textSession.activate(token);
-    this.fileSession.activate(token);
+    this.fileSession.activate(token, status.effectiveFileLimitBytes);
     this.emit({ kind: "connected", manifest, status });
     const generation = this.generation;
     this.events.connect(token, {
@@ -452,6 +534,11 @@ export class SessionController {
 
 function isUnauthorized(error: unknown): boolean {
   return error instanceof SessionApiError && error.code === "UNAUTHORIZED";
+}
+
+function isTrustedCredentialRejected(error: unknown): boolean {
+  return error instanceof SessionApiError &&
+    (error.code === "UNAUTHORIZED" || error.code === "EXPIRED");
 }
 
 function isAbortError(error: unknown): boolean {

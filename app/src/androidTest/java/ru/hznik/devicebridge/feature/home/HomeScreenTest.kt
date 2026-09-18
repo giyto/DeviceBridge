@@ -226,6 +226,38 @@ class HomeScreenTest {
     }
 
     @Test
+    fun trustRequestExplainsPersistenceAndDispatchesExplicitRememberDecision() {
+        val actions = mutableListOf<HomeAction>()
+        val requestId = PairingRequestId("remember-request")
+        setScreen(
+            ServerSessionUiState(
+                status = HomeServerStatus.Running,
+                pairingCode = "123456",
+                pairingExpiresInSeconds = 120,
+                pendingBrowsers = listOf(
+                    PendingBrowserUiState(
+                        id = requestId,
+                        browserLabel = "Яндекс Браузер",
+                        sourceIpv4 = "192.168.1.4",
+                        expiresInSeconds = 42,
+                        rememberBrowserRequested = true,
+                    ),
+                ),
+            ),
+            onAction = actions::add,
+        )
+
+        composeRule.onNodeWithText(
+            "Браузер просит сохранить доступ на этом устройстве на срок до 30 дней.",
+        ).performScrollTo().assertIsDisplayed()
+        composeRule.onNodeWithContentDescription(
+            "Разрешить и запомнить Яндекс Браузер с адреса 192.168.1.4",
+        ).performScrollTo().performClick()
+
+        assertEquals(listOf(HomeAction.ApproveAndRememberBrowser(requestId)), actions)
+    }
+
+    @Test
     fun activeBrowsersCanBeRevokedWithoutShowingCredentials() {
         val actions = mutableListOf<HomeAction>()
         val sessionId = BrowserSessionId("session-1")

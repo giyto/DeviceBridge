@@ -40,6 +40,22 @@ class HiltGraphContractTest {
     }
 
     @Test
+    fun persistenceDependenciesAreInstalledAsProcessSingletons() {
+        val module = read(
+            "src/main/java/ru/hznik/devicebridge/di/PersistenceModule.kt",
+        )
+
+        assertTrue(module.contains("@Module"))
+        assertTrue(module.contains("@InstallIn(SingletonComponent::class)"))
+        assertTrue(module.contains("fun provideDeviceBridgeDatabase"))
+        assertTrue(module.contains("fun provideSettingsDataStore"))
+        assertTrue(module.contains("fun provideSettingsRepository"))
+        assertTrue(module.contains("fun provideHistoryRepository"))
+        assertTrue(module.contains("@ApplicationScope"))
+        assertTrue(module.countOccurrences("@Singleton") >= 5)
+    }
+
+    @Test
     fun textTransferDependenciesAreInstalledInSingletonGraphWithoutUiOrKtorInDomain() {
         val module = read(
             "src/main/java/ru/hznik/devicebridge/di/ServerLifecycleModule.kt",
@@ -110,9 +126,23 @@ class HiltGraphContractTest {
         assertFalse(viewModel.contains("FileSourceRegistry"))
     }
 
+    @Test
+    fun productionServerReadsEffectiveFileLimitFromSettingsSnapshot() {
+        val runtime = read(
+            "src/main/java/ru/hznik/devicebridge/data/server/KtorServerRuntimeFactory.kt",
+        )
+
+        assertTrue(runtime.contains("ObserveSettingsUseCase"))
+        assertTrue(runtime.contains("settingsState.value.effectiveFileLimitBytes"))
+        assertTrue(runtime.contains("effectiveFileLimitBytes ="))
+    }
+
     private fun read(relativePath: String): String {
         val path = Path.of(relativePath)
         assertTrue("Expected source file: $relativePath", Files.exists(path))
         return Files.readString(path)
     }
+
+    private fun String.countOccurrences(value: String): Int =
+        windowed(value.length).count { it == value }
 }

@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>DeviceBridge file draft gate</title>
+    <link rel="stylesheet" href="../src/styles.css" />
+  </head>
+  <body>
+    <main class="app-shell">
+      <section class="file-transfer" data-role="file-transfer">
+        <label class="file-drop-zone" data-role="file-drop-zone" for="file-input" tabindex="0">
+          <strong>Добавить файлы</strong>
+          <span>Выберите или перетащите файлы.</span>
+        </label>
+        <input id="file-input" type="file" multiple hidden />
+        <div class="file-draft__heading">
+          <span>Выбранные файлы</span>
+          <button class="secondary-button" data-action="clear-file-draft" type="button" hidden>
+            Очистить
+          </button>
+        </div>
+        <ul class="file-selection" data-role="file-selection" aria-label="Выбранные файлы"></ul>
+        <p data-role="file-error" role="alert" hidden></p>
+        <button class="primary-button" data-action="confirm-files" type="button" disabled>
+          Подтвердить отправку
+        </button>
+        <p data-role="file-transfer-empty">Передач пока нет.</p>
+        <span data-role="file-transfer-count">0</span>
+        <ol data-role="file-transfer-list"></ol>
+        <p data-role="file-announcer" aria-live="polite"></p>
+      </section>
+    </main>
+    <script type="module" src="./fileDraftHarness.ts"></script>
+  </body>
+</html>

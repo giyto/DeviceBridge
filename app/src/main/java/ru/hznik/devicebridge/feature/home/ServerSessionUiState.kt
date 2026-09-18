@@ -73,6 +73,7 @@ data class PendingBrowserUiState(
     val sourceIpv4: String,
     val expiresInSeconds: Long,
     val actionPending: Boolean = false,
+    val rememberBrowserRequested: Boolean = false,
 )
 
 data class ActiveBrowserUiState(
@@ -91,6 +92,7 @@ sealed interface HomeAction {
     ) : HomeAction
     data object NotificationWarningDismissed : HomeAction
     data class ApproveBrowser(val requestId: PairingRequestId) : HomeAction
+    data class ApproveAndRememberBrowser(val requestId: PairingRequestId) : HomeAction
     data class DenyBrowser(val requestId: PairingRequestId) : HomeAction
     data class RevokeBrowser(val sessionId: BrowserSessionId) : HomeAction
 }

@@ -7,10 +7,14 @@ import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import androidx.test.platform.app.InstrumentationRegistry
+import dagger.hilt.EntryPoints
+import org.junit.Assert.assertSame
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 import ru.hznik.devicebridge.MainActivity
+import ru.hznik.devicebridge.di.PersistenceEntryPoint
 
 @RunWith(AndroidJUnit4::class)
 class MainActivityRestorationTest {
@@ -27,5 +31,21 @@ class MainActivityRestorationTest {
 
         composeRule.onNodeWithText("История передач").assertIsDisplayed()
         composeRule.onNodeWithContentDescription("Раздел История").assertIsSelected()
+    }
+
+    @Test
+    fun persistenceGraphKeepsSingletonsAcrossActivityRecreation() {
+        val application = InstrumentationRegistry.getInstrumentation().targetContext.applicationContext
+        val before = EntryPoints.get(application, PersistenceEntryPoint::class.java)
+        val database = before.database()
+        val settings = before.settingsRepository()
+        val trusted = before.trustedBrowserRepository()
+
+        composeRule.activityRule.scenario.recreate()
+
+        val after = EntryPoints.get(application, PersistenceEntryPoint::class.java)
+        assertSame(database, after.database())
+        assertSame(settings, after.settingsRepository())
+        assertSame(trusted, after.trustedBrowserRepository())
     }
 }

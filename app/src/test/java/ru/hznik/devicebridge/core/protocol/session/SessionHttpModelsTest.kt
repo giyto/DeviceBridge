@@ -12,6 +12,7 @@ class SessionHttpModelsTest {
         val challenge = SessionChallengeRequest(
             protocolVersion = SESSION_PROTOCOL_VERSION,
             clientLabel = "Edge on Windows",
+            rememberBrowserRequested = true,
         )
         val confirm = SessionConfirmRequest(
             protocolVersion = SESSION_PROTOCOL_VERSION,
@@ -44,6 +45,8 @@ class SessionHttpModelsTest {
             sessionId = "session-123",
             token = "opaque-token",
             serverTimeEpochMillis = 123_456L,
+            trustedCredential = "trusted-credential",
+            trustedCredentialExpiresAtEpochMillis = 2_715_456L,
         )
         val error = SessionErrorEnvelope(
             error = SessionErrorBody(
@@ -66,6 +69,23 @@ class SessionHttpModelsTest {
             error,
             SessionProtocolJson.decode<SessionErrorEnvelope>(SessionProtocolJson.encode(error)),
         )
+    }
+
+    @Test
+    fun legacyChallengeDefaultsToNoPersistentTrustAndOrdinaryResponseOmitsCredential() {
+        val legacy = SessionProtocolJson.decode<SessionChallengeRequest>(
+            """{"protocolVersion":1,"clientLabel":"Chrome"}""",
+        )
+        val ordinary = SessionConfirmResponse(
+            protocolVersion = SESSION_PROTOCOL_VERSION,
+            sessionId = "session-ordinary",
+            token = "session-token",
+            serverTimeEpochMillis = 123_456L,
+        )
+
+        assertEquals(false, legacy.rememberBrowserRequested)
+        val encoded = SessionProtocolJson.encode(ordinary)
+        assertTrue(!encoded.contains("trustedCredential"))
     }
 
     @Test(expected = SerializationException::class)
@@ -99,5 +119,28 @@ class SessionHttpModelsTest {
         assertEquals(SessionValidationError.UNSUPPORTED_VERSION, unsupported)
         assertEquals(SessionValidationError.INVALID_CHALLENGE_ID, oversized)
         assertTrue(MAX_SESSION_JSON_BYTES <= 4 * 1024)
+    }
+
+    @Test
+    fun trustedExchangeRequestIsStrictAndBoundsCredential() {
+        val valid = TrustedSessionExchangeRequest(
+            protocolVersion = SESSION_PROTOCOL_VERSION,
+            trustedCredential = "abc_DEF-123",
+        )
+        val oversized = valid.copy(
+            trustedCredential = "x".repeat(MAX_TRUSTED_CREDENTIAL_LENGTH + 1),
+        )
+
+        assertEquals(
+            valid,
+            SessionProtocolJson.decode<TrustedSessionExchangeRequest>(
+                SessionProtocolJson.encode(valid),
+            ),
+        )
+        assertEquals(SessionValidationError.NONE, SessionPayloadValidator.validate(valid))
+        assertEquals(
+            SessionValidationError.INVALID_TRUSTED_CREDENTIAL,
+            SessionPayloadValidator.validate(oversized),
+        )
     }
 }

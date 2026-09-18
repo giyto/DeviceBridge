@@ -73,6 +73,7 @@ fun Application.installFileRoutes(
     uploadTargetFactory: FileUploadTargetFactory? = null,
     uploadProcessor: RawFileUploadProcessor = RawFileUploadProcessor(),
     downloadSourceFactory: FileDownloadSourceFactory? = null,
+    effectiveFileLimitBytes: () -> Long = { HARD_MAX_FILE_BYTES },
 ) {
     routing {
         post("/api/v1/files") {
@@ -108,7 +109,14 @@ fun Application.installFileRoutes(
                 call.respondFileError(HttpStatusCode.BadRequest, FileProtocolErrorCode.INVALID_PAYLOAD, wallClockMs, offer.messageId)
                 return@post
             }
-            val validation = FileMetadataValidator.validateBatch(offer.items.map { it.toCandidate() })
+            val validationLimitSnapshot =
+                ru.hznik.devicebridge.domain.file.effectiveFileLimitBytes(
+                    effectiveFileLimitBytes(),
+                )
+            val validation = FileMetadataValidator.validateBatch(
+                offer.items.map { it.toCandidate() },
+                validationLimitSnapshot,
+            )
             val metadata = when (validation) {
                 is FileBatchValidation.Valid -> validation.items
                 is FileBatchValidation.InvalidItem -> {

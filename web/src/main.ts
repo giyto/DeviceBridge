@@ -2,6 +2,7 @@ import { SessionApiClient } from "./sessionApiClient";
 import { SessionController } from "./sessionController";
 import { SessionEventSocketClient } from "./sessionEventSocketClient";
 import { BrowserSessionTokenStore } from "./sessionTokenStore";
+import { BrowserTrustedCredentialStore } from "./browserTrustedCredentialStore";
 import { createShellView } from "./shellView";
 import { TextApiClient } from "./textApiClient";
 import { TextTransferController } from "./textTransferController";
@@ -21,7 +22,7 @@ let textController: TextTransferController;
 let fileController: FileTransferController;
 const view = createShellView(document, {
   onRetry: () => controller.retry(),
-  onSubmitCode: (code) => controller.submitCode(code),
+  onSubmitCode: (code, rememberBrowser) => controller.submitCode(code, rememberBrowser),
   onDisconnect: () => controller.disconnect(),
 });
 const textView = createTextTransferView(document, {
@@ -30,8 +31,10 @@ const textView = createTextTransferView(document, {
   onRetry: (messageId) => textController.retry(messageId),
 });
 const fileView = createFileTransferView(document, {
-  onSelect: (files) => fileController.selectFiles(files),
+  onSelect: (files) => fileController.addFiles(files),
   onConfirm: () => void fileController.confirmSelection(),
+  onRemoveDraft: (key) => fileController.removeDraft(key),
+  onClearDraft: () => fileController.clearDraft(),
   onCancel: (transferId) => void fileController.cancel(transferId),
   onRetry: (transferId) => void fileController.retry(transferId),
   onDownload: (transferId) => void fileController.download(transferId),
@@ -63,6 +66,7 @@ controller = new SessionController(
   createBrowserLabel(navigator.userAgent, navigator.platform),
   textController,
   fileController,
+  new BrowserTrustedCredentialStore(),
 );
 controller.start();
 

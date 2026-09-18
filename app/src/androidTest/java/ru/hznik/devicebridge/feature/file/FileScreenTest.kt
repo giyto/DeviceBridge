@@ -1,10 +1,12 @@
 package ru.hznik.devicebridge.feature.file
 
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performClick
 import androidx.compose.ui.unit.Density
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.platform.LocalDensity
@@ -16,6 +18,7 @@ import ru.hznik.devicebridge.domain.file.FileTransferDirection
 import ru.hznik.devicebridge.domain.file.FileTransferId
 import ru.hznik.devicebridge.domain.file.FileTransferPhase
 import ru.hznik.devicebridge.domain.file.FileTransferFailure
+import ru.hznik.devicebridge.domain.file.FileDraftId
 import ru.hznik.devicebridge.ui.theme.DeviceBridgeTheme
 
 @RunWith(AndroidJUnit4::class)
@@ -26,7 +29,42 @@ class FileScreenTest {
     fun emptyStateOffersFileSelection() {
         setScreen(FileUiState())
         composeRule.onNodeWithText("Файлы").assertIsDisplayed()
-        composeRule.onNodeWithText("Выбрать файлы").assertIsDisplayed()
+        composeRule.onNodeWithText("Добавить файлы").assertIsDisplayed()
+        composeRule.onNodeWithContentDescription("Подтвердить отправку файлов")
+            .assertIsNotEnabled()
+    }
+
+    @Test
+    fun editableDraftExposesAccessibleRemoveClearAndAddActions() {
+        val actions = mutableListOf<FileAction>()
+        val draftId = FileDraftId("draft-report")
+        composeRule.setContent {
+            DeviceBridgeTheme {
+                FileScreen(
+                    uiState = FileUiState(
+                        selection = listOf(
+                            FileDraftItem(
+                                id = draftId,
+                                displayName = "report.pdf",
+                                sizeBytes = 42,
+                                mimeType = "application/pdf",
+                                sha256 = "a".repeat(64),
+                                sourceIdentity = "content://report",
+                                sourceLease = NoOpDraftSourceLease,
+                            ),
+                        ),
+                    ),
+                    onAction = actions::add,
+                )
+            }
+        }
+
+        composeRule.onNodeWithContentDescription("Удалить report.pdf из выбранных")
+            .performClick()
+        composeRule.onNodeWithContentDescription("Очистить выбранные файлы")
+            .assertIsDisplayed()
+        composeRule.onNodeWithText("Добавить файлы").assertIsDisplayed()
+        org.junit.Assert.assertEquals(listOf(FileAction.RemoveDraftItem(draftId)), actions)
     }
 
     @Test
@@ -52,7 +90,7 @@ class FileScreenTest {
                 DeviceBridgeTheme(darkTheme = true) { FileScreen(FileUiState()) }
             }
         }
-        composeRule.onNodeWithText("Выбрать файлы").assertIsDisplayed()
+        composeRule.onNodeWithText("Добавить файлы").assertIsDisplayed()
     }
 
     @Test
@@ -76,6 +114,33 @@ class FileScreenTest {
             .assertIsDisplayed()
     }
 
+    @Test
+    fun incomingOfferLetsUserUseSavedFolderOrChooseAnother() {
+        val actions = mutableListOf<FileAction>()
+        val incoming = item("incoming", FileTransferPhase.CONNECTING, 0, 100)
+        composeRule.setContent {
+            DeviceBridgeTheme {
+                FileScreen(
+                    uiState = FileUiState(
+                        transfers = listOf(incoming),
+                        hasDefaultDestination = true,
+                    ),
+                    onAction = actions::add,
+                )
+            }
+        }
+
+        composeRule.onNodeWithText("Принять в выбранную папку")
+            .performScrollTo()
+            .performClick()
+        composeRule.onNodeWithText("Выбрать другую папку")
+            .performScrollTo()
+            .performClick()
+
+        assert(actions.contains(FileAction.ApproveIncoming(incoming.id)))
+        assert(actions.contains(FileAction.ChangeIncomingDestination(incoming.id)))
+    }
+
     private fun setScreen(state: FileUiState) {
         composeRule.setContent { DeviceBridgeTheme { FileScreen(state) } }
     }
@@ -87,4 +152,11 @@ class FileScreenTest {
             direction = FileTransferDirection.BROWSER_TO_ANDROID, phase = phase,
             bytesTransferred = bytes, speedBytesPerSecond = 10, failure = null,
         )
+
+    private data object NoOpDraftSourceLease : DraftSourceLease {
+        override fun promote(transferId: FileTransferId) = true
+        override fun rollback(transferId: FileTransferId) = Unit
+        override fun commit(transferId: FileTransferId) = Unit
+        override fun release() = Unit
+    }
 }

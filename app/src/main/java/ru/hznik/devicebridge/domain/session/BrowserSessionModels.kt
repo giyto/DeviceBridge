@@ -51,6 +51,7 @@ data class PendingBrowserRequest(
     val sourceIpv4: String,
     val createdAtElapsedRealtimeMs: Long,
     val expiresAtElapsedRealtimeMs: Long,
+    val rememberBrowserRequested: Boolean = false,
 ) {
     init {
         requireValidBrowserLabel(browserLabel)
@@ -68,6 +69,7 @@ data class BrowserSession(
     val browserLabel: String,
     val sourceIpv4: String,
     val connectedAtElapsedRealtimeMs: Long,
+    val trustedBrowserId: ru.hznik.devicebridge.domain.trust.TrustedBrowserId? = null,
 ) {
     init {
         requireValidBrowserLabel(browserLabel)
@@ -83,6 +85,12 @@ enum class BrowserSessionPhase {
     CONNECTED,
     BLOCKED,
     ERROR,
+}
+
+enum class BrowserApprovalDecision {
+    ALLOW_ONCE,
+    ALLOW_AND_REMEMBER,
+    REJECT,
 }
 
 sealed interface BrowserSessionError {

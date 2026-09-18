@@ -1,5 +1,6 @@
 package ru.hznik.devicebridge.di
 
+import java.time.Clock
 import dagger.Binds
 import dagger.Module
 import dagger.Provides
@@ -25,6 +26,7 @@ import ru.hznik.devicebridge.data.session.SessionEventDispatcher
 import ru.hznik.devicebridge.data.session.security.JavaCryptographicRandom
 import ru.hznik.devicebridge.data.session.security.SessionSecretGenerator
 import ru.hznik.devicebridge.domain.repository.BrowserSessionRepository
+import ru.hznik.devicebridge.domain.repository.TrustedBrowserRepository
 import ru.hznik.devicebridge.domain.repository.TextTransferRepository
 import ru.hznik.devicebridge.data.text.TextTransferCoordinator
 import ru.hznik.devicebridge.domain.repository.FileTransferRepository
@@ -93,10 +95,14 @@ abstract class ServerLifecycleModule {
         fun provideBrowserSessionCoordinator(
             monotonicClock: MonotonicClock,
             @ApplicationScope applicationScope: CoroutineScope,
+            trustedBrowserRepository: TrustedBrowserRepository,
+            wallClock: Clock,
         ): BrowserSessionCoordinator = BrowserSessionCoordinator(
             clock = monotonicClock,
             secretGenerator = SessionSecretGenerator(JavaCryptographicRandom()),
             scope = applicationScope,
+            trustedBrowserRepository = trustedBrowserRepository,
+            wallClock = wallClock,
         )
 
         @Provides
@@ -116,10 +122,12 @@ abstract class ServerLifecycleModule {
         fun provideTextTransferCoordinator(
             browserSessions: BrowserSessionCoordinator,
             eventDispatcher: SessionEventDispatcher,
+            historyRecorder: ru.hznik.devicebridge.data.text.TextTerminalHistoryRecorder,
         ): TextTransferCoordinator = TextTransferCoordinator(
             nowEpochMillis = System::currentTimeMillis,
             browserSessionState = { browserSessions.state.value },
             eventGateway = eventDispatcher,
+            historyRecorder = historyRecorder,
         )
 
         @Provides
@@ -133,10 +141,31 @@ abstract class ServerLifecycleModule {
         fun provideFileTransferCoordinator(
             browserSessions: BrowserSessionCoordinator,
             wifiLock: FileTransferWifiLock,
+            historyRecorder: ru.hznik.devicebridge.data.file.FileTerminalHistoryRecorder,
         ): FileTransferCoordinator = FileTransferCoordinator(
             browserSessionState = { browserSessions.state.value },
             wifiLock = wifiLock,
+            historyRecorder = historyRecorder,
         )
+
+        @Provides
+        @Singleton
+        fun provideFileTerminalHistoryRecorder(
+            historyRepository: ru.hznik.devicebridge.domain.repository.HistoryRepository,
+            browserSessions: BrowserSessionCoordinator,
+            @ApplicationScope applicationScope: CoroutineScope,
+            failureReporter: ru.hznik.devicebridge.data.history.HistoryPersistenceFailureReporter,
+        ): ru.hznik.devicebridge.data.file.FileTerminalHistoryRecorder =
+            ru.hznik.devicebridge.data.history.FileTransferHistoryRecorder(
+                repository = historyRepository,
+                browserLabelFor = { sessionId ->
+                    browserSessions.state.value.sessions
+                        .firstOrNull { it.id == sessionId }
+                        ?.browserLabel
+                },
+                applicationScope = applicationScope,
+                failureReporter = failureReporter,
+            )
 
         @Provides
         @Singleton
@@ -259,5 +288,17 @@ abstract class ServerLifecycleModule {
         @Provides
         fun provideRevokeBrowserSessionUseCase(repository: BrowserSessionRepository) =
             ru.hznik.devicebridge.domain.usecase.RevokeBrowserSessionUseCase(repository)
+
+        @Provides
+        fun provideObserveTrustedBrowsersUseCase(repository: TrustedBrowserRepository) =
+            ru.hznik.devicebridge.domain.usecase.ObserveTrustedBrowsersUseCase(repository)
+
+        @Provides
+        fun provideRevokeTrustedBrowserUseCase(repository: BrowserSessionRepository) =
+            ru.hznik.devicebridge.domain.usecase.RevokeTrustedBrowserUseCase(repository)
+
+        @Provides
+        fun provideRevokeAllTrustedBrowsersUseCase(repository: BrowserSessionRepository) =
+            ru.hznik.devicebridge.domain.usecase.RevokeAllTrustedBrowsersUseCase(repository)
     }
 }

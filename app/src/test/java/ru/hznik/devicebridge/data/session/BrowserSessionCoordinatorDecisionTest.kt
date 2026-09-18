@@ -63,6 +63,29 @@ class BrowserSessionCoordinatorDecisionTest {
     }
 
     @Test
+    fun allowAndRememberAndRepeatedDecisionCreateOnlyOneSession() = runTest {
+        val fixture = Fixture(this)
+        val challenge = fixture.challenge("Edge", rememberBrowser = true)
+        val response = async {
+            fixture.coordinator.confirmAndAwait(
+                fixture.handle,
+                challenge.challengeId,
+                "123456",
+                "Edge",
+                "192.168.1.2",
+            )
+        }
+        runCurrent()
+        val request = fixture.coordinator.state.value.pendingRequests.single()
+
+        fixture.coordinator.approveAndRemember(request.id)
+        fixture.coordinator.approve(request.id)
+
+        assertTrue(response.await() is SessionConfirmationResult.Approved)
+        assertEquals(1, fixture.coordinator.state.value.sessions.size)
+    }
+
+    @Test
     fun unansweredConfirmationTimesOutAndRemovesPendingRequest() = runTest {
         val fixture = Fixture(this)
         val challenge = fixture.challenge("Firefox")
@@ -96,9 +119,12 @@ class BrowserSessionCoordinatorDecisionTest {
         )
         lateinit var handle: SessionGenerationHandle
 
-        suspend fun challenge(label: String = "Chrome"): ChallengeCreationResult.Created {
+        suspend fun challenge(
+            label: String = "Chrome",
+            rememberBrowser: Boolean = false,
+        ): ChallengeCreationResult.Created {
             handle = coordinator.activate(ServerGenerationId(1))
-            return coordinator.createChallenge(handle, label, "192.168.1.2")
+            return coordinator.createChallenge(handle, label, "192.168.1.2", rememberBrowser)
                 as ChallengeCreationResult.Created
         }
     }

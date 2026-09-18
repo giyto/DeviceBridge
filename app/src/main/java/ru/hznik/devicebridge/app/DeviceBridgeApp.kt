@@ -37,12 +37,16 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import ru.hznik.devicebridge.feature.history.HistoryScreen
+import ru.hznik.devicebridge.feature.history.HistoryViewModel
 import ru.hznik.devicebridge.feature.home.HomeScreen
 import ru.hznik.devicebridge.feature.home.HomeAction
 import ru.hznik.devicebridge.feature.home.HomeEffect
 import ru.hznik.devicebridge.feature.home.HomeViewModel
 import ru.hznik.devicebridge.feature.home.rememberServerPermissionLauncher
 import ru.hznik.devicebridge.feature.settings.SettingsScreen
+import ru.hznik.devicebridge.feature.settings.SettingsAction
+import ru.hznik.devicebridge.feature.settings.SettingsEffect
+import ru.hznik.devicebridge.feature.settings.SettingsViewModel
 import ru.hznik.devicebridge.feature.text.TextScreen
 import ru.hznik.devicebridge.feature.text.SharedTextDraft
 import ru.hznik.devicebridge.feature.text.TextAction
@@ -59,6 +63,8 @@ import ru.hznik.devicebridge.data.file.AndroidFileDestinationGateway
 import ru.hznik.devicebridge.data.file.AndroidFileSourcePickerGateway
 import ru.hznik.devicebridge.data.file.ContentResolverDocumentTreePermissionGateway
 import ru.hznik.devicebridge.data.file.DestinationApproval
+import ru.hznik.devicebridge.data.file.PersistedDestinationPermissionController
+import ru.hznik.devicebridge.data.file.SettingsDestinationApproval
 import ru.hznik.devicebridge.data.file.CompletedFileRegistry
 import ru.hznik.devicebridge.data.file.FileDestinationLeaseRegistry
 import ru.hznik.devicebridge.data.file.FileSourceRegistry
@@ -115,6 +121,18 @@ fun DeviceBridgeApp(
             destinationLeaseRegistry,
             fileSourceRegistry,
         )
+    },
+    historyContent: @Composable () -> Unit = {
+        val historyViewModel: HistoryViewModel = hiltViewModel()
+        val historyUiState by historyViewModel.uiState.collectAsStateWithLifecycle()
+        HistoryScreen(
+            uiState = historyUiState,
+            onAction = historyViewModel::onAction,
+        )
+    },
+    settingsContent: @Composable () -> Unit = {
+        val settingsViewModel: SettingsViewModel = hiltViewModel()
+        SettingsRoute(settingsViewModel)
     },
 ) {
     val backStackEntry by navController.currentBackStackEntryAsState()
@@ -180,10 +198,10 @@ fun DeviceBridgeApp(
                 )
             }
             composable(TopLevelDestination.History.route) {
-                HistoryScreen()
+                historyContent()
             }
             composable(TopLevelDestination.Settings.route) {
-                SettingsScreen()
+                settingsContent()
             }
             composable(TEXT_ROUTE) {
                 textContent(
@@ -216,6 +234,44 @@ fun DeviceBridgeApp(
             navController.navigate(FILE_ROUTE) { launchSingleTop = true }
         }
     }
+}
+
+@Composable
+private fun SettingsRoute(viewModel: SettingsViewModel) {
+    val context = LocalContext.current
+    val permissionController = remember(context) {
+        PersistedDestinationPermissionController(
+            ContentResolverDocumentTreePermissionGateway(context.contentResolver),
+        )
+    }
+    val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    val effect by viewModel.effects.collectAsStateWithLifecycle()
+    val destinationPicker = rememberLauncherForActivityResult(
+        AndroidFileDestinationGateway.contract(),
+    ) { uri ->
+        when (val result = permissionController.approve(uri?.toString())) {
+            is SettingsDestinationApproval.Approved ->
+                viewModel.onAction(SettingsAction.DestinationSelected(result.uri))
+            SettingsDestinationApproval.Cancelled ->
+                viewModel.onAction(SettingsAction.DestinationCancelled)
+            SettingsDestinationApproval.Unavailable ->
+                viewModel.onAction(SettingsAction.DestinationPermissionUnavailable)
+        }
+    }
+
+    LaunchedEffect(effect) {
+        val current = effect
+        if (current == SettingsEffect.ChooseDestination) {
+            val initialUri = uiState.settings.destinationTree?.value?.let(Uri::parse)
+            destinationPicker.launch(initialUri)
+            viewModel.consumeEffect(current)
+        }
+    }
+
+    SettingsScreen(
+        uiState = uiState,
+        onAction = viewModel::onAction,
+    )
 }
 
 @Composable
@@ -336,6 +392,11 @@ private fun FileRoute(
             ContentResolverDocumentTreePermissionGateway(context.contentResolver),
         )
     }
+    val persistedDestinationController = remember(context) {
+        PersistedDestinationPermissionController(
+            ContentResolverDocumentTreePermissionGateway(context.contentResolver),
+        )
+    }
     val completedFileOpener = remember(context) {
         AndroidCompletedFileOpener(ContextExternalFileViewerGateway(context))
     }
@@ -346,7 +407,10 @@ private fun FileRoute(
         AndroidFileSourcePickerGateway.contract(),
     ) { uris ->
         scope.launch {
-            val result = preparer.prepare(uris.map(Uri::toString))
+            val result = preparer.prepare(
+                uris = uris.map(Uri::toString),
+                effectiveFileLimitBytes = uiState.effectiveFileLimitBytes,
+            )
             viewModel.onAction(FileAction.SelectionReceived(result.items))
             viewModel.onAction(FileAction.SelectionRejected(result.rejectedCount))
         }
@@ -394,6 +458,34 @@ private fun FileRoute(
                 pendingDestination = current.transferId
                 destinationPicker.launch(null)
             }
+            is FileEffect.UseDefaultDestination -> {
+                pendingDestination = current.transferId
+                when (val approval = persistedDestinationController.openPersisted(current.uri)) {
+                    is DestinationApproval.Approved -> {
+                        val leases = destinationLeaseRegistry
+                        if (leases == null) {
+                            approval.lease.release()
+                            viewModel.onAction(
+                                FileAction.DestinationUnavailable(current.transferId),
+                            )
+                        } else {
+                            val destinationId = leases.register(
+                                current.transferId,
+                                approval.lease,
+                            )
+                            pendingDestination = null
+                            viewModel.onAction(
+                                FileAction.DestinationSelected(
+                                    current.transferId,
+                                    destinationId,
+                                ),
+                            )
+                        }
+                    }
+                    DestinationApproval.Unavailable -> destinationPicker.launch(null)
+                    DestinationApproval.Cancelled -> destinationPicker.launch(null)
+                }
+            }
             is FileEffect.OpenCompleted -> {
                 val item = uiState.transfers.firstOrNull { it.id == current.transferId }
                 val uri = completedFileRegistry?.uri(current.transferId)
@@ -425,6 +517,7 @@ private fun FileRoute(
             val result = preparer.prepare(
                 uris = uris,
                 stageTemporarySources = true,
+                effectiveFileLimitBytes = uiState.effectiveFileLimitBytes,
             )
             viewModel.onAction(FileAction.SharedSelectionReceived(result.items))
             viewModel.onAction(FileAction.SelectionRejected(result.rejectedCount))

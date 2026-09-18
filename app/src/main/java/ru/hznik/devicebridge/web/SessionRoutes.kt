@@ -43,6 +43,7 @@ import ru.hznik.devicebridge.core.protocol.session.SessionErrorEnvelope
 import ru.hznik.devicebridge.core.protocol.session.SessionPayloadValidator
 import ru.hznik.devicebridge.core.protocol.session.SessionProtocolJson
 import ru.hznik.devicebridge.core.protocol.session.SessionStatusResponse
+import ru.hznik.devicebridge.core.protocol.session.TrustedSessionExchangeRequest
 import ru.hznik.devicebridge.core.protocol.session.SESSION_AUTHENTICATED_MESSAGE_TYPE
 import ru.hznik.devicebridge.core.protocol.session.SessionWebSocketAuthMessage
 import ru.hznik.devicebridge.core.protocol.session.SessionWebSocketAuthValidator
@@ -65,18 +66,24 @@ import ru.hznik.devicebridge.core.protocol.text.TextSnapshotItem
 import ru.hznik.devicebridge.data.session.BrowserSessionCoordinator
 import ru.hznik.devicebridge.data.file.FileTransferCoordinator
 import ru.hznik.devicebridge.data.session.ChallengeCreationResult
+import ru.hznik.devicebridge.data.session.PairingRateLimiter
+import ru.hznik.devicebridge.data.session.RateLimitDecision
 import ru.hznik.devicebridge.data.session.SessionEventConnection
 import ru.hznik.devicebridge.data.session.SessionEventDispatcher
 import ru.hznik.devicebridge.data.session.SessionGenerationHandle
 import ru.hznik.devicebridge.data.session.SessionConfirmationResult
 import ru.hznik.devicebridge.data.session.SessionConnection
 import ru.hznik.devicebridge.data.session.SessionOutboundEvent
+import ru.hznik.devicebridge.data.session.TrustedSessionExchangeResult
+import ru.hznik.devicebridge.data.server.MonotonicClock
 import ru.hznik.devicebridge.data.text.TextTransferCoordinator
 import ru.hznik.devicebridge.domain.session.PairingChallengeId
 import ru.hznik.devicebridge.domain.session.BrowserSession
 import ru.hznik.devicebridge.domain.text.TextMessageId
 import ru.hznik.devicebridge.domain.text.TextTransferDirection
 import ru.hznik.devicebridge.domain.text.TextTransferItem
+import ru.hznik.devicebridge.domain.file.HARD_MAX_FILE_BYTES
+import ru.hznik.devicebridge.domain.file.effectiveFileLimitBytes
 
 fun Application.installSessionRoutes(
     coordinator: BrowserSessionCoordinator,
@@ -89,8 +96,12 @@ fun Application.installSessionRoutes(
     textCoordinator: TextTransferCoordinator? = null,
     eventDispatcher: SessionEventDispatcher? = null,
     fileCoordinator: FileTransferCoordinator? = null,
+    effectiveFileLimitBytes: () -> Long = { HARD_MAX_FILE_BYTES },
 ) {
     require(webSocketAuthTimeoutMs > 0)
+    val trustedExchangeRateLimiter = PairingRateLimiter(
+        MonotonicClock { monotonicClockMs() },
+    )
     install(WebSockets) {
         pingPeriodMillis = 15_000
         timeoutMillis = 30_000
@@ -153,6 +164,7 @@ fun Application.installSessionRoutes(
                     handle,
                     request.clientLabel,
                     sourceIpv4(call),
+                    request.rememberBrowserRequested,
                 )
             ) {
                 is ChallengeCreationResult.Created -> {
@@ -263,6 +275,9 @@ fun Application.installSessionRoutes(
                             sessionId = result.sessionId.value,
                             token = result.token,
                             serverTimeEpochMillis = wallClockMs(),
+                            trustedCredential = result.trustedCredential,
+                            trustedCredentialExpiresAtEpochMillis =
+                                result.trustedCredentialExpiresAtEpochMillis,
                         ),
                     ),
                 )
@@ -314,6 +329,135 @@ fun Application.installSessionRoutes(
             }
         }
 
+        post("/api/v1/session/trusted") {
+            if (!call.requireJsonApiRequest(allowedHosts())) return@post
+            val body = call.receiveBoundedJson()
+            if (body == null) {
+                call.respondSessionError(
+                    HttpStatusCode.BadRequest,
+                    SessionErrorCode.INVALID_PAYLOAD,
+                    "Некорректное или слишком большое тело запроса",
+                )
+                return@post
+            }
+            val request = runCatching {
+                SessionProtocolJson.decode<TrustedSessionExchangeRequest>(body)
+            }.getOrNull()
+            if (request == null) {
+                call.respondSessionError(
+                    HttpStatusCode.BadRequest,
+                    SessionErrorCode.INVALID_PAYLOAD,
+                    "Некорректное тело запроса",
+                )
+                return@post
+            }
+            when (SessionPayloadValidator.validate(request)) {
+                SessionValidationError.UNSUPPORTED_VERSION -> {
+                    call.respondSessionError(
+                        HttpStatusCode.BadRequest,
+                        SessionErrorCode.UNSUPPORTED_VERSION,
+                        "Версия протокола не поддерживается",
+                    )
+                    return@post
+                }
+                SessionValidationError.NONE -> Unit
+                else -> {
+                    call.respondSessionError(
+                        HttpStatusCode.BadRequest,
+                        SessionErrorCode.INVALID_PAYLOAD,
+                        "Недопустимые данные доверенного браузера",
+                    )
+                    return@post
+                }
+            }
+            val handle = generationHandle()
+            if (handle == null) {
+                call.respondSessionError(
+                    HttpStatusCode.ServiceUnavailable,
+                    SessionErrorCode.SESSION_CLOSED,
+                    "Серверная сессия не активна",
+                )
+                return@post
+            }
+            val source = sourceIpv4(call)
+            when (val limit = trustedExchangeRateLimiter.check(source)) {
+                is RateLimitDecision.Blocked -> {
+                    call.respondSessionError(
+                        HttpStatusCode.TooManyRequests,
+                        SessionErrorCode.RATE_LIMITED,
+                        "Слишком много попыток",
+                        retryAfterSeconds = limit.retryAfterMs.ceilSeconds(),
+                        attemptsRemaining = 0,
+                    )
+                    return@post
+                }
+                is RateLimitDecision.Allowed -> Unit
+            }
+            when (
+                val result = coordinator.exchangeTrusted(
+                    handle = handle,
+                    rawCredential = request.trustedCredential,
+                    sourceIpv4 = source,
+                    nowEpochMillis = wallClockMs(),
+                )
+            ) {
+                is TrustedSessionExchangeResult.Approved -> {
+                    trustedExchangeRateLimiter.recordSuccess(source)
+                    call.respondJson(
+                        HttpStatusCode.OK,
+                        SessionProtocolJson.encode(
+                            SessionConfirmResponse(
+                                protocolVersion = SESSION_PROTOCOL_VERSION,
+                                sessionId = result.sessionId.value,
+                                token = result.token,
+                                serverTimeEpochMillis = wallClockMs(),
+                            ),
+                        ),
+                    )
+                }
+                TrustedSessionExchangeResult.InvalidCredential -> {
+                    when (val failure = trustedExchangeRateLimiter.recordFailure(source)) {
+                        is RateLimitDecision.Blocked -> call.respondSessionError(
+                            HttpStatusCode.TooManyRequests,
+                            SessionErrorCode.RATE_LIMITED,
+                            "Слишком много попыток",
+                            retryAfterSeconds = failure.retryAfterMs.ceilSeconds(),
+                            attemptsRemaining = 0,
+                        )
+                        is RateLimitDecision.Allowed -> call.respondSessionError(
+                            HttpStatusCode.Unauthorized,
+                            SessionErrorCode.UNAUTHORIZED,
+                            "Доверенный доступ недействителен или отозван",
+                            attemptsRemaining = failure.remainingAttempts,
+                        )
+                    }
+                }
+                TrustedSessionExchangeResult.Expired -> {
+                    trustedExchangeRateLimiter.recordFailure(source)
+                    call.respondSessionError(
+                        HttpStatusCode.Gone,
+                        SessionErrorCode.EXPIRED,
+                        "Срок доверенного доступа истёк",
+                    )
+                }
+                TrustedSessionExchangeResult.InvalidMetadata -> call.respondSessionError(
+                    HttpStatusCode.BadRequest,
+                    SessionErrorCode.INVALID_PAYLOAD,
+                    "Недопустимые данные клиента",
+                )
+                TrustedSessionExchangeResult.CapacityReached -> call.respondSessionError(
+                    HttpStatusCode.TooManyRequests,
+                    SessionErrorCode.CAPACITY_REACHED,
+                    "Слишком много активных сессий",
+                )
+                TrustedSessionExchangeResult.GenerationClosed -> call.respondSessionError(
+                    HttpStatusCode.ServiceUnavailable,
+                    SessionErrorCode.SESSION_CLOSED,
+                    "Серверная сессия завершена",
+                )
+            }
+        }
+
         get("/api/v1/status") {
             val authorized = call.authorizeSession(
                 coordinator,
@@ -329,6 +473,9 @@ fun Application.installSessionRoutes(
                         sessionId = authorized.session.id.value,
                         connected = true,
                         activeSessionCount = coordinator.state.value.sessions.size,
+                        effectiveFileLimitBytes = effectiveFileLimitBytes(
+                            effectiveFileLimitBytes(),
+                        ),
                     ),
                 ),
             )

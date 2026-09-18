@@ -2,62 +2,366 @@ package ru.hznik.devicebridge.feature.settings
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
+import java.time.Instant
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
 
 @Composable
-fun SettingsScreen(modifier: Modifier = Modifier) {
-    Column(
+fun SettingsScreen(
+    uiState: SettingsUiState,
+    onAction: (SettingsAction) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    LazyColumn(
         modifier = modifier
             .fillMaxSize()
-            .padding(horizontal = 20.dp, vertical = 28.dp),
-        verticalArrangement = Arrangement.spacedBy(24.dp),
+            .testTag("settings-list")
+            .imePadding()
+            .padding(horizontal = 20.dp),
+        contentPadding = PaddingValues(vertical = 28.dp),
+        verticalArrangement = Arrangement.spacedBy(18.dp),
     ) {
-        Text(
-            text = "Настройки",
-            modifier = Modifier.semantics {
-                heading()
-                contentDescription = "Заголовок экрана Настройки"
-            },
-            style = MaterialTheme.typography.headlineLarge,
-            fontWeight = FontWeight.Bold,
-        )
-
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(28.dp),
-            colors = CardDefaults.cardColors(
-                containerColor = MaterialTheme.colorScheme.surfaceContainer,
-            ),
-        ) {
-            Column(
-                modifier = Modifier.padding(24.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
+        item {
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text(
-                    text = "Базовая конфигурация",
-                    style = MaterialTheme.typography.titleLarge,
-                    fontWeight = FontWeight.SemiBold,
+                    text = "Настройки",
+                    modifier = Modifier.semantics {
+                        heading()
+                        contentDescription = "Заголовок экрана Настройки"
+                    },
+                    style = MaterialTheme.typography.headlineLarge,
+                    fontWeight = FontWeight.Bold,
                 )
                 Text(
-                    text = "Параметры подключения появятся вместе с локальным сервером.",
-                    style = MaterialTheme.typography.bodyMedium,
+                    text = "Все параметры хранятся только на этом телефоне.",
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    style = MaterialTheme.typography.bodyMedium,
                 )
             }
         }
+
+        if (uiState.isLoading) {
+            item {
+                Column(
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 32.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                ) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.semantics {
+                            contentDescription = "Загрузка настроек"
+                        },
+                    )
+                }
+            }
+        } else {
+            item {
+                SettingsCard(title = "Устройство") {
+                    SettingsTextField(
+                        title = "Имя телефона",
+                        supportingText = "Так телефон будет называться в браузере.",
+                        value = uiState.deviceNameInput,
+                        onValueChange = { onAction(SettingsAction.DeviceNameChanged(it)) },
+                        fieldState = uiState.deviceNameState,
+                        fieldDescription = "Поле имени телефона",
+                        saveDescription = "Сохранить имя телефона",
+                        isSaved = uiState.deviceNameState.errorMessage == null &&
+                            uiState.deviceNameInput.trim() == uiState.settings.deviceName,
+                        onSave = { onAction(SettingsAction.SaveDeviceName) },
+                    )
+                }
+            }
+
+            item {
+                SettingsCard(title = "История") {
+                    SettingsTextField(
+                        title = "Срок хранения истории",
+                        supportingText = "От 1 до 365 дней.",
+                        value = uiState.retentionInput,
+                        onValueChange = { onAction(SettingsAction.RetentionChanged(it)) },
+                        fieldState = uiState.retentionState,
+                        fieldDescription = "Поле срока хранения истории",
+                        saveDescription = "Сохранить срок хранения истории",
+                        isSaved = uiState.retentionState.errorMessage == null &&
+                            uiState.retentionInput.toIntOrNull() == uiState.settings.retentionDays,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        onSave = { onAction(SettingsAction.SaveRetention) },
+                    )
+                }
+            }
+
+            item {
+                SettingsCard(title = "Передача файлов") {
+                    SettingsTextField(
+                        title = "Максимальный размер файла",
+                        supportingText = "Размер в МиБ, от 1 до 1024.",
+                        value = uiState.fileLimitMiBInput,
+                        onValueChange = { onAction(SettingsAction.FileLimitMiBChanged(it)) },
+                        fieldState = uiState.fileLimitState,
+                        fieldDescription = "Поле максимального размера файла",
+                        saveDescription = "Сохранить максимальный размер файла",
+                        isSaved = uiState.fileLimitState.errorMessage == null &&
+                            fileLimitBytes(uiState.fileLimitMiBInput) ==
+                            uiState.settings.effectiveFileLimitBytes,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        onSave = { onAction(SettingsAction.SaveFileLimit) },
+                    )
+
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text(
+                            text = "Папка для входящих файлов",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                        Text(
+                            text = if (uiState.settings.destinationTree == null) {
+                                "Папка не выбрана. Перед приёмом файла приложение спросит её снова."
+                            } else {
+                                "Папка выбрана и будет предложена для следующих входящих файлов."
+                            },
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            style = MaterialTheme.typography.bodyMedium,
+                        )
+                        uiState.destinationState.errorMessage?.let { message ->
+                            FieldError(message)
+                        }
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        ) {
+                            Button(
+                                onClick = { onAction(SettingsAction.ChooseDestination) },
+                                enabled = !uiState.destinationState.isSaving,
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .semantics {
+                                        contentDescription =
+                                            "Выбрать папку для входящих файлов"
+                                    },
+                            ) {
+                                Text(if (uiState.settings.destinationTree == null) "Выбрать" else "Изменить")
+                            }
+                            if (uiState.settings.destinationTree != null) {
+                                OutlinedButton(
+                                    onClick = { onAction(SettingsAction.ClearDestination) },
+                                    enabled = !uiState.destinationState.isSaving,
+                                    modifier = Modifier.semantics {
+                                        contentDescription = "Сбросить папку для входящих файлов"
+                                    },
+                                ) {
+                                    Text("Сбросить")
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            item {
+                SettingsCard(title = "Доверенные браузеры") {
+                    if (uiState.trustedBrowsers.isEmpty()) {
+                        Text(
+                            text = "Доверенных браузеров пока нет",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                        Text(
+                            text = "После явного разрешения здесь можно будет отозвать доступ отдельного браузера или всех сразу.",
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            style = MaterialTheme.typography.bodyMedium,
+                        )
+                    } else {
+                        Text(
+                            text = "Эти браузеры могут восстановить подключение без нового кода в течение срока действия.",
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            style = MaterialTheme.typography.bodyMedium,
+                        )
+                        uiState.trustedBrowsers.forEachIndexed { index, browser ->
+                            if (index > 0) HorizontalDivider()
+                            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                Text(
+                                    text = browser.browserLabel,
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.SemiBold,
+                                )
+                                Text(
+                                    text = "Последнее использование: ${formatTrustedTimestamp(browser.lastUsedAtEpochMillis)}",
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    style = MaterialTheme.typography.bodySmall,
+                                )
+                                Text(
+                                    text = "Доступ действует до: ${formatTrustedTimestamp(browser.expiresAtEpochMillis)}",
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    style = MaterialTheme.typography.bodySmall,
+                                )
+                                OutlinedButton(
+                                    onClick = {
+                                        onAction(SettingsAction.RevokeTrustedBrowser(browser.id))
+                                    },
+                                    enabled =
+                                        browser.id !in uiState.revokingTrustedBrowserIds &&
+                                            !uiState.revokeAllTrustedBrowsersPending,
+                                    modifier = Modifier.fillMaxWidth().semantics {
+                                        contentDescription =
+                                            "Отозвать доступ ${browser.browserLabel}"
+                                    },
+                                ) {
+                                    Text(
+                                        if (browser.id in uiState.revokingTrustedBrowserIds) {
+                                            "Отзыв доступа…"
+                                        } else {
+                                            "Отозвать доступ"
+                                        },
+                                    )
+                                }
+                            }
+                        }
+                        uiState.trustedBrowsersError?.let { FieldError(it) }
+                        OutlinedButton(
+                            onClick = { onAction(SettingsAction.RevokeAllTrustedBrowsers) },
+                            enabled = !uiState.revokeAllTrustedBrowsersPending &&
+                                uiState.revokingTrustedBrowserIds.isEmpty(),
+                            modifier = Modifier.fillMaxWidth().semantics {
+                                contentDescription = "Отозвать доступ всех доверенных браузеров"
+                            },
+                        ) {
+                            Text(
+                                if (uiState.revokeAllTrustedBrowsersPending) {
+                                    "Отзыв доступа…"
+                                } else {
+                                    "Отозвать доступ всех"
+                                },
+                            )
+                        }
+                    }
+                }
+            }
+        }
     }
+}
+
+@Composable
+private fun SettingsCard(
+    title: String,
+    content: @Composable () -> Unit,
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(24.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceContainer,
+        ),
+    ) {
+        Column(
+            modifier = Modifier.padding(20.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp),
+        ) {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.primary,
+            )
+            content()
+        }
+    }
+}
+
+@Composable
+private fun SettingsTextField(
+    title: String,
+    supportingText: String,
+    value: String,
+    onValueChange: (String) -> Unit,
+    fieldState: SettingsFieldState,
+    fieldDescription: String,
+    saveDescription: String,
+    isSaved: Boolean,
+    onSave: () -> Unit,
+    keyboardOptions: KeyboardOptions = KeyboardOptions.Default,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(
+            text = title,
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.SemiBold,
+        )
+        OutlinedTextField(
+            value = value,
+            onValueChange = onValueChange,
+            modifier = Modifier.fillMaxWidth().semantics {
+                contentDescription = fieldDescription
+            },
+            singleLine = true,
+            isError = fieldState.errorMessage != null,
+            supportingText = {
+                Text(fieldState.errorMessage ?: supportingText)
+            },
+            keyboardOptions = keyboardOptions,
+        )
+        Button(
+            onClick = onSave,
+            enabled = !fieldState.isSaving,
+            modifier = Modifier.fillMaxWidth().semantics {
+                contentDescription = saveDescription
+            },
+        ) {
+            Text(
+                when {
+                    fieldState.isSaving -> "Сохранение…"
+                    isSaved -> "Сохранено"
+                    else -> "Сохранить"
+                },
+            )
+        }
+    }
+}
+
+@Composable
+private fun FieldError(message: String) {
+    Text(
+        text = message,
+        color = MaterialTheme.colorScheme.error,
+        style = MaterialTheme.typography.bodySmall,
+    )
+}
+
+private val trustedTimestampFormatter: DateTimeFormatter =
+    DateTimeFormatter.ofPattern("dd.MM.yyyy HH:mm")
+
+internal fun formatTrustedTimestamp(epochMillis: Long?): String =
+    epochMillis?.let {
+        trustedTimestampFormatter.format(
+            Instant.ofEpochMilli(it).atZone(ZoneId.systemDefault()),
+        )
+    } ?: "ещё не использовался"
+
+private fun fileLimitBytes(input: String): Long? = input.toLongOrNull()?.let { mebibytes ->
+    runCatching { Math.multiplyExact(mebibytes, 1024L * 1024) }.getOrNull()
 }
