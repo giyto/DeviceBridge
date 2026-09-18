@@ -7,6 +7,9 @@ import java.net.URI
 import java.net.http.HttpClient
 import java.net.http.HttpRequest
 import java.net.http.HttpResponse
+import java.time.Clock
+import java.time.Instant
+import java.time.ZoneOffset
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -35,16 +38,21 @@ internal class SessionRouteTestServer(
     uploadTargetFactory: FileUploadTargetFactory? = null,
     downloadSourceFactory: FileDownloadSourceFactory? = null,
     enableFileEvents: Boolean = false,
+    effectiveFileLimitBytes: Long = ru.hznik.devicebridge.domain.file.HARD_MAX_FILE_BYTES,
+    effectiveFileLimitProvider: (() -> Long)? = null,
 ) : AutoCloseable {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val clock = FixedClock(1_000)
     private var grantNowEpochMillis = 1_000_000L
+    val trustedBrowserRepository = TestTrustedBrowserRepository()
     val coordinator = BrowserSessionCoordinator(
         clock = clock,
         secretGenerator = SessionSecretGenerator(DeterministicRandom()),
         scope = scope,
         maxChallenges = maxChallenges,
         confirmWaitTimeoutMs = confirmWaitTimeoutMs,
+        trustedBrowserRepository = trustedBrowserRepository,
+        wallClock = Clock.fixed(Instant.ofEpochMilli(1_000_000), ZoneOffset.UTC),
     )
     val handle: SessionGenerationHandle = runBlocking {
         coordinator.activate(ServerGenerationId(1))
@@ -93,6 +101,9 @@ internal class SessionRouteTestServer(
                 textCoordinator = textCoordinator,
                 eventDispatcher = eventDispatcher,
                 fileCoordinator = fileCoordinator.takeIf { enableFileEvents },
+                effectiveFileLimitBytes = {
+                    effectiveFileLimitProvider?.invoke() ?: effectiveFileLimitBytes
+                },
             )
             installTextRoutes(
                 sessionCoordinator = coordinator,
@@ -109,6 +120,9 @@ internal class SessionRouteTestServer(
                 wallClockMs = { 1_000_000 },
                 uploadTargetFactory = uploadTargetFactory,
                 downloadSourceFactory = downloadSourceFactory,
+                effectiveFileLimitBytes = {
+                    effectiveFileLimitProvider?.invoke() ?: effectiveFileLimitBytes
+                },
             )
         },
     ).also { it.start(wait = false) }
@@ -194,6 +208,32 @@ internal class SessionRouteTestServer(
         error("Pending request was not published")
     }
 
+    fun pairTrustedBrowser(label: String): SessionConfirmResponse {
+        val challengeResponse = request(
+            "POST",
+            "/api/v1/session/challenge",
+            """{"protocolVersion":1,"clientLabel":"$label","rememberBrowserRequested":true}""",
+            sameOriginJsonHeaders(),
+        )
+        val challenge = SessionProtocolJson.decode<SessionChallengeResponse>(challengeResponse.body())
+        val code = requireNotNull(coordinator.state.value.pairingCode).value
+        val confirmation = requestAsync(
+            "POST",
+            "/api/v1/session/confirm",
+            """{"protocolVersion":1,"challengeId":"${challenge.challengeId}","code":"$code","clientLabel":"$label"}""",
+            sameOriginJsonHeaders(),
+        )
+        repeat(100) {
+            val pending = coordinator.state.value.pendingRequests.singleOrNull()
+            if (pending != null) {
+                runBlocking { coordinator.approveAndRemember(pending.id) }
+                return SessionProtocolJson.decode(confirmation.get().body())
+            }
+            Thread.sleep(10)
+        }
+        error("Pending trusted request was not published")
+    }
+
     fun sameOriginJsonHeaders(extra: Map<String, String> = emptyMap()): Map<String, String> =
         mapOf(
             "Origin" to "http://$authority",
@@ -234,6 +274,8 @@ internal inline fun <T> withSessionRouteServer(
     uploadTargetFactory: FileUploadTargetFactory? = null,
     downloadSourceFactory: FileDownloadSourceFactory? = null,
     enableFileEvents: Boolean = false,
+    effectiveFileLimitBytes: Long = ru.hznik.devicebridge.domain.file.HARD_MAX_FILE_BYTES,
+    noinline effectiveFileLimitProvider: (() -> Long)? = null,
     block: (SessionRouteTestServer) -> T,
 ): T = SessionRouteTestServer(
     maxChallenges,
@@ -242,4 +284,6 @@ internal inline fun <T> withSessionRouteServer(
     uploadTargetFactory,
     downloadSourceFactory,
     enableFileEvents,
+    effectiveFileLimitBytes,
+    effectiveFileLimitProvider,
 ).use(block)

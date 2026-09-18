@@ -6,6 +6,8 @@ import type {
 export interface FileTransferActions {
   readonly onSelect: (files: readonly File[]) => void;
   readonly onConfirm: () => void;
+  readonly onRemoveDraft: (key: string) => void;
+  readonly onClearDraft: () => void;
   readonly onCancel: (transferId: string) => void;
   readonly onRetry: (transferId: string) => void;
   readonly onDownload: (transferId: string) => void;
@@ -25,19 +27,25 @@ export function createFileTransferView(
   const dropZone = required<HTMLElement>(documentRef, '[data-role="file-drop-zone"]');
   const selection = required<HTMLUListElement>(documentRef, '[data-role="file-selection"]');
   const confirm = required<HTMLButtonElement>(documentRef, '[data-action="confirm-files"]');
+  const clearDraft = required<HTMLButtonElement>(documentRef, '[data-action="clear-file-draft"]');
   const error = required<HTMLElement>(documentRef, '[data-role="file-error"]');
   const list = required<HTMLOListElement>(documentRef, '[data-role="file-transfer-list"]');
   const empty = required<HTMLElement>(documentRef, '[data-role="file-transfer-empty"]');
   const count = required<HTMLElement>(documentRef, '[data-role="file-transfer-count"]');
   const announcer = required<HTMLElement>(documentRef, '[data-role="file-announcer"]');
   const knownStatuses = new Map<string, string>();
+  const transferCards = new Map<string, HTMLLIElement>();
 
   const select = (files: FileList | readonly File[] | null): void => {
     if (files === null) return;
     actions.onSelect(Array.from(files));
   };
-  const onInput = (): void => select(input.files);
+  const onInput = (): void => {
+    select(input.files);
+    input.value = "";
+  };
   const onConfirm = (): void => actions.onConfirm();
+  const onClearDraft = (): void => actions.onClearDraft();
   const onDragOver = (event: DragEvent): void => {
     event.preventDefault();
     if (event.dataTransfer !== null) event.dataTransfer.dropEffect = "copy";
@@ -54,6 +62,7 @@ export function createFileTransferView(
   };
   input.addEventListener("change", onInput);
   confirm.addEventListener("click", onConfirm);
+  clearDraft.addEventListener("click", onClearDraft);
   dropZone.addEventListener("dragover", onDragOver);
   dropZone.addEventListener("drop", onDrop);
   dropZone.addEventListener("keydown", onDropKey);
@@ -66,9 +75,12 @@ export function createFileTransferView(
       error.hidden = true;
       error.textContent = "";
       confirm.disabled = true;
+      clearDraft.hidden = true;
+      clearDraft.disabled = true;
       count.textContent = "0";
       empty.hidden = false;
       knownStatuses.clear();
+      transferCards.clear();
       return;
     }
 
@@ -88,9 +100,21 @@ export function createFileTransferView(
           itemError.textContent = item.error;
           row.append(itemError);
         }
+        const remove = actionButton(
+          documentRef,
+          "Удалить",
+          "remove-draft-file",
+          () => actions.onRemoveDraft(item.key),
+          true,
+        );
+        remove.disabled = state.preparing;
+        remove.setAttribute("aria-label", `Удалить ${item.displayName} из выбранных`);
+        row.append(remove);
         return row;
       }),
     );
+    clearDraft.hidden = state.selection.length === 0;
+    clearDraft.disabled = state.preparing || state.selection.length === 0;
     confirm.disabled =
       state.preparing ||
       state.selection.length === 0 ||
@@ -102,9 +126,7 @@ export function createFileTransferView(
     error.textContent = state.error ?? "";
     count.textContent = String(state.transfers.length);
     empty.hidden = state.transfers.length > 0;
-    list.replaceChildren(
-      ...state.transfers.map((item) => createTransferCard(documentRef, item, actions)),
-    );
+    reconcileTransferCards(documentRef, list, state.transfers, actions, transferCards);
     announceTerminalChanges(state.transfers, knownStatuses, announcer);
   };
 
@@ -114,6 +136,7 @@ export function createFileTransferView(
     dispose: () => {
       input.removeEventListener("change", onInput);
       confirm.removeEventListener("click", onConfirm);
+      clearDraft.removeEventListener("click", onClearDraft);
       dropZone.removeEventListener("dragover", onDragOver);
       dropZone.removeEventListener("drop", onDrop);
       dropZone.removeEventListener("keydown", onDropKey);
@@ -129,83 +152,173 @@ function createTransferCard(
   const card = documentRef.createElement("li");
   card.className = "file-card";
   card.dataset.transferId = item.id;
-  card.dataset.status = item.status;
 
   const heading = documentRef.createElement("div");
   heading.className = "file-card__heading";
   const name = documentRef.createElement("strong");
-  name.textContent = item.metadata.displayName;
   const status = documentRef.createElement("span");
   status.className = "file-card__status";
-  status.textContent = statusLabel(item.status);
   heading.append(name, status);
 
   const details = documentRef.createElement("p");
   details.className = "file-card__details";
+  card.append(heading, details);
+  updateTransferCard(documentRef, card, item, actions);
+  return card;
+}
+
+function updateTransferCard(
+  documentRef: Document,
+  card: HTMLLIElement,
+  item: FileTransferUiItem,
+  actions: FileTransferActions,
+): void {
+  card.dataset.status = item.status;
+  const name = card.querySelector<HTMLElement>(".file-card__heading strong")!;
+  const status = card.querySelector<HTMLElement>(".file-card__status")!;
+  const details = card.querySelector<HTMLElement>(".file-card__details")!;
+  name.textContent = item.metadata.displayName;
+  status.textContent = statusLabel(item.status);
   details.textContent =
     directionLabel(item.metadata.direction) + " · " +
     formatBytes(item.metadata.sizeBytes) + " · " +
     item.metadata.mimeType;
-  card.append(heading, details);
 
   if (item.status === "TRANSFERRING" || item.status === "VERIFYING") {
-    const progress = documentRef.createElement("progress");
+    const progress = card.querySelector<HTMLProgressElement>("progress") ??
+      documentRef.createElement("progress");
     progress.max = Math.max(1, item.metadata.sizeBytes);
     progress.value = item.bytesTransferred;
     progress.setAttribute(
       "aria-label",
       "Прогресс " + item.metadata.displayName + ": " + progressPercent(item) + "%",
     );
-    const progressText = documentRef.createElement("p");
+    const progressText = card.querySelector<HTMLElement>(".file-card__progress") ??
+      documentRef.createElement("p");
     progressText.className = "file-card__progress";
     progressText.textContent =
       progressPercent(item) + "% · " +
       formatBytes(item.bytesTransferred) + " из " +
       formatBytes(item.metadata.sizeBytes) + " · " +
       formatBytes(item.speedBytesPerSecond) + "/с";
-    card.append(progress, progressText);
+    if (!progress.isConnected) details.after(progress, progressText);
+  } else {
+    card.querySelector("progress")?.remove();
+    card.querySelector(".file-card__progress")?.remove();
   }
 
   if (item.localError !== undefined) {
-    const itemError = documentRef.createElement("p");
+    const itemError = card.querySelector<HTMLElement>(".file-card__error") ??
+      documentRef.createElement("p");
     itemError.className = "file-card__error";
     itemError.textContent = item.localError;
-    card.append(itemError);
+    if (!itemError.isConnected) {
+      const actionsRow = card.querySelector(".file-card__actions");
+      if (actionsRow === null) card.append(itemError);
+      else card.insertBefore(itemError, actionsRow);
+    }
+  } else {
+    card.querySelector(".file-card__error")?.remove();
   }
 
-  const actionsRow = documentRef.createElement("div");
-  actionsRow.className = "file-card__actions";
-  if (
+  const canDownload =
     item.metadata.direction === "ANDROID_TO_BROWSER" &&
-    item.status === "CONNECTING"
-  ) {
-    actionsRow.append(actionButton(
+    item.status === "CONNECTING";
+  const canCancel = !isTerminal(item.status);
+  const canRetry = item.status === "FAILED" || item.status === "CANCELLED";
+  let actionsRow = card.querySelector<HTMLDivElement>(".file-card__actions");
+  if (canDownload || canCancel || canRetry) {
+    if (actionsRow === null) {
+      actionsRow = documentRef.createElement("div");
+      actionsRow.className = "file-card__actions";
+      card.append(actionsRow);
+    }
+  }
+  syncActionButton(
+    documentRef,
+    actionsRow,
+    "download-file",
+    canDownload,
+    () => actionButton(
       documentRef,
       "Скачать",
       "download-file",
       () => actions.onDownload(item.id),
-    ));
-  }
-  if (!isTerminal(item.status)) {
-    actionsRow.append(actionButton(
+    ),
+  );
+  syncActionButton(
+    documentRef,
+    actionsRow,
+    "cancel-file",
+    canCancel,
+    () => actionButton(
       documentRef,
       "Отменить",
       "cancel-file",
       () => actions.onCancel(item.id),
       true,
-    ));
-  }
-  if (item.status === "FAILED" || item.status === "CANCELLED") {
-    actionsRow.append(actionButton(
+    ),
+  );
+  syncActionButton(
+    documentRef,
+    actionsRow,
+    "retry-file",
+    canRetry,
+    () => actionButton(
       documentRef,
       "Повторить",
       "retry-file",
       () => actions.onRetry(item.id),
       true,
-    ));
+    ),
+  );
+  if (actionsRow !== null && actionsRow.childElementCount === 0) {
+    actionsRow.remove();
   }
-  if (actionsRow.childElementCount > 0) card.append(actionsRow);
-  return card;
+}
+
+function syncActionButton(
+  _documentRef: Document,
+  actionsRow: HTMLDivElement | null,
+  action: string,
+  visible: boolean,
+  create: () => HTMLButtonElement,
+): void {
+  const existing = actionsRow?.querySelector<HTMLButtonElement>(
+    `[data-action="${action}"]`,
+  );
+  if (!visible) {
+    existing?.remove();
+  } else if (existing === null || existing === undefined) {
+    actionsRow?.append(create());
+  }
+}
+
+function reconcileTransferCards(
+  documentRef: Document,
+  list: HTMLOListElement,
+  items: readonly FileTransferUiItem[],
+  actions: FileTransferActions,
+  cards: Map<string, HTMLLIElement>,
+): void {
+  const activeIds = new Set(items.map((item) => item.id));
+  for (const [id, card] of cards) {
+    if (!activeIds.has(id)) {
+      card.remove();
+      cards.delete(id);
+    }
+  }
+  items.forEach((item, index) => {
+    let card = cards.get(item.id);
+    if (card === undefined) {
+      card = createTransferCard(documentRef, item, actions);
+      cards.set(item.id, card);
+    } else {
+      updateTransferCard(documentRef, card, item, actions);
+    }
+    const currentAtIndex = list.children.item(index);
+    if (currentAtIndex !== card) list.insertBefore(card, currentAtIndex);
+  });
 }
 
 function actionButton(

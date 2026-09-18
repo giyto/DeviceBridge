@@ -28,6 +28,7 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -112,14 +113,14 @@ internal class ProductionFileTransferBenchmarkHarness : Closeable {
         val uploaded = withContext(Dispatchers.IO) { upload(uploadId, 0, emptyHash) }
         assertEquals(0, uploaded.bytes)
         assertEquals(emptyHash, uploaded.sha256)
-        assertEquals(FileTransferPhase.COMPLETED, files.state.value.item(uploadId)?.phase)
+        awaitPhase(uploadId, FileTransferPhase.COMPLETED)
 
         val downloadId = FileTransferId("zero-download")
         createDownload(downloadId, 0, emptyHash)
         val downloaded = withContext(Dispatchers.IO) { download(downloadId, 0, emptyHash) }
         assertEquals(0, downloaded.bytes)
         assertEquals(emptyHash, downloaded.sha256)
-        assertEquals(FileTransferPhase.COMPLETED, files.state.value.item(downloadId)?.phase)
+        awaitPhase(downloadId, FileTransferPhase.COMPLETED)
     }
 
     suspend fun verifyOversizeOfferRejected() {
@@ -152,7 +153,7 @@ internal class ProductionFileTransferBenchmarkHarness : Closeable {
             result.copy(uiTicks = ticks)
         }
         assertTransfer(uploadRun, uploadMemory, expectedHash)
-        assertEquals(FileTransferPhase.COMPLETED, files.state.value.item(uploadId)?.phase)
+        awaitPhase(uploadId, FileTransferPhase.COMPLETED)
 
         val downloadId = FileTransferId("benchmark-download")
         val (downloadRun, downloadMemory) = sampler.measure("production-file-download", 1) {
@@ -163,7 +164,7 @@ internal class ProductionFileTransferBenchmarkHarness : Closeable {
             result.copy(uiTicks = ticks)
         }
         assertTransfer(downloadRun, downloadMemory, expectedHash)
-        assertEquals(FileTransferPhase.COMPLETED, files.state.value.item(downloadId)?.phase)
+        awaitPhase(downloadId, FileTransferPhase.COMPLETED)
 
         emitResult(uploadRun, uploadMemory)
         emitResult(downloadRun, downloadMemory)
@@ -356,6 +357,17 @@ internal class ProductionFileTransferBenchmarkHarness : Closeable {
         }
         assertTrue("Android main thread did not remain responsive", ticks.get() >= 2)
         result to ticks.get()
+    }
+
+    private suspend fun awaitPhase(
+        transferId: FileTransferId,
+        expected: FileTransferPhase,
+    ) {
+        withTimeout(5_000) {
+            while (files.state.value.item(transferId)?.phase != expected) {
+                delay(10)
+            }
+        }
     }
 
     private fun assertTransfer(

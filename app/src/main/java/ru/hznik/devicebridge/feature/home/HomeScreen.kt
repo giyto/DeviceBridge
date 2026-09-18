@@ -310,6 +310,13 @@ private fun PendingBrowsersSection(
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSecondaryContainer,
                     )
+                    if (request.rememberBrowserRequested) {
+                        Text(
+                            text = "Браузер просит сохранить доступ на этом устройстве на срок до 30 дней.",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSecondaryContainer,
+                        )
+                    }
                     HorizontalDivider()
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -338,7 +345,23 @@ private fun PendingBrowsersSection(
                                     contentDescription =
                                         "Разрешить ${request.browserLabel} с адреса ${request.sourceIpv4}"
                                 },
-                        ) { Text("Разрешить") }
+                        ) {
+                            Text(if (request.rememberBrowserRequested) "Один раз" else "Разрешить")
+                        }
+                    }
+                    if (request.rememberBrowserRequested) {
+                        Button(
+                            onClick = {
+                                onAction(HomeAction.ApproveAndRememberBrowser(request.id))
+                            },
+                            enabled = !request.actionPending,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .semantics {
+                                    contentDescription =
+                                        "Разрешить и запомнить ${request.browserLabel} с адреса ${request.sourceIpv4}"
+                                },
+                        ) { Text("Разрешить и запомнить") }
                     }
                 }
             }

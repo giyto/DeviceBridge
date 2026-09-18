@@ -1,5 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
 <full-backup-content>
+    <!-- Room contains local history and trusted-browser verifiers. -->
+    <exclude
+        domain="database"
+        path="." />
+    <!-- Preferences DataStore contains local device settings and a persisted SAF URI. -->
+    <exclude
+        domain="file"
+        path="datastore/devicebridge_settings.preferences_pb" />
     <exclude
         domain="sharedpref"
         path="server_session_journal.xml" />

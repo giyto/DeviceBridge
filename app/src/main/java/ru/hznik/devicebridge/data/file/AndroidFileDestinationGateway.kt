@@ -3,6 +3,7 @@ package ru.hznik.devicebridge.data.file
 import android.content.ContentResolver
 import android.content.Intent
 import android.net.Uri
+import android.provider.DocumentsContract
 import androidx.activity.result.contract.ActivityResultContracts
 import java.util.concurrent.atomic.AtomicBoolean
 
@@ -24,6 +25,7 @@ class ScopedDocumentTreeLease internal constructor(
     val uri: String,
     private val grantFlags: Int,
     private val permissions: DocumentTreePermissionGateway,
+    private val releasePermissionOnClose: Boolean = true,
 ) {
     private val released = AtomicBoolean(false)
 
@@ -32,7 +34,9 @@ class ScopedDocumentTreeLease internal constructor(
 
     fun release() {
         if (released.compareAndSet(false, true)) {
-            permissions.release(uri, grantFlags)
+            if (releasePermissionOnClose) {
+                permissions.release(uri, grantFlags)
+            }
         }
     }
 }
@@ -63,19 +67,66 @@ class AndroidFileDestinationGateway(
     }
 }
 
+sealed interface SettingsDestinationApproval {
+    data class Approved(val uri: String) : SettingsDestinationApproval
+    data object Cancelled : SettingsDestinationApproval
+    data object Unavailable : SettingsDestinationApproval
+}
+
+class PersistedDestinationPermissionController(
+    private val permissions: DocumentTreePermissionGateway,
+) {
+    fun approve(uri: String?): SettingsDestinationApproval {
+        if (uri == null) return SettingsDestinationApproval.Cancelled
+        if (!permissions.acquire(uri, READ_WRITE_FLAGS) || !permissions.isAvailable(uri)) {
+            return SettingsDestinationApproval.Unavailable
+        }
+        return SettingsDestinationApproval.Approved(uri)
+    }
+
+    fun openPersisted(uri: String): DestinationApproval {
+        if (!permissions.isAvailable(uri)) return DestinationApproval.Unavailable
+        return DestinationApproval.Approved(
+            ScopedDocumentTreeLease(
+                uri = uri,
+                grantFlags = READ_WRITE_FLAGS,
+                permissions = permissions,
+                releasePermissionOnClose = false,
+            ),
+        )
+    }
+
+    private companion object {
+        const val READ_WRITE_FLAGS =
+            Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+    }
+}
+
 class ContentResolverDocumentTreePermissionGateway(
     private val contentResolver: ContentResolver,
 ) : DocumentTreePermissionGateway {
     override fun acquire(uri: String, grantFlags: Int): Boolean = runCatching {
         contentResolver.takePersistableUriPermission(Uri.parse(uri), grantFlags)
-        true
+        isAvailable(uri)
     }.getOrDefault(false)
 
     override fun isAvailable(uri: String): Boolean {
         val parsed = runCatching { Uri.parse(uri) }.getOrNull() ?: return false
-        return contentResolver.persistedUriPermissions.any { permission ->
-            permission.uri == parsed &&
-                (permission.isReadPermission || permission.isWritePermission)
+        val hasGrant = contentResolver.persistedUriPermissions.any { permission ->
+            permission.uri == parsed && permission.isWritePermission
+        }
+        return persistedTreeIsAvailable(hasGrant) {
+            val documentUri = DocumentsContract.buildDocumentUriUsingTree(
+                parsed,
+                DocumentsContract.getTreeDocumentId(parsed),
+            )
+            contentResolver.query(
+                documentUri,
+                arrayOf(DocumentsContract.Document.COLUMN_DOCUMENT_ID),
+                null,
+                null,
+                null,
+            )?.use { cursor -> cursor.moveToFirst() } == true
         }
     }
 
@@ -84,4 +135,12 @@ class ContentResolverDocumentTreePermissionGateway(
             contentResolver.releasePersistableUriPermission(Uri.parse(uri), grantFlags)
         }
     }
+}
+
+internal inline fun persistedTreeIsAvailable(
+    hasGrant: Boolean,
+    providerProbe: () -> Boolean,
+): Boolean {
+    if (!hasGrant) return false
+    return runCatching(providerProbe).getOrDefault(false)
 }

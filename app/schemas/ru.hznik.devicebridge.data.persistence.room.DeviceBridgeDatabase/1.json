@@ -1,0 +1,176 @@
+{
+  "formatVersion": 1,
+  "database": {
+    "version": 1,
+    "identityHash": "7be9478a52a5bff1e7db6a3a54aa57a9",
+    "entities": [
+      {
+        "tableName": "history_records",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`record_id` TEXT NOT NULL, `operation_id` TEXT NOT NULL, `kind` TEXT NOT NULL, `direction` TEXT NOT NULL, `browser_label` TEXT NOT NULL, `timestamp_epoch_millis` INTEGER NOT NULL, `terminal_status` TEXT NOT NULL, `text_preview` TEXT, `file_display_name` TEXT, `file_size_bytes` INTEGER, `file_mime_type` TEXT, `file_sha256` TEXT, `failure_reason` TEXT, PRIMARY KEY(`record_id`))",
+        "fields": [
+          {
+            "fieldPath": "recordId",
+            "columnName": "record_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "operationId",
+            "columnName": "operation_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "kind",
+            "columnName": "kind",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "direction",
+            "columnName": "direction",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "browserLabel",
+            "columnName": "browser_label",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "timestampEpochMillis",
+            "columnName": "timestamp_epoch_millis",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "terminalStatus",
+            "columnName": "terminal_status",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "textPreview",
+            "columnName": "text_preview",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "fileDisplayName",
+            "columnName": "file_display_name",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "fileSizeBytes",
+            "columnName": "file_size_bytes",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "fileMimeType",
+            "columnName": "file_mime_type",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "fileSha256",
+            "columnName": "file_sha256",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "failureReason",
+            "columnName": "failure_reason",
+            "affinity": "TEXT"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "record_id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_history_records_operation_id_kind",
+            "unique": true,
+            "columnNames": [
+              "operation_id",
+              "kind"
+            ],
+            "orders": [],
+            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `index_history_records_operation_id_kind` ON `${TABLE_NAME}` (`operation_id`, `kind`)"
+          },
+          {
+            "name": "index_history_records_timestamp_epoch_millis",
+            "unique": false,
+            "columnNames": [
+              "timestamp_epoch_millis"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_history_records_timestamp_epoch_millis` ON `${TABLE_NAME}` (`timestamp_epoch_millis`)"
+          }
+        ]
+      },
+      {
+        "tableName": "trusted_browsers",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`trusted_browser_id` TEXT NOT NULL, `browser_label` TEXT NOT NULL, `created_at_epoch_millis` INTEGER NOT NULL, `last_used_at_epoch_millis` INTEGER, `expires_at_epoch_millis` INTEGER NOT NULL, `credential_verifier` BLOB NOT NULL, PRIMARY KEY(`trusted_browser_id`))",
+        "fields": [
+          {
+            "fieldPath": "trustedBrowserId",
+            "columnName": "trusted_browser_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "browserLabel",
+            "columnName": "browser_label",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "createdAtEpochMillis",
+            "columnName": "created_at_epoch_millis",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "lastUsedAtEpochMillis",
+            "columnName": "last_used_at_epoch_millis",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "expiresAtEpochMillis",
+            "columnName": "expires_at_epoch_millis",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "credentialVerifier",
+            "columnName": "credential_verifier",
+            "affinity": "BLOB",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "trusted_browser_id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_trusted_browsers_expires_at_epoch_millis",
+            "unique": false,
+            "columnNames": [
+              "expires_at_epoch_millis"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_trusted_browsers_expires_at_epoch_millis` ON `${TABLE_NAME}` (`expires_at_epoch_millis`)"
+          }
+        ]
+      }
+    ],
+    "setupQueries": [
+      "CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)",
+      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, '7be9478a52a5bff1e7db6a3a54aa57a9')"
+    ]
+  }
+}

@@ -22,6 +22,11 @@ import ru.hznik.devicebridge.feature.text.TextUiState
 import ru.hznik.devicebridge.domain.session.BrowserSessionId
 import ru.hznik.devicebridge.feature.file.FileScreen
 import ru.hznik.devicebridge.feature.file.FileUiState
+import ru.hznik.devicebridge.feature.history.HistoryLoadState
+import ru.hznik.devicebridge.feature.history.HistoryScreen
+import ru.hznik.devicebridge.feature.history.HistoryUiState
+import ru.hznik.devicebridge.feature.settings.SettingsScreen
+import ru.hznik.devicebridge.feature.settings.SettingsUiState
 
 @RunWith(AndroidJUnit4::class)
 class DeviceBridgeNavigationTest {
@@ -138,6 +143,15 @@ class DeviceBridgeNavigationTest {
                 )
             },
             fileContent = { onBack, _ -> FileScreen(FileUiState(), onBack = onBack) },
+            historyContent = {
+                HistoryScreen(
+                    HistoryUiState(loadState = HistoryLoadState.EMPTY),
+                    onAction = {},
+                )
+            },
+            settingsContent = {
+                SettingsScreen(SettingsUiState(isLoading = false), onAction = {})
+            },
         )
     }
 }

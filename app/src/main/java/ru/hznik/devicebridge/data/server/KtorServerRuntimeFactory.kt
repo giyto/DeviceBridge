@@ -4,8 +4,14 @@ import io.ktor.server.cio.CIO
 import io.ktor.server.engine.embeddedServer
 import java.util.concurrent.atomic.AtomicReference
 import javax.inject.Inject
+import javax.inject.Qualifier
 import javax.inject.Singleton
 import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.withContext
 import ru.hznik.devicebridge.data.network.LanEndpointResolution
 import ru.hznik.devicebridge.data.network.LanEndpointResolver
@@ -22,6 +28,9 @@ import ru.hznik.devicebridge.data.file.FileSourceRegistry
 import ru.hznik.devicebridge.data.file.CompletedFileRegistry
 import ru.hznik.devicebridge.data.file.FileDestinationLeaseRegistry
 import ru.hznik.devicebridge.domain.session.ServerGenerationId
+import ru.hznik.devicebridge.domain.settings.DeviceSettings
+import ru.hznik.devicebridge.domain.usecase.ObserveSettingsUseCase
+import ru.hznik.devicebridge.di.ApplicationScope
 import ru.hznik.devicebridge.web.WebAssetProvider
 import ru.hznik.devicebridge.web.installSessionRoutes
 import ru.hznik.devicebridge.web.installTextRoutes
@@ -29,6 +38,39 @@ import ru.hznik.devicebridge.web.RemoteClientAddress
 import ru.hznik.devicebridge.web.installWebRoutes
 import ru.hznik.devicebridge.web.installFileRoutes
 import ru.hznik.devicebridge.web.FileSessionEventBridge
+
+@Qualifier
+@Retention(AnnotationRetention.BINARY)
+annotation class ProductionServerPort
+
+const val DEFAULT_PRODUCTION_SERVER_PORT = 8_787
+
+@Singleton
+class EffectiveFileLimitProvider private constructor(
+    private val settingsState: StateFlow<DeviceSettings>,
+) {
+    @Inject
+    constructor(
+        observeSettings: ObserveSettingsUseCase,
+        @ApplicationScope applicationScope: CoroutineScope,
+    ) : this(
+        observeSettings().stateIn(
+            applicationScope,
+            SharingStarted.Eagerly,
+            DeviceSettings.defaults(),
+        ),
+    )
+
+    fun currentBytes(): Long =
+        ru.hznik.devicebridge.domain.file.effectiveFileLimitBytes(
+            settingsState.value.effectiveFileLimitBytes,
+        )
+
+    companion object {
+        internal fun hardLimit(): EffectiveFileLimitProvider =
+            EffectiveFileLimitProvider(MutableStateFlow(DeviceSettings.defaults()))
+    }
+}
 
 @Singleton
 class KtorServerRuntimeFactory @Inject constructor(
@@ -46,7 +88,15 @@ class KtorServerRuntimeFactory @Inject constructor(
     private val destinationLeaseRegistry: FileDestinationLeaseRegistry = FileDestinationLeaseRegistry(),
     @Suppress("unused") private val fileSessionEventBridge: FileSessionEventBridge,
     private val monotonicClock: MonotonicClock,
+    private val effectiveFileLimitProvider: EffectiveFileLimitProvider =
+        EffectiveFileLimitProvider.hardLimit(),
+    @param:ProductionServerPort
+    private val preferredPort: Int = DEFAULT_PRODUCTION_SERVER_PORT,
 ) : ServerRuntimeFactory {
+
+    init {
+        require(preferredPort in 0..65_535)
+    }
 
     override fun create(): ServerRuntime = KtorServerRuntime(
         networkSnapshotProvider = networkSnapshotProvider,
@@ -62,6 +112,8 @@ class KtorServerRuntimeFactory @Inject constructor(
         completedFileRegistry = completedFileRegistry,
         destinationLeaseRegistry = destinationLeaseRegistry,
         monotonicClock = monotonicClock,
+        effectiveFileLimitBytes = effectiveFileLimitProvider::currentBytes,
+        preferredPort = preferredPort,
     )
 }
 
@@ -79,6 +131,8 @@ private class KtorServerRuntime(
     private val completedFileRegistry: CompletedFileRegistry,
     private val destinationLeaseRegistry: FileDestinationLeaseRegistry,
     private val monotonicClock: MonotonicClock,
+    private val effectiveFileLimitBytes: () -> Long,
+    private val preferredPort: Int,
 ) : ServerRuntime {
 
     private var stopServer: (() -> Unit)? = null
@@ -101,7 +155,7 @@ private class KtorServerRuntime(
         val engine = embeddedServer(
             factory = CIO,
             host = ALL_LOCAL_INTERFACES,
-            port = DYNAMIC_PORT,
+            port = preferredPort,
             module = {
                 installWebRoutes(
                     webAssetProvider = webAssetProvider,
@@ -119,6 +173,7 @@ private class KtorServerRuntime(
                     textCoordinator = textTransferCoordinator,
                     eventDispatcher = sessionEventDispatcher,
                     fileCoordinator = fileTransferCoordinator,
+                    effectiveFileLimitBytes = effectiveFileLimitBytes,
                 )
                 installTextRoutes(
                     sessionCoordinator = browserSessionCoordinator,
@@ -135,6 +190,7 @@ private class KtorServerRuntime(
                     wallClockMs = System::currentTimeMillis,
                     uploadTargetFactory = uploadTargetFactory,
                     downloadSourceFactory = downloadSourceFactory,
+                    effectiveFileLimitBytes = effectiveFileLimitBytes,
                 )
             },
         )
@@ -196,7 +252,6 @@ private class KtorServerRuntime(
 
     private companion object {
         const val ALL_LOCAL_INTERFACES = "0.0.0.0"
-        const val DYNAMIC_PORT = 0
         const val STOP_GRACE_PERIOD_MILLIS = 500L
         const val STOP_TIMEOUT_MILLIS = 2_000L
     }

@@ -13,7 +13,10 @@
 .externalNativeBuild
 .cxx
 local.properties
+/node_modules/
 /web/node_modules/
 /web/.vite/
+/web/test-results/
+/web/playwright-report/
 /app/src/main/assets/web/*
 !/app/src/main/assets/web/.gitkeep

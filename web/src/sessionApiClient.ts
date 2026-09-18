@@ -24,6 +24,8 @@ export interface SessionConfirmation {
   readonly sessionId: string;
   readonly token: string;
   readonly serverTimeEpochMillis: number;
+  readonly trustedCredential?: string;
+  readonly trustedCredentialExpiresAtEpochMillis?: number;
 }
 
 export interface SessionStatus {
@@ -31,6 +33,7 @@ export interface SessionStatus {
   readonly sessionId: string;
   readonly connected: boolean;
   readonly activeSessionCount: number;
+  readonly effectiveFileLimitBytes: number;
 }
 
 export class SessionApiError extends Error {
@@ -53,6 +56,7 @@ export class SessionApiClient {
 
   async createChallenge(
     clientLabel: string,
+    rememberBrowserRequested = false,
     signal?: AbortSignal,
   ): Promise<SessionChallenge> {
     const value = await this.requestJson(
@@ -63,6 +67,7 @@ export class SessionApiClient {
         body: JSON.stringify({
           protocolVersion: SESSION_PROTOCOL_VERSION,
           clientLabel,
+          rememberBrowserRequested,
         }),
         signal,
       },
@@ -86,6 +91,26 @@ export class SessionApiClient {
           challengeId,
           code,
           clientLabel,
+        }),
+        signal,
+      },
+    );
+    return parseConfirmation(value);
+  }
+
+  async exchangeTrusted(
+    trustedCredential: string,
+    signal?: AbortSignal,
+  ): Promise<SessionConfirmation> {
+    requireToken(trustedCredential);
+    const value = await this.requestJson(
+      "/api/v1/session/trusted",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          protocolVersion: SESSION_PROTOCOL_VERSION,
+          trustedCredential,
         }),
         signal,
       },
@@ -178,7 +203,22 @@ function parseConfirmation(value: unknown): SessionConfirmation {
   };
   requireCompatible(confirmation.protocolVersion);
   requireToken(confirmation.token);
-  return confirmation;
+  const trustedCredential = record.trustedCredential;
+  const trustedExpiry = record.trustedCredentialExpiresAtEpochMillis;
+  if (trustedCredential === undefined && trustedExpiry === undefined) return confirmation;
+  if (typeof trustedCredential !== "string") {
+    throw new Error("Invalid DeviceBridge response");
+  }
+  requireToken(trustedCredential);
+  const expiresAtEpochMillis = requireNumber(trustedExpiry);
+  if (expiresAtEpochMillis <= confirmation.serverTimeEpochMillis) {
+    throw new Error("Invalid DeviceBridge response");
+  }
+  return {
+    ...confirmation,
+    trustedCredential,
+    trustedCredentialExpiresAtEpochMillis: expiresAtEpochMillis,
+  };
 }
 
 function parseStatus(value: unknown): SessionStatus {
@@ -188,6 +228,9 @@ function parseStatus(value: unknown): SessionStatus {
     sessionId: requireString(record.sessionId),
     connected: requireBoolean(record.connected),
     activeSessionCount: requireNumber(record.activeSessionCount),
+    effectiveFileLimitBytes: requireEffectiveFileLimit(
+      record.effectiveFileLimitBytes,
+    ),
   };
   requireCompatible(status.protocolVersion);
   return status;
@@ -231,6 +274,14 @@ function requireNumber(value: unknown): number {
 function requireBoolean(value: unknown): boolean {
   if (typeof value !== "boolean") throw new Error("Invalid DeviceBridge response");
   return value;
+}
+
+function requireEffectiveFileLimit(value: unknown): number {
+  const bytes = requireNumber(value);
+  if (bytes < 1 || bytes > 1_073_741_824) {
+    throw new Error("Invalid DeviceBridge response");
+  }
+  return bytes;
 }
 
 function optionalNonNegativeNumber(value: unknown): number | undefined {

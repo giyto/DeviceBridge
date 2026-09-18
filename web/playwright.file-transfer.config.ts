@@ -14,6 +14,11 @@ export default defineConfig({
     },
     trace: "retain-on-failure",
   },
+  webServer: {
+    command: "npm run dev:file-transfer-gate",
+    url: "http://127.0.0.1:4174/integration/file-draft-harness.html",
+    reuseExistingServer: false,
+  },
   projects: [
     {
       name: "chrome",

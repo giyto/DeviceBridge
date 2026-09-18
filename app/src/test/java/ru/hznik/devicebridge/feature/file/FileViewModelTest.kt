@@ -3,6 +3,7 @@ package ru.hznik.devicebridge.feature.file
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.resetMain
@@ -17,11 +18,16 @@ import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 import ru.hznik.devicebridge.domain.file.FileDestinationId
+import ru.hznik.devicebridge.domain.file.FileDraftId
 import ru.hznik.devicebridge.domain.file.FileTransferId
 import ru.hznik.devicebridge.domain.file.FileTransferOperationResult
 import ru.hznik.devicebridge.domain.file.FileTransferSnapshot
 import ru.hznik.devicebridge.domain.repository.BrowserSessionRepository
 import ru.hznik.devicebridge.domain.repository.FileTransferRepository
+import ru.hznik.devicebridge.domain.repository.SettingsRepository
+import ru.hznik.devicebridge.domain.settings.DestinationTree
+import ru.hznik.devicebridge.domain.settings.DeviceSettings
+import ru.hznik.devicebridge.domain.settings.SettingsUpdateResult
 import ru.hznik.devicebridge.domain.session.BrowserSession
 import ru.hznik.devicebridge.domain.session.BrowserSessionId
 import ru.hznik.devicebridge.domain.session.BrowserSessionState
@@ -33,6 +39,7 @@ import ru.hznik.devicebridge.domain.usecase.CancelFileTransferUseCase
 import ru.hznik.devicebridge.domain.usecase.CreateFileTransfersUseCase
 import ru.hznik.devicebridge.domain.usecase.ObserveBrowserSessionsUseCase
 import ru.hznik.devicebridge.domain.usecase.ObserveFileTransfersUseCase
+import ru.hznik.devicebridge.domain.usecase.ObserveSettingsUseCase
 import ru.hznik.devicebridge.domain.usecase.RetryFileTransferUseCase
 
 @OptIn(ExperimentalCoroutinesApi::class)
@@ -58,7 +65,7 @@ class FileViewModelTest {
         viewModel.onAction(FileAction.ConfirmSend)
         runCurrent()
         assertEquals(first.id, files.created.single().ownerSessionId)
-        assertEquals("one", files.created.single().files.single().id.value)
+        assertTrue(files.created.single().files.single().id.value.startsWith("android-"))
     }
 
     @Test
@@ -97,6 +104,45 @@ class FileViewModelTest {
     }
 
     @Test
+    fun incomingWithSavedDestinationOffersCurrentFolderOrPicker() = runTest(dispatcher) {
+        val files = FakeFiles()
+        val settings = FakeSettings(
+            DeviceSettings.defaults().copy(
+                destinationTree = DestinationTree("content://provider/tree/saved"),
+            ),
+        )
+        val viewModel = viewModel(FakeSessions(active(first)), files, settings)
+        val transferId = FileTransferId("incoming-saved")
+        runCurrent()
+
+        viewModel.onAction(FileAction.ApproveIncoming(transferId))
+        assertEquals(
+            FileEffect.UseDefaultDestination(
+                transferId,
+                "content://provider/tree/saved",
+            ),
+            viewModel.effects.value,
+        )
+
+        viewModel.onAction(FileAction.ChangeIncomingDestination(transferId))
+        assertEquals(FileEffect.ChooseDestination(transferId), viewModel.effects.value)
+    }
+
+    @Test
+    fun selectionLimitTracksLatestRepositorySetting() = runTest(dispatcher) {
+        val settings = FakeSettings(
+            DeviceSettings.defaults().copy(effectiveFileLimitBytes = 512),
+        )
+        val viewModel = viewModel(FakeSessions(active(first)), FakeFiles(), settings)
+        runCurrent()
+        assertEquals(512, viewModel.uiState.value.effectiveFileLimitBytes)
+
+        settings.current.value = settings.current.value.copy(effectiveFileLimitBytes = 256)
+        runCurrent()
+        assertEquals(256, viewModel.uiState.value.effectiveFileLimitBytes)
+    }
+
+    @Test
     fun lostRecipientIsClearedAndCancelRetryUseCasesAreInvoked() = runTest(dispatcher) {
         val sessions = FakeSessions(active(first, second))
         val files = FakeFiles()
@@ -115,15 +161,118 @@ class FileViewModelTest {
         assertEquals(listOf(id), files.retried)
     }
 
-    private fun viewModel(sessions: FakeSessions, files: FakeFiles) = FileViewModel(
+    @Test
+    fun pickerResultsAppendDeduplicateAndCancelWithoutDroppingExistingDraft() =
+        runTest(dispatcher) {
+            val viewModel = viewModel(FakeSessions(active(first)), FakeFiles())
+            val firstLease = FakeDraftSourceLease()
+            val duplicateLease = FakeDraftSourceLease()
+            val differentLease = FakeDraftSourceLease()
+            viewModel.onAction(
+                FileAction.SelectionReceived(
+                    listOf(candidate("first", "content://same", "report.txt", firstLease)),
+                ),
+            )
+            viewModel.onAction(FileAction.SelectionReceived(emptyList()))
+            viewModel.onAction(
+                FileAction.SelectionReceived(
+                    listOf(
+                        candidate("duplicate", "content://same", "report.txt", duplicateLease),
+                        candidate("different", "content://other", "report.txt", differentLease),
+                    ),
+                ),
+            )
+            runCurrent()
+
+            assertEquals(listOf("first", "different"), viewModel.uiState.value.selection.map { it.id.value })
+            assertTrue(duplicateLease.released)
+            assertFalse(firstLease.released)
+            assertFalse(differentLease.released)
+        }
+
+    @Test
+    fun removeAndClearReleaseDraftSourcesWithoutCreatingTransfers() = runTest(dispatcher) {
+        val files = FakeFiles()
+        val firstLease = FakeDraftSourceLease()
+        val secondLease = FakeDraftSourceLease()
+        val viewModel = viewModel(FakeSessions(active(first)), files)
+        viewModel.onAction(
+            FileAction.SelectionReceived(
+                listOf(
+                    candidate("first", lease = firstLease),
+                    candidate("second", lease = secondLease),
+                ),
+            ),
+        )
+
+        viewModel.onAction(FileAction.RemoveDraftItem(FileDraftId("first")))
+        runCurrent()
+        assertTrue(firstLease.released)
+        assertEquals(listOf("second"), viewModel.uiState.value.selection.map { it.id.value })
+        viewModel.onAction(FileAction.ClearDraft)
+        runCurrent()
+
+        assertTrue(secondLease.released)
+        assertTrue(viewModel.uiState.value.selection.isEmpty())
+        assertTrue(files.created.isEmpty())
+    }
+
+    @Test
+    fun rejectedConfirmationRollsBackLeaseAndKeepsDraftForRetry() = runTest(dispatcher) {
+        val files = FakeFiles().apply { createResult = FileTransferOperationResult.InvalidState }
+        val lease = FakeDraftSourceLease()
+        val viewModel = viewModel(FakeSessions(active(first)), files)
+        viewModel.onAction(FileAction.SelectionReceived(listOf(candidate("retry", lease = lease))))
+
+        viewModel.onAction(FileAction.ConfirmSend)
+        runCurrent()
+
+        assertEquals(1, lease.promoted.size)
+        assertEquals(lease.promoted, lease.rolledBack)
+        assertTrue(viewModel.uiState.value.selection.isNotEmpty())
+        files.createResult = FileTransferOperationResult.Accepted
+        viewModel.onAction(FileAction.ConfirmSend)
+        runCurrent()
+        assertEquals(2, lease.promoted.size)
+        assertEquals(1, lease.committed.size)
+        assertTrue(viewModel.uiState.value.selection.isEmpty())
+    }
+
+    private fun viewModel(
+        sessions: FakeSessions,
+        files: FakeFiles,
+        settings: FakeSettings = FakeSettings(),
+    ) = FileViewModel(
         observeBrowserSessions = ObserveBrowserSessionsUseCase(sessions),
         observeTransfers = ObserveFileTransfersUseCase(files),
+        observeSettings = ObserveSettingsUseCase(settings),
         createTransfers = CreateFileTransfersUseCase(files),
         approveTransfer = ApproveFileTransferUseCase(files),
         cancelTransfer = CancelFileTransferUseCase(files),
         retryTransfer = RetryFileTransferUseCase(files),
         nowEpochMillis = { 1_000 },
     )
+
+    private class FakeSettings(
+        initial: DeviceSettings = DeviceSettings.defaults(),
+    ) : SettingsRepository {
+        val current = MutableStateFlow(initial)
+        override val settings: Flow<DeviceSettings> = current
+
+        override suspend fun updateDeviceName(value: String): SettingsUpdateResult =
+            SettingsUpdateResult.Updated(current.value)
+
+        override suspend fun updateRetentionDays(value: Int): SettingsUpdateResult =
+            SettingsUpdateResult.Updated(current.value)
+
+        override suspend fun updateDestinationTree(value: DestinationTree?): SettingsUpdateResult {
+            current.value = current.value.copy(destinationTree = value)
+            return SettingsUpdateResult.Updated(current.value)
+        }
+
+        override suspend fun updateEffectiveFileLimitBytes(value: Long): SettingsUpdateResult =
+            SettingsUpdateResult.Updated(current.value)
+    }
 
     private class FakeSessions(initial: BrowserSessionState) : BrowserSessionRepository {
         val mutable = MutableStateFlow(initial)
@@ -139,8 +288,9 @@ class FileViewModelTest {
         val approved = mutableListOf<Pair<FileTransferId, FileDestinationId?>>()
         val cancelled = mutableListOf<FileTransferId>()
         val retried = mutableListOf<FileTransferId>()
+        var createResult: FileTransferOperationResult = FileTransferOperationResult.Accepted
         override suspend fun create(request: ru.hznik.devicebridge.domain.file.CreateFileTransfersRequest) =
-            FileTransferOperationResult.Accepted.also { created += request }
+            createResult.also { created += request }
         override suspend fun approve(transferId: FileTransferId, destinationId: FileDestinationId?) =
             FileTransferOperationResult.Accepted.also { approved += transferId to destinationId }
         override suspend fun cancel(transferId: FileTransferId) =
@@ -151,10 +301,31 @@ class FileViewModelTest {
             FileTransferOperationResult.Accepted
     }
 
-    private fun candidate(id: String) = FileSelectionItem(
-        transferId = FileTransferId(id), uri = "content://$id", displayName = "$id.txt",
-        sizeBytes = 4, mimeType = "text/plain", sha256 = "a".repeat(64),
+    private fun candidate(
+        id: String,
+        sourceIdentity: String = "content://$id",
+        displayName: String = "$id.txt",
+        lease: FakeDraftSourceLease = FakeDraftSourceLease(),
+    ) = FileDraftItem(
+        id = FileDraftId(id),
+        sourceIdentity = sourceIdentity,
+        sourceLease = lease,
+        displayName = displayName,
+        sizeBytes = 4,
+        mimeType = "text/plain",
+        sha256 = "a".repeat(64),
     )
+
+    private class FakeDraftSourceLease : DraftSourceLease {
+        val promoted = mutableListOf<FileTransferId>()
+        val rolledBack = mutableListOf<FileTransferId>()
+        val committed = mutableListOf<FileTransferId>()
+        var released = false
+        override fun promote(transferId: FileTransferId): Boolean = true.also { promoted += transferId }
+        override fun rollback(transferId: FileTransferId) { rolledBack += transferId }
+        override fun commit(transferId: FileTransferId) { committed += transferId }
+        override fun release() { released = true }
+    }
 
     private fun active(vararg sessions: BrowserSession) = BrowserSessionState.active(
         generationId = generation, pairingCode = PairingCodeState("123456", 60_000), sessions = sessions.toList(),

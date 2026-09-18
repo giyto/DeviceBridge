@@ -62,13 +62,33 @@ fun FileScreen(
 
         Button(
             onClick = { onAction(FileAction.PickFiles) },
-            modifier = Modifier.fillMaxWidth(),
-        ) { Text("Выбрать файлы") }
+            enabled = !uiState.isSubmitting,
+            modifier = Modifier.fillMaxWidth().semantics {
+                contentDescription = "Добавить файлы в черновик"
+            },
+        ) { Text("Добавить файлы") }
 
         if (uiState.selection.isNotEmpty()) {
-            SectionCard("Выбрано: ${uiState.selection.size}") {
+            SectionCard(
+                title = "Выбрано: ${uiState.selection.size}",
+                trailing = {
+                    TextButton(
+                        onClick = { onAction(FileAction.ClearDraft) },
+                        enabled = !uiState.isSubmitting,
+                        modifier = Modifier.semantics {
+                            contentDescription = "Очистить выбранные файлы"
+                        },
+                    ) { Text("Очистить") }
+                },
+            ) {
                 uiState.selection.forEach { item ->
-                    FileMetadataRow(item.displayName, item.sizeBytes, item.mimeType)
+                    FileMetadataRow(
+                        name = item.displayName,
+                        size = item.sizeBytes,
+                        mime = item.mimeType,
+                        enabled = !uiState.isSubmitting,
+                        onRemove = { onAction(FileAction.RemoveDraftItem(item.id)) },
+                    )
                 }
             }
         }
@@ -98,15 +118,15 @@ fun FileScreen(
             }
         }
 
-        if (uiState.selection.isNotEmpty()) {
-            Button(
-                onClick = { onAction(FileAction.ConfirmSend) },
-                enabled = uiState.canConfirmSend,
-                modifier = Modifier.fillMaxWidth(),
-            ) { Text(if (uiState.isSubmitting) "Добавляем…" else "Подтвердить отправку") }
-            if (uiState.recipientSelectionRequired) {
-                Text("Выберите браузер-получатель.", color = MaterialTheme.colorScheme.error)
-            }
+        Button(
+            onClick = { onAction(FileAction.ConfirmSend) },
+            enabled = uiState.canConfirmSend,
+            modifier = Modifier.fillMaxWidth().semantics {
+                contentDescription = "Подтвердить отправку файлов"
+            },
+        ) { Text(if (uiState.isSubmitting) "Добавляем…" else "Подтвердить отправку") }
+        if (uiState.recipientSelectionRequired) {
+            Text("Выберите браузер-получатель.", color = MaterialTheme.colorScheme.error)
         }
 
         if (uiState.transfers.isEmpty()) {
@@ -119,14 +139,18 @@ fun FileScreen(
         } else {
             Text("Передачи", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
             uiState.transfers.forEach { item ->
-                TransferCard(item, onAction)
+                TransferCard(item, uiState.hasDefaultDestination, onAction)
             }
         }
     }
 }
 
 @Composable
-private fun TransferCard(item: FileTransferItemUiState, onAction: (FileAction) -> Unit) {
+private fun TransferCard(
+    item: FileTransferItemUiState,
+    hasDefaultDestination: Boolean,
+    onAction: (FileAction) -> Unit,
+) {
     Card(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(22.dp),
@@ -156,7 +180,25 @@ private fun TransferCard(item: FileTransferItemUiState, onAction: (FileAction) -
                 Button(
                     onClick = { onAction(FileAction.ApproveIncoming(item.id)) },
                     modifier = Modifier.fillMaxWidth(),
-                ) { Text("Принять и выбрать папку") }
+                ) {
+                    Text(
+                        if (hasDefaultDestination) {
+                            "Принять в выбранную папку"
+                        } else {
+                            "Принять и выбрать папку"
+                        },
+                    )
+                }
+                if (hasDefaultDestination) {
+                    OutlinedButton(
+                        onClick = {
+                            onAction(FileAction.ChangeIncomingDestination(item.id))
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text("Выбрать другую папку")
+                    }
+                }
             }
             if (item.canCancel) {
                 OutlinedButton(
@@ -185,24 +227,52 @@ private fun TransferCard(item: FileTransferItemUiState, onAction: (FileAction) -
 }
 
 @Composable
-private fun SectionCard(title: String, content: @Composable () -> Unit) {
+private fun SectionCard(
+    title: String,
+    trailing: (@Composable () -> Unit)? = null,
+    content: @Composable () -> Unit,
+) {
     Card(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(22.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
     ) {
         Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                trailing?.invoke()
+            }
             content()
         }
     }
 }
 
 @Composable
-private fun FileMetadataRow(name: String, size: Long, mime: String) {
-    Column(Modifier.fillMaxWidth()) {
-        Text(name, fontWeight = FontWeight.Medium)
-        Text("${formatBytes(size)} · $mime", color = MaterialTheme.colorScheme.onSurfaceVariant)
+private fun FileMetadataRow(
+    name: String,
+    size: Long,
+    mime: String,
+    enabled: Boolean,
+    onRemove: () -> Unit,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text(name, fontWeight = FontWeight.Medium)
+            Text("${formatBytes(size)} · $mime", color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        TextButton(
+            onClick = onRemove,
+            enabled = enabled,
+            modifier = Modifier.semantics {
+                contentDescription = "Удалить $name из выбранных"
+            },
+        ) { Text("Удалить") }
     }
 }
 

@@ -35,6 +35,11 @@ sealed interface BrowserSessionEvent {
         val sessionId: BrowserSessionId,
     ) : BrowserSessionEvent
 
+    data class TrustedSessionConnected(
+        val generationId: ServerGenerationId,
+        val session: BrowserSession,
+    ) : BrowserSessionEvent
+
     data class SourceBlocked(
         val generationId: ServerGenerationId,
         val blockedUntilElapsedRealtimeMs: Long,
@@ -104,6 +109,17 @@ object BrowserSessionReducer {
                 this
             } else {
                 evolve(sessions = sessions.filterNot { it.id == event.sessionId })
+            }
+        }
+
+        is BrowserSessionEvent.TrustedSessionConnected -> current.ifGeneration(event.generationId) {
+            if (
+                event.session.generationId != generationId ||
+                sessions.any { it.id == event.session.id }
+            ) {
+                this
+            } else {
+                evolve(sessions = sessions + event.session, error = null)
             }
         }
 

@@ -31,6 +31,10 @@ fun interface TextSessionEventGateway {
     suspend fun deliver(item: TextTransferItem): Boolean
 }
 
+fun interface TextTerminalHistoryRecorder {
+    suspend fun recordTerminal(item: TextTransferItem)
+}
+
 class TextTransferCoordinator(
     private val nowEpochMillis: () -> Long,
     private val maxFeedItems: Int = 100,
@@ -40,6 +44,8 @@ class TextTransferCoordinator(
         TextMessageId(UUID.randomUUID().toString())
     },
     private val acknowledgementTimeoutMs: Long = 10_000,
+    private val historyRecorder: TextTerminalHistoryRecorder =
+        TextTerminalHistoryRecorder { },
 ) : TextTransferRepository {
     private data class OperationKey(
         val generationId: ServerGenerationId,
@@ -211,42 +217,52 @@ class TextTransferCoordinator(
         }
     }
 
-    suspend fun acceptIncoming(request: IncomingTextRequest): TextTransferResult = mutex.withLock {
-        if (activeGenerationId != request.generationId) {
-            return@withLock TextTransferResult.Rejected(TextTransferRejection.GENERATION_CLOSED)
-        }
-
-        val key = OperationKey(request.generationId, request.sessionId, request.id)
-        val fingerprint = request.content.sha256()
-        outcomes[key]?.let { stored ->
-            return@withLock if (stored.fingerprint == fingerprint) {
-                stored.result
-            } else {
-                TextTransferResult.Rejected(TextTransferRejection.MESSAGE_CONFLICT)
+    suspend fun acceptIncoming(request: IncomingTextRequest): TextTransferResult {
+        val result = mutex.withLock {
+            if (activeGenerationId != request.generationId) {
+                return@withLock TextTransferResult.Rejected(
+                    TextTransferRejection.GENERATION_CLOSED,
+                )
             }
-        }
 
-        when (TextContentValidator.validate(request.content)) {
-            TextContentValidation.Empty ->
-                return@withLock TextTransferResult.Rejected(TextTransferRejection.EMPTY_CONTENT)
-            is TextContentValidation.TooLarge ->
-                return@withLock TextTransferResult.Rejected(TextTransferRejection.CONTENT_TOO_LARGE)
-            is TextContentValidation.Valid -> Unit
-        }
+            val key = OperationKey(request.generationId, request.sessionId, request.id)
+            val fingerprint = request.content.sha256()
+            outcomes[key]?.let { stored ->
+                return@withLock if (stored.fingerprint == fingerprint) {
+                    stored.result
+                } else {
+                    TextTransferResult.Rejected(TextTransferRejection.MESSAGE_CONFLICT)
+                }
+            }
 
-        val item = TextTransferItem.incoming(
-            id = request.id,
-            generationId = request.generationId,
-            sessionId = request.sessionId,
-            browserLabel = request.browserLabel,
-            content = request.content,
-            contentKind = TextContentClassifier.classify(request.content),
-            receivedAtEpochMillis = nowEpochMillis(),
-        )
-        val result = TextTransferResult.Accepted(item)
-        outcomes[key] = StoredOutcome(fingerprint, result)
-        appendItemLocked(item)
-        result
+            when (TextContentValidator.validate(request.content)) {
+                TextContentValidation.Empty ->
+                    return@withLock TextTransferResult.Rejected(
+                        TextTransferRejection.EMPTY_CONTENT,
+                    )
+                is TextContentValidation.TooLarge ->
+                    return@withLock TextTransferResult.Rejected(
+                        TextTransferRejection.CONTENT_TOO_LARGE,
+                    )
+                is TextContentValidation.Valid -> Unit
+            }
+
+            val item = TextTransferItem.incoming(
+                id = request.id,
+                generationId = request.generationId,
+                sessionId = request.sessionId,
+                browserLabel = request.browserLabel,
+                content = request.content,
+                contentKind = TextContentClassifier.classify(request.content),
+                receivedAtEpochMillis = nowEpochMillis(),
+            )
+            val accepted = TextTransferResult.Accepted(item)
+            outcomes[key] = StoredOutcome(fingerprint, accepted)
+            appendItemLocked(item)
+            accepted
+        }
+        recordTerminalBestEffort(result)
+        return result
     }
 
     private suspend fun deliver(item: TextTransferItem): TextTransferResult {
@@ -281,7 +297,7 @@ class TextTransferCoordinator(
                 ?: DeliverySignal.Failed(TextTransferFailureReason.CONNECTION_LOST)
         }
 
-        return mutex.withLock {
+        val result = mutex.withLock {
             pendingAcknowledgements.remove(key, deferred)
             val current = findItemLocked(item.sessionId, item.id)
                 ?: return@withLock TextTransferResult.Rejected(
@@ -307,6 +323,21 @@ class TextTransferCoordinator(
             }
             replaceItemLocked(completed)
             TextTransferResult.Accepted(completed)
+        }
+        recordTerminalBestEffort(result)
+        return result
+    }
+
+    private suspend fun recordTerminalBestEffort(result: TextTransferResult) {
+        val item = (result as? TextTransferResult.Accepted)?.item ?: return
+        if (
+            item.status != TextTransferStatus.DELIVERED &&
+            item.status != TextTransferStatus.FAILED
+        ) {
+            return
+        }
+        runCatching {
+            historyRecorder.recordTerminal(item)
         }
     }
 

@@ -78,6 +78,35 @@ class FileRouteTest {
         }
 
     @Test
+    fun offerUsesConfiguredEffectiveLimitSnapshot() =
+        withSessionRouteServer(effectiveFileLimitBytes = 5) { server ->
+            val paired = server.pairBrowser("Chrome")
+            val headers = server.sameOriginJsonHeaders(
+                mapOf("Authorization" to "Bearer ${paired.token}"),
+            )
+
+            val atLimit = server.request(
+                "POST",
+                "/api/v1/files",
+                offerBody(sizeBytes = 5),
+                headers,
+            )
+            val aboveLimit = server.request(
+                "POST",
+                "/api/v1/files",
+                offerBody(
+                    messageId = "offer-over-limit",
+                    transferId = "upload-over-limit",
+                    sizeBytes = 6,
+                ),
+                headers,
+            )
+
+            assertEquals(200, atLimit.statusCode())
+            assertEquals(413, aboveLimit.statusCode())
+        }
+
+    @Test
     fun repeatedOfferIsIdempotentAndConflictingReplayDoesNotMutateOriginal() =
         withSessionRouteServer { server ->
             val paired = server.pairBrowser("Chrome")

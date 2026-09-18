@@ -128,12 +128,17 @@ function createItem(
 
   const footer = documentRef.createElement("div");
   footer.className = "text-card__footer";
+  const summary = documentRef.createElement("div");
+  summary.className = "text-card__summary";
+  const actionRow = documentRef.createElement("div");
+  actionRow.className = "text-card__actions";
   const kind = documentRef.createElement("span");
   kind.textContent = item.contentKind === "LINK" ? "Ссылка" : "Текст";
   const status = documentRef.createElement("span");
   status.className = "text-card__status";
   status.textContent = statusLabel(item.status);
-  footer.append(kind, status);
+  summary.append(kind, status);
+  footer.append(summary, actionRow);
 
   if (canonicalHttpUrl(item.content, item.contentKind) !== undefined) {
     const open = documentRef.createElement("button");
@@ -144,7 +149,7 @@ function createItem(
     open.addEventListener("click", () => {
       linkOpener.open(item.content, item.contentKind);
     });
-    footer.append(open);
+    actionRow.append(open);
   }
 
   const copy = documentRef.createElement("button");
@@ -152,7 +157,7 @@ function createItem(
   copy.className = "text-card__copy";
   copy.dataset.copyMessageId = item.messageId;
   copy.textContent = "Копировать";
-  footer.append(copy);
+  actionRow.append(copy);
 
   if (item.status === "FAILED") {
     const retry = documentRef.createElement("button");
@@ -161,7 +166,7 @@ function createItem(
     retry.dataset.retryMessageId = item.messageId;
     retry.textContent = "Повторить";
     retry.addEventListener("click", () => actions.onRetry(item.messageId));
-    footer.append(retry);
+    actionRow.append(retry);
   }
   const copyStatus = documentRef.createElement("span");
   copyStatus.className = "text-card__copy-status";

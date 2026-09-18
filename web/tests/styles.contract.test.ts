@@ -38,6 +38,9 @@ describe("responsive style contract", () => {
     expect(css).toContain("@media (max-width: 30rem)");
     expect(css).toMatch(/\.text-transfer\s*\{[^}]*min-width:\s*0/s);
     expect(css).toMatch(/\.text-card\s*\{[^}]*min-width:\s*0/s);
+    expect(css).toMatch(/\.text-card__actions\s*\{[^}]*display:\s*grid/s);
+    expect(css).toMatch(/\.text-card__actions\s*\{[^}]*grid-template-columns:\s*repeat\(auto-fit,/s);
+    expect(css).toMatch(/\.text-card__actions button\s*\{[^}]*max-width:\s*100%/s);
     expect(css).toMatch(/\.file-transfer\s*\{[^}]*min-width:\s*0/s);
     expect(css).toMatch(/\.file-card\s*\{[^}]*min-width:\s*0/s);
     expect(css).toMatch(/\.file-card__actions\s*\{[^}]*flex-wrap:\s*wrap/s);

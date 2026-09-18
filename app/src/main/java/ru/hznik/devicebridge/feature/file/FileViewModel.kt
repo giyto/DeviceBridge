@@ -6,31 +6,39 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
 import java.util.concurrent.atomic.AtomicLong
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import ru.hznik.devicebridge.domain.file.CreateFileTransfersRequest
 import ru.hznik.devicebridge.domain.file.FileCommandId
+import ru.hznik.devicebridge.domain.file.FileDraftId
+import ru.hznik.devicebridge.domain.file.FileTransferId
 import ru.hznik.devicebridge.domain.file.FileTransferDirection
 import ru.hznik.devicebridge.domain.file.FileTransferMetadata
 import ru.hznik.devicebridge.domain.file.FileTransferOperationResult
 import ru.hznik.devicebridge.domain.file.FileTransferSnapshot
+import ru.hznik.devicebridge.domain.file.effectiveFileLimitBytes
 import ru.hznik.devicebridge.domain.session.BrowserSession
 import ru.hznik.devicebridge.domain.session.BrowserSessionId
 import ru.hznik.devicebridge.domain.session.BrowserSessionState
+import ru.hznik.devicebridge.domain.settings.DeviceSettings
 import ru.hznik.devicebridge.domain.usecase.ApproveFileTransferUseCase
 import ru.hznik.devicebridge.domain.usecase.CancelFileTransferUseCase
 import ru.hznik.devicebridge.domain.usecase.CreateFileTransfersUseCase
 import ru.hznik.devicebridge.domain.usecase.ObserveBrowserSessionsUseCase
 import ru.hznik.devicebridge.domain.usecase.ObserveFileTransfersUseCase
+import ru.hznik.devicebridge.domain.usecase.ObserveSettingsUseCase
 import ru.hznik.devicebridge.domain.usecase.RetryFileTransferUseCase
 
 @HiltViewModel
 class FileViewModel private constructor(
     observeBrowserSessions: ObserveBrowserSessionsUseCase,
     observeTransfers: ObserveFileTransfersUseCase,
+    observeSettings: ObserveSettingsUseCase,
     private val createTransfers: CreateFileTransfersUseCase,
     private val approveTransfer: ApproveFileTransferUseCase,
     private val cancelTransfer: CancelFileTransferUseCase,
@@ -41,6 +49,7 @@ class FileViewModel private constructor(
     constructor(
         observeBrowserSessions: ObserveBrowserSessionsUseCase,
         observeTransfers: ObserveFileTransfersUseCase,
+        observeSettings: ObserveSettingsUseCase,
         createTransfers: CreateFileTransfersUseCase,
         approveTransfer: ApproveFileTransferUseCase,
         cancelTransfer: CancelFileTransferUseCase,
@@ -48,6 +57,7 @@ class FileViewModel private constructor(
     ) : this(
         observeBrowserSessions,
         observeTransfers,
+        observeSettings,
         createTransfers,
         approveTransfer,
         cancelTransfer,
@@ -58,6 +68,7 @@ class FileViewModel private constructor(
     internal constructor(
         observeBrowserSessions: ObserveBrowserSessionsUseCase,
         observeTransfers: ObserveFileTransfersUseCase,
+        observeSettings: ObserveSettingsUseCase,
         createTransfers: CreateFileTransfersUseCase,
         approveTransfer: ApproveFileTransferUseCase,
         cancelTransfer: CancelFileTransferUseCase,
@@ -67,6 +78,7 @@ class FileViewModel private constructor(
     ) : this(
         observeBrowserSessions,
         observeTransfers,
+        observeSettings,
         createTransfers,
         approveTransfer,
         cancelTransfer,
@@ -74,7 +86,7 @@ class FileViewModel private constructor(
         nowEpochMillis,
     )
     private data class LocalState(
-        val selection: List<FileSelectionItem> = emptyList(),
+        val selection: List<FileDraftItem> = emptyList(),
         val selectedSessionId: BrowserSessionId? = null,
         val recipientWasLost: Boolean = false,
         val isSubmitting: Boolean = false,
@@ -84,11 +96,18 @@ class FileViewModel private constructor(
 
     private val sessions = observeBrowserSessions()
     private val transfers = observeTransfers()
+    private val settings = observeSettings().stateIn(
+        viewModelScope,
+        SharingStarted.Eagerly,
+        DeviceSettings.defaults(),
+    )
     private val sequence = AtomicLong()
     private val local = MutableStateFlow(
         LocalState(selectedSessionId = sessions.value.sessions.singleOrNull()?.id),
     )
-    private val mutableUiState = MutableStateFlow(buildUiState(sessions.value, transfers.value, local.value))
+    private val mutableUiState = MutableStateFlow(
+        buildUiState(sessions.value, transfers.value, settings.value, local.value),
+    )
     private val mutableEffects = MutableStateFlow<FileEffect?>(null)
 
     val uiState: StateFlow<FileUiState> = mutableUiState
@@ -99,8 +118,13 @@ class FileViewModel private constructor(
             sessions.collectLatest { reconcileRecipient(it.sessions) }
         }
         viewModelScope.launch {
-            combine(sessions, transfers, local) { browserState, fileState, localState ->
-                buildUiState(browserState, fileState, localState)
+            combine(sessions, transfers, settings, local) {
+                    browserState,
+                    fileState,
+                    settingsState,
+                    localState,
+                ->
+                buildUiState(browserState, fileState, settingsState, localState)
             }.collectLatest(mutableUiState::emit)
         }
     }
@@ -118,9 +142,20 @@ class FileViewModel private constructor(
                     )
                 }
             }
+            is FileAction.RemoveDraftItem -> removeDraftItem(action.draftId)
+            FileAction.ClearDraft -> clearDraft()
             is FileAction.RecipientSelected -> selectRecipient(action.sessionId)
             FileAction.ConfirmSend -> confirmSend()
-            is FileAction.ApproveIncoming -> mutableEffects.value = FileEffect.ChooseDestination(action.transferId)
+            is FileAction.ApproveIncoming -> {
+                val saved = settings.value.destinationTree?.value
+                mutableEffects.value = if (saved == null) {
+                    FileEffect.ChooseDestination(action.transferId)
+                } else {
+                    FileEffect.UseDefaultDestination(action.transferId, saved)
+                }
+            }
+            is FileAction.ChangeIncomingDestination ->
+                mutableEffects.value = FileEffect.ChooseDestination(action.transferId)
             is FileAction.DestinationSelected -> approve(action.transferId, action.destinationId)
             is FileAction.DestinationCancelled -> local.update {
                 it.copy(errorMessage = "Папка не выбрана. Файл остаётся в ожидании.", successMessage = null)
@@ -145,17 +180,51 @@ class FileViewModel private constructor(
         if (mutableEffects.value == effect) mutableEffects.value = null
     }
 
-    private fun acceptSelection(items: List<FileSelectionItem>, shared: Boolean) {
+    private fun acceptSelection(items: List<FileDraftItem>, shared: Boolean) {
         val valid = items.filter { item -> item.sizeBytes >= 0 }
+        items.filterNot { it in valid }.forEach { it.sourceLease.release() }
         local.update { current ->
+            val existingKeys = current.selection.mapTo(mutableSetOf()) { it.dedupeKey }
+            val appended = buildList {
+                valid.forEach { item ->
+                    if (existingKeys.add(item.dedupeKey)) {
+                        add(item)
+                    } else {
+                        item.sourceLease.release()
+                    }
+                }
+            }
             current.copy(
-                selection = valid,
-                selectedSessionId = if (shared) null else current.selectedSessionId,
-                recipientWasLost = shared || current.recipientWasLost,
+                selection = current.selection + appended,
+                selectedSessionId = if (shared && appended.isNotEmpty()) null else current.selectedSessionId,
+                recipientWasLost = (shared && appended.isNotEmpty()) || current.recipientWasLost,
                 errorMessage = if (valid.size == items.size) null else "Некоторые файлы недоступны.",
                 successMessage = null,
             )
         }
+    }
+
+    private fun removeDraftItem(draftId: FileDraftId) {
+        val current = local.value
+        if (current.isSubmitting) return
+        val removed = current.selection.firstOrNull { it.id == draftId } ?: return
+        local.update { state ->
+            state.copy(
+                selection = state.selection.filterNot { it.id == draftId },
+                errorMessage = null,
+                successMessage = null,
+            )
+        }
+        removed.sourceLease.release()
+    }
+
+    private fun clearDraft() {
+        val current = local.value
+        if (current.isSubmitting || current.selection.isEmpty()) return
+        local.update {
+            it.copy(selection = emptyList(), errorMessage = null, successMessage = null)
+        }
+        current.selection.forEach { it.sourceLease.release() }
     }
 
     private fun reconcileRecipient(active: List<BrowserSession>) {
@@ -191,15 +260,40 @@ class FileViewModel private constructor(
         local.update { it.copy(isSubmitting = true, errorMessage = null, successMessage = null) }
         viewModelScope.launch {
             val commandId = FileCommandId("android-${nowEpochMillis()}-${sequence.incrementAndGet()}")
-            val result = createTransfers(
-                CreateFileTransfersRequest(
-                    commandId = commandId,
-                    generationId = generationId,
-                    ownerSessionId = sessionId,
-                    batchId = commandId.value,
-                    files = current.selection.map { item ->
+            val prepared = current.selection.mapIndexed { index, item ->
+                PreparedDraftTransfer(
+                    item = item,
+                    transferId = FileTransferId("${commandId.value}-${index + 1}"),
+                )
+            }
+            val promoted = mutableListOf<PreparedDraftTransfer>()
+            val promotionSucceeded = prepared.all { transfer ->
+                transfer.item.sourceLease.promote(transfer.transferId).also { promotedNow ->
+                    if (promotedNow) promoted += transfer
+                }
+            }
+            if (!promotionSucceeded) {
+                promoted.forEach { it.item.sourceLease.rollback(it.transferId) }
+                local.update {
+                    it.copy(
+                        isSubmitting = false,
+                        errorMessage = "Не удалось подготовить выбранные файлы.",
+                        successMessage = null,
+                    )
+                }
+                return@launch
+            }
+            val result = runCatching {
+                createTransfers(
+                    CreateFileTransfersRequest(
+                        commandId = commandId,
+                        generationId = generationId,
+                        ownerSessionId = sessionId,
+                        batchId = commandId.value,
+                        files = prepared.map { transfer ->
+                            val item = transfer.item
                         FileTransferMetadata(
-                            id = item.transferId,
+                            id = transfer.transferId,
                             displayName = item.displayName,
                             sizeBytes = item.sizeBytes,
                             mimeType = item.mimeType,
@@ -207,21 +301,30 @@ class FileViewModel private constructor(
                             direction = FileTransferDirection.ANDROID_TO_BROWSER,
                         )
                     },
-                ),
-            )
+                    ),
+                )
+            }.getOrDefault(FileTransferOperationResult.InvalidState)
             local.update { state ->
                 if (result == FileTransferOperationResult.Accepted) {
+                    prepared.forEach { it.item.sourceLease.commit(it.transferId) }
+                    val sentIds = prepared.mapTo(mutableSetOf()) { it.item.id }
                     state.copy(
-                        selection = emptyList(),
+                        selection = state.selection.filterNot { it.id in sentIds },
                         isSubmitting = false,
                         errorMessage = null,
                         successMessage = "Файлы добавлены в очередь.",
                     )
                 } else {
+                    prepared.forEach { it.item.sourceLease.rollback(it.transferId) }
                     state.copy(isSubmitting = false, errorMessage = result.userMessage(), successMessage = null)
                 }
             }
         }
+    }
+
+    override fun onCleared() {
+        local.value.selection.forEach { it.sourceLease.release() }
+        super.onCleared()
     }
 
     private fun approve(id: ru.hznik.devicebridge.domain.file.FileTransferId, destination: ru.hznik.devicebridge.domain.file.FileDestinationId) {
@@ -248,6 +351,7 @@ class FileViewModel private constructor(
     private fun buildUiState(
         sessionState: BrowserSessionState,
         snapshot: FileTransferSnapshot,
+        settingsState: DeviceSettings,
         localState: LocalState,
     ): FileUiState {
         val selected = localState.selectedSessionId?.takeIf { id -> sessionState.sessions.any { it.id == id } }
@@ -274,9 +378,18 @@ class FileViewModel private constructor(
             isSubmitting = localState.isSubmitting,
             errorMessage = localState.errorMessage,
             successMessage = localState.successMessage,
+            hasDefaultDestination = settingsState.destinationTree != null,
+            effectiveFileLimitBytes = effectiveFileLimitBytes(
+                settingsState.effectiveFileLimitBytes,
+            ),
         )
     }
 }
+
+private data class PreparedDraftTransfer(
+    val item: FileDraftItem,
+    val transferId: FileTransferId,
+)
 
 private fun FileTransferOperationResult.userMessage(): String = when (this) {
     FileTransferOperationResult.Accepted -> ""

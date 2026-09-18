@@ -67,6 +67,26 @@ class ProtectedSessionRouteTest {
         }
 
     @Test
+    fun authorizedStatusPublishesOnlyEffectiveFileLimitCapability() =
+        withSessionRouteServer(effectiveFileLimitBytes = 512) { server ->
+            val paired = server.pairBrowser("Chrome")
+            val response = server.request(
+                "GET",
+                "/api/v1/status",
+                headers = mapOf(
+                    "Origin" to "http://${server.authority}",
+                    "Authorization" to "Bearer ${paired.token}",
+                ),
+            )
+
+            val status = SessionProtocolJson.decode<SessionStatusResponse>(response.body())
+            assertEquals(512, status.effectiveFileLimitBytes)
+            assertFalse(response.body().contains("retention", ignoreCase = true))
+            assertFalse(response.body().contains("destination", ignoreCase = true))
+            assertFalse(response.body().contains("deviceName", ignoreCase = true))
+        }
+
+    @Test
     fun authorizedStatusRestoresBrowserTabWhenSameOriginGetOmitsOriginHeader() =
         withSessionRouteServer { server ->
             val paired = server.pairBrowser("Chrome")

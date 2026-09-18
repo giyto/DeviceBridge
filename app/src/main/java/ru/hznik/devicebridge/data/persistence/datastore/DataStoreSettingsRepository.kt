@@ -1,0 +1,120 @@
+package ru.hznik.devicebridge.data.persistence.datastore
+
+import androidx.datastore.core.DataStore
+import androidx.datastore.preferences.core.Preferences
+import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.emptyPreferences
+import androidx.datastore.preferences.core.intPreferencesKey
+import androidx.datastore.preferences.core.longPreferencesKey
+import androidx.datastore.preferences.core.stringPreferencesKey
+import java.io.IOException
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.map
+import ru.hznik.devicebridge.domain.file.HARD_MAX_FILE_BYTES
+import ru.hznik.devicebridge.domain.repository.SettingsRepository
+import ru.hznik.devicebridge.domain.settings.DestinationTree
+import ru.hznik.devicebridge.domain.settings.DeviceSettings
+import ru.hznik.devicebridge.domain.settings.SettingsDefaults
+import ru.hznik.devicebridge.domain.settings.SettingsUpdateResult
+import ru.hznik.devicebridge.domain.settings.SettingsValidationError
+
+internal object SettingsPreferenceKeys {
+    val deviceName = stringPreferencesKey("device_name")
+    val retentionDays = intPreferencesKey("retention_days")
+    val destinationTree = stringPreferencesKey("destination_tree_uri")
+    val effectiveFileLimitBytes = longPreferencesKey("effective_file_limit_bytes")
+}
+
+class DataStoreSettingsRepository(
+    private val dataStore: DataStore<Preferences>,
+) : SettingsRepository {
+    override val settings: Flow<DeviceSettings> = dataStore.data
+        .catch { failure ->
+            if (failure is IOException) {
+                emit(emptyPreferences())
+            } else {
+                throw failure
+            }
+        }
+        .map(::mapSettings)
+
+    override suspend fun updateDeviceName(value: String): SettingsUpdateResult {
+        val normalized = value.trim()
+        if (
+            normalized.isBlank() ||
+            normalized.codePointCount(0, normalized.length) > 40 ||
+            normalized.any(Char::isISOControl)
+        ) {
+            return SettingsUpdateResult.Invalid(SettingsValidationError.DEVICE_NAME)
+        }
+        return update { preferences ->
+            preferences[SettingsPreferenceKeys.deviceName] = normalized
+        }
+    }
+
+    override suspend fun updateRetentionDays(value: Int): SettingsUpdateResult {
+        if (value !in SettingsDefaults.MIN_RETENTION_DAYS..SettingsDefaults.MAX_RETENTION_DAYS) {
+            return SettingsUpdateResult.Invalid(SettingsValidationError.RETENTION_DAYS)
+        }
+        return update { preferences ->
+            preferences[SettingsPreferenceKeys.retentionDays] = value
+        }
+    }
+
+    override suspend fun updateDestinationTree(
+        value: DestinationTree?,
+    ): SettingsUpdateResult = update { preferences ->
+        if (value == null) {
+            preferences.remove(SettingsPreferenceKeys.destinationTree)
+        } else {
+            preferences[SettingsPreferenceKeys.destinationTree] = value.value
+        }
+    }
+
+    override suspend fun updateEffectiveFileLimitBytes(value: Long): SettingsUpdateResult {
+        if (value !in 1..HARD_MAX_FILE_BYTES) {
+            return SettingsUpdateResult.Invalid(SettingsValidationError.FILE_LIMIT)
+        }
+        return update { preferences ->
+            preferences[SettingsPreferenceKeys.effectiveFileLimitBytes] = value
+        }
+    }
+
+    private suspend fun update(
+        transform: suspend (androidx.datastore.preferences.core.MutablePreferences) -> Unit,
+    ): SettingsUpdateResult {
+        val updated = dataStore.edit { preferences ->
+            transform(preferences)
+        }
+        return SettingsUpdateResult.Updated(mapSettings(updated))
+    }
+
+    private fun mapSettings(preferences: Preferences): DeviceSettings {
+        val defaults = DeviceSettings.defaults()
+        val deviceName = preferences[SettingsPreferenceKeys.deviceName]
+            ?.trim()
+            ?.takeIf { candidate ->
+                candidate.isNotBlank() &&
+                    candidate.codePointCount(0, candidate.length) <= 40 &&
+                    candidate.none(Char::isISOControl)
+            }
+            ?: defaults.deviceName
+        val retentionDays = preferences[SettingsPreferenceKeys.retentionDays]
+            ?.takeIf {
+                it in SettingsDefaults.MIN_RETENTION_DAYS..SettingsDefaults.MAX_RETENTION_DAYS
+            }
+            ?: defaults.retentionDays
+        val destinationTree = preferences[SettingsPreferenceKeys.destinationTree]
+            ?.let { stored -> runCatching { DestinationTree(stored) }.getOrNull() }
+        val effectiveFileLimitBytes = preferences[SettingsPreferenceKeys.effectiveFileLimitBytes]
+            ?.takeIf { it in 1..HARD_MAX_FILE_BYTES }
+            ?: defaults.effectiveFileLimitBytes
+        return DeviceSettings(
+            deviceName = deviceName,
+            retentionDays = retentionDays,
+            destinationTree = destinationTree,
+            effectiveFileLimitBytes = effectiveFileLimitBytes,
+        )
+    }
+}

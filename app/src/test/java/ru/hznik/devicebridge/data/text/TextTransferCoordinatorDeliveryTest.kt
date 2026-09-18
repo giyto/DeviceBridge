@@ -111,15 +111,41 @@ class TextTransferCoordinatorDeliveryTest {
         assertEquals(1, coordinator.state.value.items.size)
     }
 
+    @Test
+    fun historyFailureDoesNotChangeDeliveredTransferResult() = runTest {
+        val gateway = RecordingGateway()
+        val coordinator = coordinator(
+            gateway = gateway,
+            historyRecorder = TextTerminalHistoryRecorder {
+                error("history unavailable")
+            },
+        )
+        coordinator.activate(generationId)
+        val result = async { coordinator.send(SendTextRequest(firstSession.id, "hello")) }
+        runCurrent()
+        coordinator.acknowledge(
+            generationId,
+            firstSession.id,
+            gateway.deliveries.single().id,
+        )
+
+        assertEquals(
+            TextTransferStatus.DELIVERED,
+            (result.await() as TextTransferResult.Accepted).item.status,
+        )
+    }
+
     private fun coordinator(
         gateway: RecordingGateway,
         acknowledgementTimeoutMs: Long = 10_000,
+        historyRecorder: TextTerminalHistoryRecorder = TextTerminalHistoryRecorder { },
     ) = TextTransferCoordinator(
         nowEpochMillis = { 5_000 },
         browserSessionState = { browserState() },
         eventGateway = gateway,
         newMessageId = { TextMessageId("outgoing-1") },
         acknowledgementTimeoutMs = acknowledgementTimeoutMs,
+        historyRecorder = historyRecorder,
     )
 
     private fun browserState() = BrowserSessionState.active(

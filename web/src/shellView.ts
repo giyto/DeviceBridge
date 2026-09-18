@@ -2,7 +2,7 @@ import type { SessionUiState } from "./sessionController";
 
 export interface ShellActions {
   readonly onRetry: () => void;
-  readonly onSubmitCode: (code: string) => void;
+  readonly onSubmitCode: (code: string, rememberBrowser: boolean) => void;
   readonly onDisconnect: () => void;
 }
 
@@ -24,6 +24,7 @@ export function createShellView(
   const retryButton = requiredElement<HTMLButtonElement>(documentRef, '[data-action="retry"]');
   const form = requiredElement<HTMLFormElement>(documentRef, '[data-role="pairing-form"]');
   const codeInput = requiredElement<HTMLInputElement>(documentRef, "#pairing-code");
+  const rememberBrowser = requiredElement<HTMLInputElement>(documentRef, "#remember-browser");
   const pairButton = requiredElement<HTMLButtonElement>(documentRef, '[data-action="pair"]');
   const disconnectButton = requiredElement<HTMLButtonElement>(
     documentRef,
@@ -45,7 +46,7 @@ export function createShellView(
       codeInput.reportValidity();
       return;
     }
-    actions.onSubmitCode(codeInput.value);
+    actions.onSubmitCode(codeInput.value, rememberBrowser.checked);
   };
 
   retryButton.addEventListener("click", onRetry);
@@ -60,6 +61,7 @@ export function createShellView(
     form.hidden = true;
     disconnectButton.hidden = true;
     codeInput.disabled = false;
+    rememberBrowser.disabled = false;
     pairButton.disabled = false;
 
     if ("manifest" in state && state.manifest !== undefined) {
@@ -90,6 +92,7 @@ export function createShellView(
         sessionDetail.textContent = "После проверки потребуется подтверждение на телефоне.";
         form.hidden = false;
         codeInput.disabled = true;
+        rememberBrowser.disabled = true;
         pairButton.disabled = true;
         break;
       case "awaiting":
@@ -99,6 +102,7 @@ export function createShellView(
         sessionDetail.textContent = "Разрешите или отклоните запрос в DeviceBridge.";
         form.hidden = false;
         codeInput.disabled = true;
+        rememberBrowser.disabled = true;
         pairButton.disabled = true;
         break;
       case "connected":
@@ -109,6 +113,7 @@ export function createShellView(
           `Активных браузеров: ${state.status.activeSessionCount}.`;
         disconnectButton.hidden = false;
         codeInput.value = "";
+        rememberBrowser.checked = false;
         break;
       case "blocked":
         title.textContent = "Попытки временно заблокированы";

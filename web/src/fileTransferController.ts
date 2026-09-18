@@ -24,6 +24,12 @@ export interface FileSelectionPreview {
   readonly error?: string;
 }
 
+interface DraftFile {
+  readonly key: string;
+  readonly file: File;
+  readonly error?: string;
+}
+
 export interface FileTransferUiItem {
   readonly id: string;
   readonly metadata: FileMetadata;
@@ -68,7 +74,10 @@ export class FileTransferController {
   private generation = 0;
   private token?: string;
   private state: FileTransferUiState = { kind: "inactive" };
-  private selectedFiles: File[] = [];
+  private draftFiles: DraftFile[] = [];
+  private readonly draftKeys = new WeakMap<File, string>();
+  private draftSequence = 0;
+  private effectiveFileLimitBytes = HARD_MAX_FILE_BYTES;
   private readonly sourceFiles = new Map<string, File>();
   private readonly operations = new Map<string, AbortController>();
 
@@ -83,12 +92,16 @@ export class FileTransferController {
     private readonly onUnauthorized: () => void = () => undefined,
   ) {}
 
-  activate(token: string): void {
+  activate(token: string, effectiveFileLimitBytes = HARD_MAX_FILE_BYTES): void {
+    this.effectiveFileLimitBytes = Math.min(
+      HARD_MAX_FILE_BYTES,
+      Math.max(1, effectiveFileLimitBytes),
+    );
     if (this.state.kind === "active" && this.token === token) return;
     this.resetOperations();
     this.generation += 1;
     this.token = token;
-    this.selectedFiles = [];
+    this.draftFiles = [];
     this.sourceFiles.clear();
     this.emit({ kind: "active", selection: [], transfers: [], preparing: false });
   }
@@ -97,7 +110,7 @@ export class FileTransferController {
     this.resetOperations();
     this.generation += 1;
     this.token = undefined;
-    this.selectedFiles = [];
+    this.draftFiles = [];
     this.sourceFiles.clear();
     this.emit({ kind: "inactive" });
   }
@@ -111,23 +124,44 @@ export class FileTransferController {
   }
 
   selectFiles(files: readonly File[]): void {
+    this.addFiles(files);
+  }
+
+  addFiles(files: readonly File[]): void {
     if (this.state.kind !== "active") return;
-    const limited = [...files].slice(0, MAX_BATCH_ITEMS);
-    this.selectedFiles = limited.filter((file) => selectionError(file) === undefined);
-    const selection = limited.map((file, index): FileSelectionPreview => {
-      const error = selectionError(file);
-      return {
-        key: "selection-" + index + "-" + file.name,
-        displayName: file.name || "file-" + (index + 1),
-        sizeBytes: file.size,
-        mimeType: file.type || "application/octet-stream",
-        ...(error === undefined ? {} : { error }),
-      };
-    });
-    const overflow = files.length > MAX_BATCH_ITEMS
-      ? "За один раз можно выбрать не более 32 файлов."
-      : undefined;
-    this.emit({ ...this.state, selection, error: overflow });
+    if (files.length === 0) return;
+    let overflow = false;
+    for (const file of files) {
+      const existingKey = this.draftKeys.get(file);
+      if (existingKey !== undefined && this.draftFiles.some((draft) => draft.key === existingKey)) {
+        continue;
+      }
+      if (this.draftFiles.length >= MAX_BATCH_ITEMS) {
+        overflow = true;
+        continue;
+      }
+      const key = `draft-${++this.draftSequence}`;
+      this.draftKeys.set(file, key);
+      const error = selectionError(file, this.effectiveFileLimitBytes);
+      this.draftFiles.push({ key, file, ...(error === undefined ? {} : { error }) });
+    }
+    this.emitDraft(overflow ? "В черновике может быть не более 32 файлов." : undefined);
+  }
+
+  removeDraft(key: string): void {
+    if (this.state.kind !== "active" || this.state.preparing) return;
+    const removed = this.draftFiles.find((draft) => draft.key === key);
+    if (removed === undefined) return;
+    this.draftFiles = this.draftFiles.filter((draft) => draft.key !== key);
+    this.draftKeys.delete(removed.file);
+    this.emitDraft();
+  }
+
+  clearDraft(): void {
+    if (this.state.kind !== "active" || this.state.preparing || this.draftFiles.length === 0) return;
+    for (const draft of this.draftFiles) this.draftKeys.delete(draft.file);
+    this.draftFiles = [];
+    this.emitDraft();
   }
 
   async confirmSelection(): Promise<void> {
@@ -135,7 +169,7 @@ export class FileTransferController {
       this.state.kind !== "active" ||
       this.token === undefined ||
       this.state.preparing ||
-      this.selectedFiles.length === 0
+      this.draftFiles.every((draft) => draft.error !== undefined)
     ) return;
     const generation = this.generation;
     const token = this.token;
@@ -143,8 +177,9 @@ export class FileTransferController {
     this.operations.set("selection", controller);
     this.emit({ ...this.state, preparing: true, error: undefined });
     try {
-      const items: FileMetadata[] = [];
-      for (const file of this.selectedFiles) {
+      const prepared: Array<{ draft: DraftFile; metadata: FileMetadata }> = [];
+      for (const draft of this.draftFiles.filter((item) => item.error === undefined)) {
+        const file = draft.file;
         const transferId = this.createId();
         const sha256 = await this.hashFile(file, undefined, controller.signal);
         if (!this.isCurrent(generation, token)) return;
@@ -156,23 +191,35 @@ export class FileTransferController {
           sha256,
           direction: "BROWSER_TO_ANDROID",
         };
-        items.push(metadata);
-        this.sourceFiles.set(transferId, file);
+        prepared.push({ draft, metadata });
       }
       const messageId = this.createId();
       const snapshot = await this.api.offer(token, {
         messageId,
         timestamp: this.now(),
         batchId: this.createId(),
-        items,
+        items: prepared.map((item) => item.metadata),
       }, controller.signal);
       if (!this.isCurrent(generation, token)) return;
-      this.selectedFiles = [];
+      const acceptedIds = new Set(snapshot.items.map((item) => item.metadata.transferId));
+      const acceptedDraftKeys = new Set<string>();
+      for (const item of prepared) {
+        if (acceptedIds.has(item.metadata.transferId)) {
+          this.sourceFiles.set(item.metadata.transferId, item.draft.file);
+          this.draftKeys.delete(item.draft.file);
+          acceptedDraftKeys.add(item.draft.key);
+        }
+      }
+      this.draftFiles = this.draftFiles
+        .filter((draft) => !acceptedDraftKeys.has(draft.key))
+        .map((draft) => prepared.some((item) => item.draft.key === draft.key)
+          ? { ...draft, error: "Телефон не принял этот файл. Его можно отправить повторно." }
+          : draft);
       this.applySnapshot(snapshot);
       if (this.state.kind === "active") {
         this.emit({
           ...this.state,
-          selection: [],
+          selection: this.selectionPreview(),
           preparing: false,
           error: undefined,
         });
@@ -246,10 +293,14 @@ export class FileTransferController {
     if (event.transferId !== undefined) {
       const existing = this.state.transfers.find((item) => item.id === event.transferId);
       if (existing !== undefined) {
-        this.upsert({ ...existing, status: "FAILED", localError: fileCodeMessage(event.code) });
+        this.upsert({
+          ...existing,
+          status: "FAILED",
+          localError: fileCodeMessage(event.code, this.effectiveFileLimitBytes),
+        });
       }
     }
-    this.emitError(fileCodeMessage(event.code));
+    this.emitError(fileCodeMessage(event.code, this.effectiveFileLimitBytes));
   }
 
   async download(transferId: string): Promise<void> {
@@ -397,6 +448,21 @@ export class FileTransferController {
     if (this.state.kind === "active") this.emit({ ...this.state, error: message, preparing: false });
   }
 
+  private emitDraft(error?: string): void {
+    if (this.state.kind !== "active") return;
+    this.emit({ ...this.state, selection: this.selectionPreview(), error });
+  }
+
+  private selectionPreview(): readonly FileSelectionPreview[] {
+    return this.draftFiles.map((draft, index) => ({
+      key: draft.key,
+      displayName: draft.file.name || `file-${index + 1}`,
+      sizeBytes: draft.file.size,
+      mimeType: draft.file.type || "application/octet-stream",
+      ...(draft.error === undefined ? {} : { error: draft.error }),
+    }));
+  }
+
   private handleOperationError(error: unknown, transferId?: string): void {
     if (error instanceof FileApiError && error.code === "UNAUTHORIZED") {
       this.deactivate();
@@ -467,9 +533,12 @@ function safeErrorMessage(error: unknown): string {
     : "Не удалось выполнить файловую операцию.";
 }
 
-function fileCodeMessage(code: FileErrorEvent["code"]): string {
+function fileCodeMessage(
+  code: FileErrorEvent["code"],
+  effectiveFileLimitBytes: number,
+): string {
   switch (code) {
-    case "FILE_TOO_LARGE": return "Файл превышает лимит 1 ГиБ.";
+    case "FILE_TOO_LARGE": return fileLimitMessage(effectiveFileLimitBytes);
     case "CHECKSUM_MISMATCH": return "Контрольная сумма файла не совпала.";
     case "NOT_APPROVED": return "Подтвердите передачу на телефоне.";
     case "CANCELLED": return "Передача отменена.";
@@ -486,11 +555,13 @@ function isAbortError(error: unknown): boolean {
   return error instanceof DOMException && error.name === "AbortError";
 }
 
-function selectionError(file: File): string | undefined {
+function selectionError(file: File, effectiveFileLimitBytes: number): string | undefined {
   if (!Number.isSafeInteger(file.size) || file.size < 0) {
     return "Не удалось определить размер файла.";
   }
-  if (file.size > HARD_MAX_FILE_BYTES) return "Файл превышает лимит 1 ГиБ.";
+  if (file.size > effectiveFileLimitBytes) {
+    return fileLimitMessage(effectiveFileLimitBytes);
+  }
   if (
     file.name.length > 255 ||
     [...file.name].some((character) => {
@@ -504,4 +575,15 @@ function selectionError(file: File): string | undefined {
     return "Тип файла не поддерживается.";
   }
   return undefined;
+}
+
+function fileLimitMessage(bytes: number): string {
+  const formatted = bytes >= 1024 ** 3
+    ? `${bytes / 1024 ** 3} ГиБ`
+    : bytes >= 1024 ** 2
+      ? `${bytes / 1024 ** 2} МиБ`
+      : bytes >= 1024
+        ? `${bytes / 1024} КиБ`
+        : `${bytes} Б`;
+  return `Файл превышает установленный лимит ${formatted}.`;
 }

@@ -409,7 +409,7 @@ h2 {
   font-weight: 720;
 }
 
-.pairing-form input {
+.pairing-form #pairing-code {
   width: 100%;
   min-height: 54px;
   padding: 0.7rem 0.9rem;
@@ -419,6 +419,38 @@ h2 {
   color: var(--text);
   font: 700 1.35rem/1 ui-monospace, "Cascadia Code", Consolas, monospace;
   letter-spacing: 0.22em;
+}
+
+.remember-browser {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: start;
+  gap: 0.75rem;
+  margin-top: 0.25rem;
+  padding: 0.85rem;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--surface-elevated) 86%, transparent);
+  cursor: pointer;
+}
+
+.remember-browser input {
+  width: 1.15rem;
+  height: 1.15rem;
+  margin: 0.1rem 0 0;
+  accent-color: var(--accent);
+}
+
+.remember-browser span {
+  display: grid;
+  gap: 0.25rem;
+}
+
+.remember-browser small {
+  color: var(--text-muted);
+  font-size: 0.78rem;
+  font-weight: 500;
+  line-height: 1.4;
 }
 
 .field-help {
@@ -450,13 +482,8 @@ h2 {
 }
 
 .text-card__open {
-  margin-left: auto;
   border-color: color-mix(in srgb, var(--accent) 40%, var(--border));
   color: var(--accent);
-}
-
-.text-card__copy:first-of-type {
-  margin-left: auto;
 }
 
 .text-card__copy:disabled {
@@ -521,7 +548,7 @@ h2 {
 .text-transfer__heading,
 .text-feed-panel__heading,
 .text-card__metadata,
-.text-card__footer,
+.text-card__summary,
 .file-unavailable {
   display: flex;
   min-width: 0;
@@ -671,9 +698,30 @@ h2 {
 }
 
 .text-card__footer {
-  justify-content: flex-start;
+  display: grid;
+  min-width: 0;
+  gap: 0.6rem;
   color: var(--text-muted);
   font-size: 0.75rem;
+}
+
+.text-card__summary {
+  justify-content: flex-start;
+  flex-wrap: wrap;
+}
+
+.text-card__actions {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: repeat(auto-fit, minmax(8rem, 1fr));
+  gap: 0.5rem;
+}
+
+.text-card__actions button {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  margin: 0;
 }
 
 .text-card__status {
@@ -795,6 +843,19 @@ h2 {
   display: none;
 }
 
+.file-draft__heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  color: var(--text-muted);
+  font-size: 0.8rem;
+}
+
+.file-draft__heading button {
+  width: auto;
+}
+
 .file-selection__item,
 .file-card {
   display: grid;
@@ -811,6 +872,11 @@ h2 {
 .file-card__heading strong {
   min-width: 0;
   overflow-wrap: anywhere;
+}
+
+.file-selection__item button {
+  justify-self: start;
+  width: auto;
 }
 
 .file-selection__item span,
@@ -945,19 +1011,12 @@ h2 {
   }
 
   .text-card__metadata,
-  .text-card__footer {
+  .text-card__summary {
     flex-wrap: wrap;
   }
 
   .text-card__metadata time {
     width: 100%;
-    margin-left: 0;
-  }
-
-  .text-card__open,
-  .text-card__copy,
-  .text-card__retry {
-    flex: 1 1 8rem;
     margin-left: 0;
   }
 

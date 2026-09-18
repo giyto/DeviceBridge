@@ -128,6 +128,8 @@ class HomeViewModelTest {
             )
             assertEquals(listOf(BrowserSessionId("session-1")), initial.activeBrowsers.map { it.id })
             assertEquals("Edge", initial.pendingBrowsers.first().browserLabel)
+            assertTrue(initial.pendingBrowsers.first().rememberBrowserRequested)
+            assertFalse(initial.pendingBrowsers.last().rememberBrowserRequested)
             assertEquals("192.168.1.3", initial.activeBrowsers.single().sourceIpv4)
 
             clock.nowMs = 15_100
@@ -182,15 +184,15 @@ class HomeViewModelTest {
             val requestId = PairingRequestId("request-1")
             val deniedRequestId = PairingRequestId("request-2")
             val sessionId = BrowserSessionId("session-1")
-            viewModel.onAction(HomeAction.ApproveBrowser(requestId))
-            viewModel.onAction(HomeAction.ApproveBrowser(requestId))
+            viewModel.onAction(HomeAction.ApproveAndRememberBrowser(requestId))
+            viewModel.onAction(HomeAction.ApproveAndRememberBrowser(requestId))
             viewModel.onAction(HomeAction.DenyBrowser(deniedRequestId))
             viewModel.onAction(HomeAction.DenyBrowser(deniedRequestId))
             viewModel.onAction(HomeAction.RevokeBrowser(sessionId))
             viewModel.onAction(HomeAction.RevokeBrowser(sessionId))
             runCurrent()
 
-            assertEquals(listOf(requestId), sessions.approved)
+            assertEquals(listOf(requestId), sessions.approvedAndRemembered)
             assertEquals(listOf(deniedRequestId), sessions.denied)
             assertEquals(listOf(sessionId), sessions.revoked)
         }
@@ -386,11 +388,16 @@ class HomeViewModelTest {
         val mutableState = MutableStateFlow(initial)
         override val state: StateFlow<BrowserSessionState> = mutableState
         val approved = mutableListOf<PairingRequestId>()
+        val approvedAndRemembered = mutableListOf<PairingRequestId>()
         val denied = mutableListOf<PairingRequestId>()
         val revoked = mutableListOf<BrowserSessionId>()
 
         override suspend fun approve(requestId: PairingRequestId) {
             approved += requestId
+        }
+
+        override suspend fun approveAndRemember(requestId: PairingRequestId) {
+            approvedAndRemembered += requestId
         }
 
         override suspend fun deny(requestId: PairingRequestId) {
@@ -467,6 +474,7 @@ class HomeViewModelTest {
                     sourceIpv4 = "192.168.1.2",
                     createdAtElapsedRealtimeMs = 10_000,
                     expiresAtElapsedRealtimeMs = 18_000,
+                    rememberBrowserRequested = true,
                 ),
                 PendingBrowserRequest(
                     id = PairingRequestId("request-2"),

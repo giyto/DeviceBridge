@@ -17,6 +17,7 @@ import ru.hznik.devicebridge.data.server.MonotonicClock
 import ru.hznik.devicebridge.domain.model.ServerLifecycleError
 import ru.hznik.devicebridge.domain.model.ServerLifecycleState
 import ru.hznik.devicebridge.domain.session.BrowserSessionId
+import ru.hznik.devicebridge.domain.session.BrowserApprovalDecision
 import ru.hznik.devicebridge.domain.session.BrowserSessionState
 import ru.hznik.devicebridge.domain.session.PairingRequestId
 import ru.hznik.devicebridge.domain.usecase.ApproveBrowserRequestUseCase
@@ -119,7 +120,15 @@ class HomeViewModel @Inject constructor(
             }
             is HomeAction.ApproveBrowser -> decideRequest(
                 requestId = action.requestId,
-                decision = approveBrowserRequest::invoke,
+                decision = { requestId ->
+                    approveBrowserRequest(requestId, BrowserApprovalDecision.ALLOW_ONCE)
+                },
+            )
+            is HomeAction.ApproveAndRememberBrowser -> decideRequest(
+                requestId = action.requestId,
+                decision = { requestId ->
+                    approveBrowserRequest(requestId, BrowserApprovalDecision.ALLOW_AND_REMEMBER)
+                },
             )
             is HomeAction.DenyBrowser -> decideRequest(
                 requestId = action.requestId,
@@ -283,6 +292,7 @@ class HomeViewModel @Inject constructor(
                         expiresInSeconds = request.expiresAtElapsedRealtimeMs
                             .remainingSeconds(nowMs),
                         actionPending = request.id in decidingRequestIds,
+                        rememberBrowserRequested = request.rememberBrowserRequested,
                     )
                 }
             } else {

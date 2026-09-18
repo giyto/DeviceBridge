@@ -2,6 +2,7 @@ package ru.hznik.devicebridge.data.session
 
 import java.nio.charset.StandardCharsets
 import java.security.MessageDigest
+import java.time.Clock
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Job
@@ -9,6 +10,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -17,6 +19,7 @@ import ru.hznik.devicebridge.data.server.MonotonicClock
 import ru.hznik.devicebridge.data.session.security.SessionSecretGenerator
 import ru.hznik.devicebridge.data.session.security.SessionTokenCredential
 import ru.hznik.devicebridge.domain.repository.BrowserSessionRepository
+import ru.hznik.devicebridge.domain.repository.TrustedBrowserRepository
 import ru.hznik.devicebridge.domain.session.BrowserSession
 import ru.hznik.devicebridge.domain.session.BrowserSessionEvent
 import ru.hznik.devicebridge.domain.session.BrowserSessionId
@@ -26,6 +29,11 @@ import ru.hznik.devicebridge.domain.session.PairingChallengeId
 import ru.hznik.devicebridge.domain.session.PairingRequestId
 import ru.hznik.devicebridge.domain.session.PendingBrowserRequest
 import ru.hznik.devicebridge.domain.session.ServerGenerationId
+import ru.hznik.devicebridge.domain.trust.IssuedTrustedBrowser
+import ru.hznik.devicebridge.domain.trust.TRUSTED_BROWSER_MAX_LIFETIME_MILLIS
+import ru.hznik.devicebridge.domain.trust.TrustedBrowserAuthenticationResult
+import ru.hznik.devicebridge.domain.trust.TrustedBrowserIssueRequest
+import ru.hznik.devicebridge.domain.trust.TrustedBrowserId
 
 class SessionGenerationHandle internal constructor(
     internal val generationId: ServerGenerationId,
@@ -53,6 +61,8 @@ sealed interface SessionConfirmationResult {
     data class Approved(
         val sessionId: BrowserSessionId,
         val token: String,
+        val trustedCredential: String? = null,
+        val trustedCredentialExpiresAtEpochMillis: Long? = null,
     ) : SessionConfirmationResult
 
     data class InvalidCode(val remainingAttempts: Int) : SessionConfirmationResult
@@ -66,6 +76,19 @@ sealed interface SessionConfirmationResult {
     data object GenerationClosed : SessionConfirmationResult
 }
 
+sealed interface TrustedSessionExchangeResult {
+    data class Approved(
+        val sessionId: BrowserSessionId,
+        val token: String,
+    ) : TrustedSessionExchangeResult
+
+    data object InvalidCredential : TrustedSessionExchangeResult
+    data object Expired : TrustedSessionExchangeResult
+    data object InvalidMetadata : TrustedSessionExchangeResult
+    data object CapacityReached : TrustedSessionExchangeResult
+    data object GenerationClosed : TrustedSessionExchangeResult
+}
+
 class BrowserSessionCoordinator(
     private val clock: MonotonicClock,
     private val secretGenerator: SessionSecretGenerator,
@@ -74,10 +97,13 @@ class BrowserSessionCoordinator(
     private val maxPendingRequests: Int = MAX_CONCURRENT_PENDING_REQUESTS,
     private val maxSessions: Int = 16,
     private val confirmWaitTimeoutMs: Long = PENDING_REQUEST_TTL_MS,
+    private val trustedBrowserRepository: TrustedBrowserRepository? = null,
+    private val wallClock: Clock = Clock.systemUTC(),
 ) : BrowserSessionRepository {
     private data class ChallengeRecord(
         val generationId: ServerGenerationId,
         val metadata: NormalizedClientMetadata,
+        val rememberBrowserRequested: Boolean,
     )
 
     private data class PendingEntry(
@@ -94,6 +120,11 @@ class BrowserSessionCoordinator(
         data class Await(val entry: PendingEntry) : ConfirmationPreparation
         data class Immediate(val result: SessionConfirmationResult) : ConfirmationPreparation
     }
+
+    private data class ApprovalPreparation(
+        val entry: PendingEntry,
+        val handle: SessionGenerationHandle,
+    )
 
     private val mutex = Mutex()
     private val lifetimePolicy = SessionLifetimePolicy(clock, secretGenerator)
@@ -116,6 +147,19 @@ class BrowserSessionCoordinator(
 
     init {
         require(confirmWaitTimeoutMs in 1..PENDING_REQUEST_TTL_MS)
+        trustedBrowserRepository?.let { repository ->
+            scope.launch {
+                repository.trustedBrowsers.collectLatest { browsers ->
+                    closeTrustedSessionsMissingFrom(browsers.mapTo(mutableSetOf()) { it.id })
+                }
+            }
+            scope.launch {
+                while (true) {
+                    delay(TRUSTED_BROWSER_CLEANUP_INTERVAL_MS)
+                    runCatching { repository.deleteExpired(wallClock.millis()) }
+                }
+            }
+        }
     }
 
     override val state: StateFlow<BrowserSessionState> = mutableState.asStateFlow()
@@ -150,6 +194,7 @@ class BrowserSessionCoordinator(
         handle: SessionGenerationHandle,
         browserLabel: String,
         sourceIpv4: String,
+        rememberBrowserRequested: Boolean = false,
     ): ChallengeCreationResult = mutex.withLock {
         if (activeHandle !== handle) return@withLock ChallengeCreationResult.GenerationClosed
         val metadata = when (val normalized = ClientMetadataNormalizer.normalize(browserLabel, sourceIpv4)) {
@@ -166,7 +211,11 @@ class BrowserSessionCoordinator(
                 val challengeId = PairingChallengeId(secretGenerator.newOpaqueId())
                 val result = challenges.put(
                     key = challengeId,
-                    value = ChallengeRecord(handle.generationId, metadata),
+                    value = ChallengeRecord(
+                        generationId = handle.generationId,
+                        metadata = metadata,
+                        rememberBrowserRequested = rememberBrowserRequested,
+                    ),
                     expiresAtMs = currentCode.expiresAtElapsedRealtimeMs,
                 )
                 if (result == RegistryPutResult.CAPACITY_REACHED) {
@@ -213,14 +262,56 @@ class BrowserSessionCoordinator(
     }
 
     override suspend fun approve(requestId: PairingRequestId) {
-        mutex.withLock {
-            val entry = pending.remove(requestId) ?: return@withLock
+        approveInternal(requestId, rememberBrowser = false)
+    }
+
+    override suspend fun approveAndRemember(requestId: PairingRequestId) {
+        approveInternal(requestId, rememberBrowser = true)
+    }
+
+    private suspend fun approveInternal(
+        requestId: PairingRequestId,
+        rememberBrowser: Boolean,
+    ) {
+        val preparation = mutex.withLock<ApprovalPreparation?> {
+            val entry = pending.remove(requestId) ?: return@withLock null
             val handle = activeHandle
             if (handle == null || handle.generationId != entry.request.generationId) {
+                entry.decision.complete(SessionConfirmationResult.GenerationClosed)
+                return@withLock null
+            }
+            if (sessions.size >= maxSessions) {
+                entry.decision.complete(SessionConfirmationResult.CapacityReached)
+                mutableState.value = BrowserSessionReducer.reduce(
+                    mutableState.value,
+                    BrowserSessionEvent.RequestDenied(entry.request.generationId, requestId),
+                )
+                return@withLock null
+            }
+            ApprovalPreparation(entry, handle)
+        } ?: return
+        val issuedTrustedBrowser = if (
+            rememberBrowser && preparation.entry.request.rememberBrowserRequested
+        ) {
+            issueTrustedBrowser(preparation.entry.request)
+        } else {
+            null
+        }
+        var orphanedTrustedBrowser: IssuedTrustedBrowser? = null
+        mutex.withLock {
+            val entry = preparation.entry
+            val handle = activeHandle
+            if (
+                handle == null ||
+                handle !== preparation.handle ||
+                handle.generationId != entry.request.generationId
+            ) {
+                orphanedTrustedBrowser = issuedTrustedBrowser
                 entry.decision.complete(SessionConfirmationResult.GenerationClosed)
                 return@withLock
             }
             if (sessions.size >= maxSessions) {
+                orphanedTrustedBrowser = issuedTrustedBrowser
                 entry.decision.complete(SessionConfirmationResult.CapacityReached)
                 mutableState.value = BrowserSessionReducer.reduce(
                     mutableState.value,
@@ -235,6 +326,7 @@ class BrowserSessionCoordinator(
                 browserLabel = entry.request.browserLabel,
                 sourceIpv4 = entry.request.sourceIpv4,
                 connectedAtElapsedRealtimeMs = clock.nowMs(),
+                trustedBrowserId = issuedTrustedBrowser?.browser?.id,
             )
             sessions[session.id] = StoredSession(
                 session = session,
@@ -251,8 +343,36 @@ class BrowserSessionCoordinator(
                 ),
             )
             scheduleCodeRotation(handle)
-            entry.decision.complete(SessionConfirmationResult.Approved(session.id, rawToken))
+            entry.decision.complete(
+                SessionConfirmationResult.Approved(
+                    sessionId = session.id,
+                    token = rawToken,
+                    trustedCredential = issuedTrustedBrowser?.rawCredential,
+                    trustedCredentialExpiresAtEpochMillis =
+                        issuedTrustedBrowser?.browser?.expiresAtEpochMillis,
+                ),
+            )
         }
+        orphanedTrustedBrowser?.let { issued ->
+            runCatching { trustedBrowserRepository?.revoke(issued.browser.id) }
+        }
+    }
+
+    private suspend fun issueTrustedBrowser(
+        request: PendingBrowserRequest,
+    ): IssuedTrustedBrowser? {
+        val repository = trustedBrowserRepository ?: return null
+        val issuedAt = wallClock.millis()
+        val expiresAt = Math.addExact(issuedAt, TRUSTED_BROWSER_MAX_LIFETIME_MILLIS)
+        return runCatching {
+            repository.issue(
+                TrustedBrowserIssueRequest(
+                    browserLabel = request.browserLabel,
+                    issuedAtEpochMillis = issuedAt,
+                    expiresAtEpochMillis = expiresAt,
+                ),
+            )
+        }.getOrNull()
     }
 
     override suspend fun deny(requestId: PairingRequestId) {
@@ -274,6 +394,63 @@ class BrowserSessionCoordinator(
         sessions.values
             .firstOrNull { it.credential.matches(handle.generationId, token) }
             ?.session
+    }
+
+    suspend fun exchangeTrusted(
+        handle: SessionGenerationHandle,
+        rawCredential: String,
+        sourceIpv4: String,
+        nowEpochMillis: Long = wallClock.millis(),
+    ): TrustedSessionExchangeResult {
+        if (activeHandle !== handle) return TrustedSessionExchangeResult.GenerationClosed
+        val repository = trustedBrowserRepository
+            ?: return TrustedSessionExchangeResult.InvalidCredential
+        val trustedBrowser = when (
+            val authentication = repository.authenticate(rawCredential, nowEpochMillis)
+        ) {
+            is TrustedBrowserAuthenticationResult.Authenticated -> authentication.browser
+            TrustedBrowserAuthenticationResult.Expired -> return TrustedSessionExchangeResult.Expired
+            TrustedBrowserAuthenticationResult.Invalid -> {
+                return TrustedSessionExchangeResult.InvalidCredential
+            }
+        }
+        return mutex.withLock {
+            if (activeHandle !== handle) {
+                return@withLock TrustedSessionExchangeResult.GenerationClosed
+            }
+            val metadata = when (
+                val normalized = ClientMetadataNormalizer.normalize(
+                    trustedBrowser.browserLabel,
+                    sourceIpv4,
+                )
+            ) {
+                is ClientMetadataResult.Valid -> normalized.metadata
+                is ClientMetadataResult.Invalid -> {
+                    return@withLock TrustedSessionExchangeResult.InvalidMetadata
+                }
+            }
+            if (sessions.size >= maxSessions) {
+                return@withLock TrustedSessionExchangeResult.CapacityReached
+            }
+            val rawToken = secretGenerator.newSessionToken()
+            val session = BrowserSession(
+                id = BrowserSessionId(secretGenerator.newOpaqueId()),
+                generationId = handle.generationId,
+                browserLabel = metadata.browserLabel,
+                sourceIpv4 = metadata.sourceIpv4,
+                connectedAtElapsedRealtimeMs = clock.nowMs(),
+                trustedBrowserId = trustedBrowser.id,
+            )
+            sessions[session.id] = StoredSession(
+                session = session,
+                credential = SessionTokenCredential.fromRaw(handle.generationId, rawToken),
+            )
+            mutableState.value = BrowserSessionReducer.reduce(
+                mutableState.value,
+                BrowserSessionEvent.TrustedSessionConnected(handle.generationId, session),
+            )
+            TrustedSessionExchangeResult.Approved(session.id, rawToken)
+        }
     }
 
     suspend fun attachConnection(
@@ -313,6 +490,57 @@ class BrowserSessionCoordinator(
                 // Revocation is complete even if a transport was already closed.
             }
         }
+    }
+
+    override suspend fun revokeTrustedBrowser(browserId: TrustedBrowserId): Boolean {
+        val revoked = trustedBrowserRepository?.revoke(browserId) ?: false
+        closeTrustedSessions(setOf(browserId))
+        return revoked
+    }
+
+    override suspend fun revokeAllTrustedBrowsers(): Int {
+        val revoked = trustedBrowserRepository?.revokeAll() ?: 0
+        closeAllTrustedSessions()
+        return revoked
+    }
+
+    private suspend fun closeTrustedSessions(browserIds: Set<TrustedBrowserId>) {
+        closeTrustedSessionsMatching { trustedId -> trustedId in browserIds }
+    }
+
+    private suspend fun closeTrustedSessionsMissingFrom(
+        activeBrowserIds: Set<TrustedBrowserId>,
+    ) {
+        closeTrustedSessionsMatching { trustedId -> trustedId !in activeBrowserIds }
+    }
+
+    private suspend fun closeAllTrustedSessions() {
+        closeTrustedSessionsMatching { true }
+    }
+
+    private suspend fun closeTrustedSessionsMatching(
+        shouldClose: (TrustedBrowserId) -> Boolean,
+    ) {
+        val toClose = mutex.withLock {
+            val sessionIds = sessions.values
+                .mapNotNull { stored ->
+                    stored.session.trustedBrowserId
+                        ?.takeIf(shouldClose)
+                        ?.let { stored.session.id }
+                }
+            sessionIds.flatMap { sessionId ->
+                val removed = sessions.remove(sessionId) ?: return@flatMap emptyList()
+                mutableState.value = BrowserSessionReducer.reduce(
+                    mutableState.value,
+                    BrowserSessionEvent.SessionRevoked(
+                        removed.session.generationId,
+                        sessionId,
+                    ),
+                )
+                connections.remove(sessionId)?.toList().orEmpty()
+            }
+        }
+        closeConnections(toClose.distinct())
     }
 
     private fun scheduleCodeRotation(handle: SessionGenerationHandle) {
@@ -412,6 +640,7 @@ class BrowserSessionCoordinator(
             sourceIpv4 = metadata.sourceIpv4,
             createdAtElapsedRealtimeMs = clock.nowMs(),
             expiresAtElapsedRealtimeMs = lifetimePolicy.newPendingExpiry(),
+            rememberBrowserRequested = challenge.rememberBrowserRequested,
         )
         val entry = PendingEntry(request, CompletableDeferred())
         if (pending.put(requestId, entry, request.expiresAtElapsedRealtimeMs) == RegistryPutResult.CAPACITY_REACHED) {
@@ -469,5 +698,9 @@ class BrowserSessionCoordinator(
                 // Lifecycle cleanup remains complete if transport close races its peer.
             }
         }
+    }
+
+    private companion object {
+        const val TRUSTED_BROWSER_CLEANUP_INTERVAL_MS = 60_000L
     }
 }

@@ -16,6 +16,10 @@ val defaultNpmExecutable = if (System.getProperty("os.name").startsWith("Windows
 val npmExecutable = providers.gradleProperty("deviceBridgeNpmExecutable")
     .orElse(defaultNpmExecutable)
 
+ksp {
+    arg("room.schemaLocation", "$projectDir/schemas")
+}
+
 val npmCi by tasks.registering(Exec::class) {
     group = "build"
     description = "Installs the locked DeviceBridge web build dependencies."
@@ -126,6 +130,9 @@ dependencies {
     implementation(libs.androidx.lifecycle.runtime.compose)
     implementation(libs.androidx.lifecycle.viewmodel.compose)
     implementation(libs.androidx.navigation.compose)
+    implementation(libs.androidx.room.runtime)
+    implementation(libs.androidx.room.ktx)
+    implementation(libs.androidx.datastore.preferences)
     implementation(libs.hilt.android)
     implementation(libs.androidx.hilt.lifecycle.viewmodel.compose)
     implementation(libs.kotlinx.coroutines.core)
@@ -134,6 +141,7 @@ dependencies {
     implementation(libs.ktor.server.websockets)
     implementation(libs.kotlinx.serialization.json)
     ksp(libs.hilt.android.compiler)
+    ksp(libs.androidx.room.compiler)
     testImplementation(libs.junit)
     testImplementation(libs.kotlinx.coroutines.test)
     testImplementation(libs.ktor.client.core)
@@ -143,6 +151,7 @@ dependencies {
     androidTestImplementation(libs.androidx.compose.ui.test.junit4)
     androidTestImplementation(libs.androidx.espresso.core)
     androidTestImplementation(libs.androidx.junit)
+    androidTestImplementation(libs.androidx.room.testing)
     androidTestImplementation(libs.ktor.client.cio)
     androidTestImplementation(libs.ktor.client.core)
     androidTestImplementation(libs.ktor.client.websockets)

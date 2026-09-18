@@ -53,7 +53,7 @@ class KtorServerRuntimeFactoryTest {
     }
 
     @Test
-    fun bindsDynamicallyPublishesLanEndpointAndReleasesPort() = runBlocking {
+    fun bindsPreferredPortPublishesLanEndpointAndReleasesPort() = runBlocking {
         val runtime = factory().create()
 
         val endpoint = runtime.start()
@@ -75,6 +75,23 @@ class KtorServerRuntimeFactoryTest {
         ServerSocket(endpoint.port).use { rebound ->
             assertTrue(rebound.isBound)
         }
+    }
+
+    @Test
+    fun reusesPreferredPortAcrossServerGenerationsForSameBrowserOrigin() = runBlocking {
+        val preferredPort = findFreePort()
+        val factory = factory(preferredPort)
+
+        val first = factory.create()
+        val firstEndpoint = first.start()
+        first.stop()
+
+        val second = factory.create()
+        val secondEndpoint = second.start()
+        second.stop()
+
+        assertEquals(preferredPort, firstEndpoint.port)
+        assertEquals(firstEndpoint.port, secondEndpoint.port)
     }
 
     @Test
@@ -120,7 +137,7 @@ class KtorServerRuntimeFactoryTest {
         }
     }
 
-    private fun factory(): KtorServerRuntimeFactory {
+    private fun factory(preferredPort: Int = findFreePort()): KtorServerRuntimeFactory {
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
         val browserSessions = BrowserSessionCoordinator(
             clock = MonotonicClock { 1_000 },
@@ -176,8 +193,11 @@ class KtorServerRuntimeFactoryTest {
                 wallClockMs = { 1_000_000 },
             ),
             monotonicClock = MonotonicClock { 1_000 },
+            preferredPort = preferredPort,
         )
     }
+
+    private fun findFreePort(): Int = ServerSocket(0).use { it.localPort }
 
     private fun rawGet(
         port: Int,

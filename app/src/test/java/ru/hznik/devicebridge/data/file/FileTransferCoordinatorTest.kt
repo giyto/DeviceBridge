@@ -149,9 +149,36 @@ class FileTransferCoordinatorTest {
         )
     }
 
-    private fun coordinator(maxItems: Int = 100) = FileTransferCoordinator(
+    @Test
+    fun terminalHistoryFailureDoesNotChangeFileOutcome() = runTest {
+        val terminal = mutableListOf<FileTransferPhase>()
+        val coordinator = coordinator(
+            historyRecorder = FileTerminalHistoryRecorder { item ->
+                terminal += item.phase
+                error("history unavailable")
+            },
+        )
+        coordinator.activate(generation)
+        coordinator.create(request("cancel-offer", "cancel-me"))
+
+        assertEquals(
+            FileTransferOperationResult.Accepted,
+            coordinator.cancel(FileTransferId("cancel-me")),
+        )
+        assertEquals(listOf(FileTransferPhase.CANCELLED), terminal)
+        assertEquals(
+            FileTransferPhase.CANCELLED,
+            coordinator.state.value.item(FileTransferId("cancel-me"))?.phase,
+        )
+    }
+
+    private fun coordinator(
+        maxItems: Int = 100,
+        historyRecorder: FileTerminalHistoryRecorder = FileTerminalHistoryRecorder { },
+    ) = FileTransferCoordinator(
         browserSessionState = { sessions },
         maxItems = maxItems,
+        historyRecorder = historyRecorder,
     )
 
     private fun request(

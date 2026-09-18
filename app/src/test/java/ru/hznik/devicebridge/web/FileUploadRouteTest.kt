@@ -1,6 +1,7 @@
 package ru.hznik.devicebridge.web
 
 import java.io.ByteArrayOutputStream
+import java.util.concurrent.atomic.AtomicLong
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Test
@@ -73,6 +74,32 @@ class FileUploadRouteTest {
             assertEquals(404, foreignResponse.statusCode())
             assertEquals(400, mismatch.statusCode())
             assertEquals(0, opens)
+        }
+    }
+
+    @Test
+    fun acceptedTransferKeepsItsValidationSnapshotWhenSettingChanges() {
+        val currentLimit = AtomicLong(5)
+        val target = RecordingTarget()
+        withSessionRouteServer(
+            uploadTargetFactory = FileUploadTargetFactory { _, _ -> target },
+            effectiveFileLimitProvider = currentLimit::get,
+        ) { server ->
+            val payload = "hello".encodeToByteArray()
+            val paired = offerAndApprove(server, payload)
+
+            currentLimit.set(1)
+            val response = server.requestBytes(
+                "POST",
+                "/api/v1/files/upload-1",
+                payload,
+                server.sameOriginBinaryHeaders(
+                    mapOf("Authorization" to "Bearer ${paired.token}"),
+                ),
+            )
+
+            assertEquals(200, response.statusCode())
+            assertEquals(1, target.commits)
         }
     }
 

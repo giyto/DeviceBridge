@@ -44,10 +44,38 @@ describe("DeviceBridge shell markup", () => {
     expect(document.querySelector('label[for="pairing-code"]')?.textContent).toContain("код");
     expect(document.querySelector<HTMLInputElement>("#pairing-code")?.inputMode).toBe("numeric");
     expect(document.querySelector<HTMLButtonElement>('button[data-action="pair"]')).not.toBeNull();
+    expect(document.querySelector('label[for="remember-browser"]')?.textContent).toContain(
+      "Запомнить этот браузер",
+    );
     expect(document.querySelector<HTMLButtonElement>('button[data-action="send-text"]')?.disabled).toBe(true);
     expect(document.querySelector<HTMLElement>('[data-role="text-transfer"]')?.hidden).toBe(true);
     expect(document.querySelector<HTMLElement>('[data-role="file-transfer"]')?.hidden).toBe(true);
     expect(document.querySelector('label[for="file-input"]')?.textContent).toContain("Выберите файлы");
+  });
+
+  it("submits the explicit remember-browser choice", () => {
+    const onSubmitCode = vi.fn();
+    const view = createShellView(document, { ...actions(), onSubmitCode });
+    view.render({
+      kind: "ready",
+      manifest: { protocolVersion: 1, webAssetVersion: "sha256-abcd" },
+      challenge: {
+        protocolVersion: 1,
+        challengeId: "challenge-remember",
+        expiresAtEpochMillis: 10_000,
+        confirmTimeoutSeconds: 60,
+        attemptsRemaining: 5,
+      },
+    });
+    const input = document.querySelector<HTMLInputElement>("#pairing-code")!;
+    const remember = document.querySelector<HTMLInputElement>("#remember-browser")!;
+    input.value = "123456";
+    remember.checked = true;
+
+    document.querySelector<HTMLFormElement>('[data-role="pairing-form"]')
+      ?.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+
+    expect(onSubmitCode).toHaveBeenCalledWith("123456", true);
   });
 });
 
@@ -140,7 +168,7 @@ describe("createShellView", () => {
     input.value = "123456";
     document.querySelector<HTMLFormElement>('[data-role="pairing-form"]')
       ?.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
-    expect(onSubmitCode).toHaveBeenCalledWith("123456");
+    expect(onSubmitCode).toHaveBeenCalledWith("123456", false);
 
     view.render({ kind: "awaiting", manifest });
     expect(document.querySelector('[data-role="session-title"]')?.textContent).toContain(
@@ -156,6 +184,7 @@ describe("createShellView", () => {
         sessionId: "session-1",
         connected: true,
         activeSessionCount: 2,
+        effectiveFileLimitBytes: 1_073_741_824,
       },
     });
     document.querySelector<HTMLButtonElement>('[data-action="disconnect"]')?.click();
@@ -167,7 +196,7 @@ describe("createShellView", () => {
 function actions() {
   return {
     onRetry: () => undefined,
-    onSubmitCode: (_code: string) => undefined,
+    onSubmitCode: (_code: string, _rememberBrowser: boolean) => undefined,
     onDisconnect: () => undefined,
   };
 }

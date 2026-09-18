@@ -1,0 +1,53 @@
+package ru.hznik.devicebridge.feature.settings
+
+import ru.hznik.devicebridge.domain.settings.DeviceSettings
+import ru.hznik.devicebridge.domain.trust.TrustedBrowserId
+
+data class SettingsFieldState(
+    val isSaving: Boolean = false,
+    val errorMessage: String? = null,
+)
+
+data class SettingsUiState(
+    val settings: DeviceSettings = DeviceSettings.defaults(),
+    val isLoading: Boolean = true,
+    val deviceNameInput: String = DeviceSettings.defaults().deviceName,
+    val retentionInput: String = DeviceSettings.defaults().retentionDays.toString(),
+    val fileLimitMiBInput: String =
+        (DeviceSettings.defaults().effectiveFileLimitBytes / (1024 * 1024)).toString(),
+    val deviceNameState: SettingsFieldState = SettingsFieldState(),
+    val retentionState: SettingsFieldState = SettingsFieldState(),
+    val destinationState: SettingsFieldState = SettingsFieldState(),
+    val fileLimitState: SettingsFieldState = SettingsFieldState(),
+    val trustedBrowsers: List<TrustedBrowserUiState> = emptyList(),
+    val revokingTrustedBrowserIds: Set<TrustedBrowserId> = emptySet(),
+    val revokeAllTrustedBrowsersPending: Boolean = false,
+    val trustedBrowsersError: String? = null,
+)
+
+data class TrustedBrowserUiState(
+    val id: TrustedBrowserId,
+    val browserLabel: String,
+    val lastUsedAtEpochMillis: Long?,
+    val expiresAtEpochMillis: Long,
+)
+
+sealed interface SettingsAction {
+    data class DeviceNameChanged(val value: String) : SettingsAction
+    data object SaveDeviceName : SettingsAction
+    data class RetentionChanged(val value: String) : SettingsAction
+    data object SaveRetention : SettingsAction
+    data class FileLimitMiBChanged(val value: String) : SettingsAction
+    data object SaveFileLimit : SettingsAction
+    data object ChooseDestination : SettingsAction
+    data class DestinationSelected(val uri: String) : SettingsAction
+    data object DestinationCancelled : SettingsAction
+    data object DestinationPermissionUnavailable : SettingsAction
+    data object ClearDestination : SettingsAction
+    data class RevokeTrustedBrowser(val browserId: TrustedBrowserId) : SettingsAction
+    data object RevokeAllTrustedBrowsers : SettingsAction
+}
+
+sealed interface SettingsEffect {
+    data object ChooseDestination : SettingsEffect
+}
