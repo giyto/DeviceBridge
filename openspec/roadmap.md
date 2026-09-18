@@ -78,7 +78,7 @@ DeviceBridge создаётся как одно Android-приложение. Т
 
 Архив: openspec/changes/archive/2026-09-17-add-file-transfer.
 
-### 8. add-local-history-and-settings — текущий change
+### 8. add-local-history-and-settings — завершён и архивирован
 
 Цель: сделать приложение удобным для постоянного личного использования.
 
@@ -86,11 +86,13 @@ DeviceBridge создаётся как одно Android-приложение. Т
 
 Зависимость: этапы 5–7.
 
-### 9. harden-errors-and-accessibility
+Архив: openspec/changes/archive/2026-09-18-add-local-history-and-settings.
+
+### 9. harden-errors-and-accessibility — текущий change
 
 Цель: довести основные сценарии до устойчивого пользовательского качества.
 
-Результат: единая модель ошибок, retry/cancellation, empty/loading/error states, accessibility, адаптация phone/large screens и понятные инструкции подключения.
+Результат: единая модель ошибок, retry/cancellation, empty/loading/error states, accessibility, согласованная визуальная система Android/web, переработанные Home/Text/File surfaces, адаптация phone/large screens и понятные инструкции подключения.
 
 Зависимость: этапы 3–8.
 
