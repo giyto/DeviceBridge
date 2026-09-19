@@ -13,6 +13,7 @@ import ru.hznik.devicebridge.domain.file.FileTransferDirection
 import ru.hznik.devicebridge.domain.file.FileTransferEvent
 import ru.hznik.devicebridge.domain.file.FileTransferFailure
 import ru.hznik.devicebridge.domain.file.FileTransferId
+import ru.hznik.devicebridge.domain.file.FileTransferReducer
 import ru.hznik.devicebridge.domain.file.FileTransferOperationResult
 import ru.hznik.devicebridge.domain.file.FileTransferPhase
 import ru.hznik.devicebridge.domain.file.FileTransferSnapshot
@@ -35,6 +36,8 @@ class FileTransferCoordinator(
         nowEpochMillis = System::currentTimeMillis,
     ),
     private val wifiLock: FileTransferWifiLock = NoOpFileTransferWifiLock,
+    private val retrySourceValidator: FileRetrySourceValidator =
+        FileRetrySourceValidator.alwaysValid(),
     private val historyRecorder: FileTerminalHistoryRecorder =
         FileTerminalHistoryRecorder { },
 ) : FileTransferRepository {
@@ -199,6 +202,16 @@ class FileTransferCoordinator(
             return@withLock FileTransferOperationResult.Rejected(
                 FileTransferFailure.SessionUnavailable,
             )
+        }
+        if (item.metadata.direction == FileTransferDirection.ANDROID_TO_BROWSER) {
+            when (retrySourceValidator.validate(item)) {
+                FileRetrySourceValidation.VALID -> Unit
+                FileRetrySourceValidation.UNAVAILABLE,
+                FileRetrySourceValidation.CHANGED,
+                -> return@withLock FileTransferOperationResult.Rejected(
+                    FileTransferFailure.SourceUnavailable,
+                )
+            }
         }
         downloadGrantRegistry.invalidateTransfer(item.generationId, transferId)
         cleanupResources(transferId)
@@ -374,7 +387,10 @@ class FileTransferCoordinator(
                 }
                 .forEach { item ->
                     cleanupResources(item.metadata.id)
-                    transitionWithWifiLock(item.metadata.id, FileTransferEvent.Cancelled)
+                    transitionWithWifiLock(
+                        item.metadata.id,
+                        FileTransferEvent.Failed(FileTransferFailure.SessionUnavailable),
+                    )
                     destinations.remove(item.metadata.id)
                 }
         }
@@ -384,12 +400,19 @@ class FileTransferCoordinator(
         resources.keys.toList().forEach { transferId -> cleanupResources(transferId) }
     }
 
-    private suspend fun cleanupResources(transferId: FileTransferId) {
+    private suspend fun cleanupResources(
+        transferId: FileTransferId,
+        successful: Boolean = false,
+    ) {
         val transferResources = resources.remove(transferId) ?: return
         withContext(NonCancellable) {
-            runCatching { transferResources.cancelJob() }
+            if (!successful) {
+                runCatching { transferResources.cancelJob() }
+            }
             runCatching { transferResources.closeStreams() }
-            runCatching { transferResources.cleanupPartial() }
+            if (!successful) {
+                runCatching { transferResources.cleanupPartial() }
+            }
         }
     }
 
@@ -397,7 +420,15 @@ class FileTransferCoordinator(
         transferId: FileTransferId,
         event: FileTransferEvent,
     ): FileTransferState? {
-        val previous = state.value.item(transferId)
+        val previous = state.value.item(transferId) ?: return null
+        val preview = FileTransferReducer.reduce(previous, event)
+        val enteringTerminal = !previous.phase.isTerminal && preview.phase.isTerminal
+        if (enteringTerminal) {
+            downloadGrantRegistry.invalidateTransfer(previous.generationId, transferId)
+            cleanupResources(transferId, successful = preview.phase == FileTransferPhase.COMPLETED)
+            destinations.remove(transferId)
+        }
+
         val updated = scheduler.transition(transferId, event)
         if (previous?.phase != FileTransferPhase.TRANSFERRING &&
             updated?.phase == FileTransferPhase.TRANSFERRING
@@ -409,10 +440,7 @@ class FileTransferCoordinator(
         ) {
             wifiLock.release(transferId)
         }
-        if (
-            previous?.phase?.isTerminal != true &&
-            updated?.phase?.isTerminal == true
-        ) {
+        if (enteringTerminal && updated != null) {
             runCatching {
                 historyRecorder.recordTerminal(updated)
             }

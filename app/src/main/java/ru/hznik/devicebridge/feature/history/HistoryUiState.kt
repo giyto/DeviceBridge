@@ -38,4 +38,5 @@ sealed interface HistoryAction {
     data object CancelClear : HistoryAction
     data object ConfirmClear : HistoryAction
     data object DismissError : HistoryAction
+    data object RetryLoad : HistoryAction
 }

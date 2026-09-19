@@ -24,9 +24,9 @@ describe("createTextTransferView", () => {
     expect(section.hidden).toBe(false);
     expect(document.querySelector('label[for="text-draft"]')?.textContent).toContain("Текст");
     expect(document.querySelector<HTMLTextAreaElement>("#text-draft")?.disabled).toBe(false);
-    expect(document.querySelector('[data-role="text-feed"]')?.getAttribute("aria-live")).toBe(
-      "polite",
-    );
+    expect(document.querySelector('[data-role="text-feed"]')?.hasAttribute("aria-live")).toBe(false);
+    expect(document.querySelector('[data-role="text-announcer"]')?.getAttribute("aria-live"))
+      .toBe("polite");
     expect(document.querySelector<HTMLElement>('[data-role="file-transfer"]')?.hidden).toBe(true);
     expect(document.querySelector('[data-action="send-file"]')).toBeNull();
   });
@@ -76,6 +76,7 @@ describe("createTextTransferView", () => {
         direction: "BROWSER_TO_ANDROID",
         senderLabel: "Этот браузер",
         status: "FAILED",
+        retryable: true,
       }],
       error: {
         code: "SESSION_UNAVAILABLE",
@@ -92,6 +93,77 @@ describe("createTextTransferView", () => {
     expect(actions.onRetry).toHaveBeenCalledWith("failed-1");
   });
 
+  it("restores focus inside the message after retry removes its button", () => {
+    const actions = createActions();
+    const view = createTextTransferView(document, actions);
+    const failed = {
+      messageId: "retry-focus",
+      timestamp: 1_000,
+      content: "Повтор",
+      contentKind: "TEXT" as const,
+      direction: "BROWSER_TO_ANDROID" as const,
+      senderLabel: "Этот браузер",
+      status: "FAILED" as const,
+      retryable: true,
+    };
+    view.render(activeState({ items: [failed] }));
+    const retry = document.querySelector<HTMLButtonElement>('[data-retry-message-id="retry-focus"]')!;
+    retry.focus();
+    retry.click();
+
+    view.render(activeState({ items: [{ ...failed, status: "SENDING", retryable: false }] }));
+
+    expect(document.activeElement).toBe(
+      document.querySelector<HTMLButtonElement>('[data-copy-message-id="retry-focus"]'),
+    );
+  });
+  it("keeps the draft editable but blocks send and retry while reconnecting", () => {
+    const view = createTextTransferView(document, createActions());
+    view.render(activeState({
+      connectionAvailable: false,
+      draft: "Черновик остаётся",
+      items: [{
+        messageId: "failed-offline",
+        timestamp: 1_000,
+        content: "Повтор",
+        contentKind: "TEXT",
+        direction: "BROWSER_TO_ANDROID",
+        senderLabel: "Этот браузер",
+        status: "FAILED",
+        retryable: true,
+      }],
+    }));
+
+    expect(document.querySelector<HTMLTextAreaElement>("#text-draft")?.disabled).toBe(false);
+    expect(document.querySelector<HTMLTextAreaElement>("#text-draft")?.value).toBe("Черновик остаётся");
+    expect(document.querySelector<HTMLButtonElement>('[data-action="send-text"]')?.disabled).toBe(true);
+    expect(document.querySelector<HTMLButtonElement>('[data-retry-message-id="failed-offline"]')?.disabled).toBe(true);
+  });
+
+  it("does not offer retry for an unchanged terminally invalid payload", () => {
+    const view = createTextTransferView(document, createActions());
+    view.render(activeState({
+      items: [{
+        messageId: "oversized-1",
+        timestamp: 1_000,
+        content: "Слишком большой текст",
+        contentKind: "TEXT",
+        direction: "BROWSER_TO_ANDROID",
+        senderLabel: "Этот браузер",
+        status: "FAILED",
+        retryable: false,
+      }],
+      error: {
+        code: "CONTENT_TOO_LARGE",
+        message: "Текст превышает лимит 100 КБ.",
+        relatedMessageId: "oversized-1",
+      },
+    }));
+
+    expect(document.querySelector('[data-retry-message-id="oversized-1"]')).toBeNull();
+    expect(document.querySelector('[data-role="text-error"]')?.textContent)
+      .toContain("100 КБ");
+  });
   it("renders HTML-like content and sender labels only as plain text", () => {
     const view = createTextTransferView(document, createActions());
     const payload = '<img src=x onerror="globalThis.pwned=true"><script>alert(1)</script>';
@@ -194,6 +266,103 @@ describe("createTextTransferView", () => {
     expect(open?.parentElement).toBe(actionRow);
     expect(copy?.parentElement).toBe(actionRow);
   });
+  it("renders explicit presentation states without dispatching transfer commands", () => {
+    const callbacks = createActions();
+    const view = createTextTransferView(document, callbacks);
+    const section = document.querySelector<HTMLElement>('[data-role="text-transfer"]')!;
+
+    view.render({ kind: "inactive" });
+    expect(section.dataset.viewState).toBe("disabled");
+    view.render(activeState());
+    expect(section.dataset.viewState).toBe("empty");
+    view.render(activeState({ draft: "Готово" }));
+    expect(section.dataset.viewState).toBe("ready");
+    view.render(activeState({ draft: "Отправка", sending: true }));
+    expect(section.dataset.viewState).toBe("loading");
+    view.render(activeState({ connectionAvailable: false, draft: "Черновик" }));
+    expect(section.dataset.viewState).toBe("offline");
+    view.render(activeState({
+      error: { code: "SESSION_UNAVAILABLE", message: "Нет получателя" },
+    }));
+    expect(section.dataset.viewState).toBe("error");
+
+    view.render(activeState({ draft: "Повторный render" }));
+    view.render(activeState({ draft: "Повторный render" }));
+    expect(callbacks.onDraftChange).not.toHaveBeenCalled();
+    expect(callbacks.onSend).not.toHaveBeenCalled();
+    expect(callbacks.onRetry).not.toHaveBeenCalled();
+  });
+  it("keeps focused item actions stable when only delivery status changes", () => {
+    const view = createTextTransferView(document, createActions());
+    const sending = {
+      messageId: "stable-focus",
+      timestamp: 2_000,
+      content: "https://example.com/very/long/path?value=one-two-three",
+      contentKind: "LINK" as const,
+      direction: "BROWSER_TO_ANDROID" as const,
+      senderLabel: "Этот браузер",
+      status: "SENDING" as const,
+    };
+    view.render(activeState({ items: [sending] }));
+    const card = document.querySelector<HTMLElement>('[data-message-id="stable-focus"]')!;
+    const copy = card.querySelector<HTMLButtonElement>('[data-copy-message-id="stable-focus"]')!;
+    copy.focus();
+
+    view.render(activeState({ items: [{ ...sending, status: "DELIVERED" }] }));
+
+    expect(document.querySelector('[data-message-id="stable-focus"]')).toBe(card);
+    expect(document.activeElement).toBe(copy);
+    expect(card.querySelector(".text-card__status")?.textContent).toBe("Доставлено");
+  });
+
+  it("announces only new messages and real delivery status transitions", () => {
+    const view = createTextTransferView(document, createActions());
+    const item = {
+      messageId: "announcement-1",
+      timestamp: 2_000,
+      content: "Проверка уведомления",
+      contentKind: "TEXT" as const,
+      direction: "BROWSER_TO_ANDROID" as const,
+      senderLabel: "Этот браузер",
+      status: "SENDING" as const,
+    };
+    const announcer = document.querySelector<HTMLElement>('[data-role="text-announcer"]')!;
+
+    view.render(activeState({ items: [item] }));
+    expect(announcer.textContent).toContain("Отправляется");
+
+    announcer.textContent = "sentinel";
+    view.render(activeState({ items: [item] }));
+    expect(announcer.textContent).toBe("sentinel");
+
+    view.render(activeState({ items: [{ ...item, status: "DELIVERED" }] }));
+    expect(announcer.textContent).toContain("Доставлено");
+  });
+  it("uses one semantic order for direction, status and applicable link actions", () => {
+    const view = createTextTransferView(document, createActions());
+    view.render(activeState({ items: [{
+      messageId: "semantic-link",
+      timestamp: 2_000,
+      content: "https://example.com/path",
+      contentKind: "LINK",
+      direction: "BROWSER_TO_ANDROID",
+      senderLabel: "Этот браузер",
+      status: "FAILED",
+      retryable: true,
+    }] }));
+
+    const card = document.querySelector<HTMLElement>('[data-message-id="semantic-link"]')!;
+    const actions = card.querySelector<HTMLElement>(".text-card__actions")!;
+    expect(card.getAttribute("aria-label")).toContain("На телефон");
+    expect(card.getAttribute("aria-label")).toContain("Ошибка");
+    expect(actions.getAttribute("role")).toBe("group");
+    expect(actions.getAttribute("aria-label")).toContain("Действия");
+    expect(Array.from(actions.querySelectorAll("button"), (button) => button.textContent)).toEqual([
+      "Открыть ссылку",
+      "Копировать",
+      "Повторить",
+    ]);
+  });
 });
 
 function createActions() {
@@ -207,6 +376,7 @@ function createActions() {
 function activeState(overrides: Record<string, unknown> = {}) {
   return {
     kind: "active" as const,
+    connectionAvailable: true,
     draft: "",
     sending: false,
     items: [],

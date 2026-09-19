@@ -1,6 +1,11 @@
 package ru.hznik.devicebridge.feature.history
 
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.ui.test.SemanticsMatcher
+import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
@@ -11,6 +16,8 @@ import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.SemanticsProperties
 import org.junit.Assert.assertEquals
 import org.junit.Rule
 import org.junit.Test
@@ -136,6 +143,71 @@ class HistoryScreenTest {
         assertEquals(listOf(HistoryAction.ConfirmClear), actions)
     }
 
+    @Test
+    fun readFailureShowsRetryAndDoesNotClaimHistoryIsEmpty() {
+        val actions = mutableListOf<HistoryAction>()
+        composeRule.setContent {
+            MaterialTheme {
+                HistoryScreen(
+                    uiState = HistoryUiState(
+                        loadState = HistoryLoadState.ERROR,
+                        errorMessage = "Не удалось прочитать локальную историю.",
+                    ),
+                    onAction = actions::add,
+                )
+            }
+        }
+
+        composeRule.onNodeWithText("История временно недоступна").assertIsDisplayed()
+        composeRule.onNodeWithText("Операций пока нет").assertDoesNotExist()
+        composeRule.onNodeWithText("Повторить").performClick()
+
+        assertEquals(listOf(HistoryAction.RetryLoad), actions)
+    }
+
+    @Test
+    fun loadingTransitionsToUsefulEmptyState() {
+        var state by mutableStateOf(HistoryUiState(loadState = HistoryLoadState.LOADING))
+        composeRule.setContent {
+            MaterialTheme {
+                HistoryScreen(uiState = state, onAction = {})
+            }
+        }
+
+        composeRule.onNodeWithContentDescription("Загрузка истории").assertIsDisplayed()
+
+        composeRule.runOnIdle {
+            state = HistoryUiState(loadState = HistoryLoadState.EMPTY)
+        }
+
+        composeRule.onNodeWithText("История пока пуста").assertIsDisplayed()
+        composeRule.onNodeWithText(
+            "Здесь появятся завершённые передачи текста, ссылок и файлов.",
+        ).assertIsDisplayed()
+    }
+
+    @Test
+    fun historyRecordCardExposesButtonRole() {
+        val item = record("accessible", HistoryKind.TEXT)
+        composeRule.setContent {
+            MaterialTheme {
+                HistoryScreen(
+                    uiState = HistoryUiState(
+                        loadState = HistoryLoadState.CONTENT,
+                        records = listOf(item),
+                    ),
+                    onAction = {},
+                )
+            }
+        }
+        val button = SemanticsMatcher.expectValue(
+            SemanticsProperties.Role,
+            Role.Button,
+        )
+
+        composeRule.onNodeWithContentDescription("Открыть детали preview")
+            .assert(button)
+    }
     private fun record(id: String, kind: HistoryKind): HistoryRecord = HistoryRecord(
         id = HistoryRecordId("record-" + id),
         operationId = HistoryOperationId("operation-" + id),

@@ -19,6 +19,7 @@ enum class RawFileUploadResult {
     PrematureEof,
     Oversize,
     ChecksumMismatch,
+    InsufficientSpace,
     Failed,
 }
 
@@ -79,8 +80,12 @@ class RawFileUploadProcessor(
             return RawFileUploadResult.Completed
         } catch (cancelled: CancellationException) {
             throw cancelled
-        } catch (_: Throwable) {
-            return RawFileUploadResult.Failed
+        } catch (failure: Throwable) {
+            return if (failure.isInsufficientSpace()) {
+                RawFileUploadResult.InsufficientSpace
+            } else {
+                RawFileUploadResult.Failed
+            }
         } finally {
             withContext(kotlinx.coroutines.NonCancellable + ioDispatcher) {
                 if (!committed) runCatching { target.abort() }
@@ -92,4 +97,13 @@ class RawFileUploadProcessor(
     private fun ByteArray.toHex(): String = buildString(size * 2) {
         this@toHex.forEach { byte -> append("%02x".format(byte)) }
     }
+
+    private fun Throwable.isInsufficientSpace(): Boolean =
+        generateSequence(this) { throwable -> throwable.cause }
+            .map { throwable -> throwable.message.orEmpty().uppercase() }
+            .any { message ->
+                message.contains("ENOSPC") ||
+                    message.contains("NO SPACE LEFT") ||
+                    message.contains("INSUFFICIENT SPACE")
+            }
 }

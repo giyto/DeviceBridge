@@ -37,6 +37,9 @@ import ru.hznik.devicebridge.core.protocol.session.SessionChallengeRequest
 import ru.hznik.devicebridge.core.protocol.session.SessionChallengeResponse
 import ru.hznik.devicebridge.core.protocol.session.SessionConfirmRequest
 import ru.hznik.devicebridge.core.protocol.session.SessionConfirmResponse
+import ru.hznik.devicebridge.core.protocol.session.SessionConfirmationStatusRequest
+import ru.hznik.devicebridge.core.protocol.session.SessionConfirmationStatusResponse
+import ru.hznik.devicebridge.core.protocol.session.SessionConfirmationStatusState
 import ru.hznik.devicebridge.core.protocol.session.SessionErrorBody
 import ru.hznik.devicebridge.core.protocol.session.SessionErrorCode
 import ru.hznik.devicebridge.core.protocol.session.SessionErrorEnvelope
@@ -72,6 +75,7 @@ import ru.hznik.devicebridge.data.session.SessionEventConnection
 import ru.hznik.devicebridge.data.session.SessionEventDispatcher
 import ru.hznik.devicebridge.data.session.SessionGenerationHandle
 import ru.hznik.devicebridge.data.session.SessionConfirmationResult
+import ru.hznik.devicebridge.data.session.SessionConfirmationRecoveryResult
 import ru.hznik.devicebridge.data.session.SessionConnection
 import ru.hznik.devicebridge.data.session.SessionOutboundEvent
 import ru.hznik.devicebridge.data.session.TrustedSessionExchangeResult
@@ -322,6 +326,124 @@ fun Application.installSessionRoutes(
                     "Слишком много ожидающих запросов",
                 )
                 SessionConfirmationResult.GenerationClosed -> call.respondSessionError(
+                    HttpStatusCode.ServiceUnavailable,
+                    SessionErrorCode.SESSION_CLOSED,
+                    "Серверная сессия завершена",
+                )
+            }
+        }
+
+        post("/api/v1/session/confirmation/status") {
+            if (!call.requireJsonApiRequest(allowedHosts())) return@post
+            val body = call.receiveBoundedJson()
+            if (body == null) {
+                call.respondSessionError(
+                    HttpStatusCode.BadRequest,
+                    SessionErrorCode.INVALID_PAYLOAD,
+                    "Некорректное или слишком большое тело запроса",
+                )
+                return@post
+            }
+            val request = runCatching {
+                SessionProtocolJson.decode<SessionConfirmationStatusRequest>(body)
+            }.getOrNull()
+            if (request == null) {
+                call.respondSessionError(
+                    HttpStatusCode.BadRequest,
+                    SessionErrorCode.INVALID_PAYLOAD,
+                    "Некорректное тело запроса",
+                )
+                return@post
+            }
+            when (SessionPayloadValidator.validate(request)) {
+                SessionValidationError.UNSUPPORTED_VERSION -> {
+                    call.respondSessionError(
+                        HttpStatusCode.BadRequest,
+                        SessionErrorCode.UNSUPPORTED_VERSION,
+                        "Версия протокола не поддерживается",
+                    )
+                    return@post
+                }
+                SessionValidationError.NONE -> Unit
+                else -> {
+                    call.respondSessionError(
+                        HttpStatusCode.BadRequest,
+                        SessionErrorCode.INVALID_PAYLOAD,
+                        "Недопустимые данные подтверждения",
+                    )
+                    return@post
+                }
+            }
+            val handle = generationHandle()
+            if (handle == null) {
+                call.respondSessionError(
+                    HttpStatusCode.ServiceUnavailable,
+                    SessionErrorCode.SESSION_CLOSED,
+                    "Серверная сессия не активна",
+                )
+                return@post
+            }
+            when (
+                val result = coordinator.recoverConfirmation(
+                    handle = handle,
+                    challengeId = PairingChallengeId(request.challengeId),
+                    browserLabel = request.clientLabel,
+                    sourceIpv4 = sourceIpv4(call),
+                )
+            ) {
+                SessionConfirmationRecoveryResult.Pending -> call.respondJson(
+                    HttpStatusCode.OK,
+                    SessionProtocolJson.encode(
+                        SessionConfirmationStatusResponse(
+                            protocolVersion = SESSION_PROTOCOL_VERSION,
+                            state = SessionConfirmationStatusState.PENDING,
+                        ),
+                    ),
+                )
+                is SessionConfirmationRecoveryResult.Approved -> call.respondJson(
+                    HttpStatusCode.OK,
+                    SessionProtocolJson.encode(
+                        SessionConfirmationStatusResponse(
+                            protocolVersion = SESSION_PROTOCOL_VERSION,
+                            state = SessionConfirmationStatusState.APPROVED,
+                            sessionId = result.confirmation.sessionId.value,
+                            token = result.confirmation.token,
+                            serverTimeEpochMillis = wallClockMs(),
+                            trustedCredential = result.confirmation.trustedCredential,
+                            trustedCredentialExpiresAtEpochMillis =
+                                result.confirmation.trustedCredentialExpiresAtEpochMillis,
+                        ),
+                    ),
+                )
+                SessionConfirmationRecoveryResult.Denied -> call.respondJson(
+                    HttpStatusCode.OK,
+                    SessionProtocolJson.encode(
+                        SessionConfirmationStatusResponse(
+                            protocolVersion = SESSION_PROTOCOL_VERSION,
+                            state = SessionConfirmationStatusState.DENIED,
+                        ),
+                    ),
+                )
+                SessionConfirmationRecoveryResult.Expired -> call.respondJson(
+                    HttpStatusCode.OK,
+                    SessionProtocolJson.encode(
+                        SessionConfirmationStatusResponse(
+                            protocolVersion = SESSION_PROTOCOL_VERSION,
+                            state = SessionConfirmationStatusState.EXPIRED,
+                        ),
+                    ),
+                )
+                SessionConfirmationRecoveryResult.InvalidMetadata -> call.respondSessionError(
+                    HttpStatusCode.BadRequest,
+                    SessionErrorCode.INVALID_PAYLOAD,
+                    "Недопустимые данные подтверждения",
+                )
+                SessionConfirmationRecoveryResult.CapacityReached -> call.respondSessionError(
+                    HttpStatusCode.TooManyRequests,
+                    SessionErrorCode.CAPACITY_REACHED,
+                    "Слишком много активных сессий",
+                )
+                SessionConfirmationRecoveryResult.GenerationClosed -> call.respondSessionError(
                     HttpStatusCode.ServiceUnavailable,
                     SessionErrorCode.SESSION_CLOSED,
                     "Серверная сессия завершена",

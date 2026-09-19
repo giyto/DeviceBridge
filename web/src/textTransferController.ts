@@ -18,6 +18,18 @@ import { createProtocolMessageId } from "./protocolMessageId";
 
 const MAX_FEED_ITEMS = 100;
 
+export interface TextDraftStore {
+  read(scopeId: string): string | undefined;
+  save(scopeId: string, draft: string): void;
+  clear(scopeId: string): void;
+}
+
+const noTextDraftStore: TextDraftStore = {
+  read: () => undefined,
+  save: () => undefined,
+  clear: () => undefined,
+};
+
 export interface TextSender {
   send(
     token: string,
@@ -34,6 +46,7 @@ export interface TextTransferUiItem {
   readonly direction: TextDirection;
   readonly senderLabel: string;
   readonly status: TextTransferStatus;
+  readonly retryable?: boolean;
 }
 
 export interface TextTransferUiError {
@@ -46,6 +59,7 @@ export type TextTransferUiState =
   | Readonly<{ kind: "inactive" }>
   | Readonly<{
       kind: "active";
+      connectionAvailable: boolean;
       draft: string;
       sending: boolean;
       items: readonly TextTransferUiItem[];
@@ -55,6 +69,7 @@ export type TextTransferUiState =
 export class TextTransferController {
   private generation = 0;
   private token?: string;
+  private draftScopeId?: string;
   private abortController?: AbortController;
   private state: TextTransferUiState = { kind: "inactive" };
   private readonly retryCommands = new Map<string, TextSendCommand>();
@@ -65,40 +80,90 @@ export class TextTransferController {
     private readonly createMessageId: () => string = createProtocolMessageId,
     private readonly now: () => number = () => Date.now(),
     private readonly onUnauthorized: () => void = () => undefined,
+    private readonly draftStore: TextDraftStore = noTextDraftStore,
   ) {}
 
-  activate(token: string): void {
+  activate(token: string, draftScopeId: string = token): void {
     if (this.state.kind === "active" && this.token === token) return;
+    const retainedDraft = this.state.kind === "active"
+      ? this.state.draft
+      : this.draftStore.read(draftScopeId) ?? "";
+    const previousScopeId = this.draftScopeId;
     this.beginNewGeneration();
     this.token = token;
     this.retryCommands.clear();
+    if (previousScopeId !== undefined && previousScopeId !== draftScopeId) {
+      this.draftStore.clear(previousScopeId);
+    }
+    this.draftScopeId = draftScopeId;
+    if (retainedDraft.length > 0) this.draftStore.save(draftScopeId, retainedDraft);
     this.emit({
       kind: "active",
-      draft: "",
+      connectionAvailable: true,
+      draft: retainedDraft,
       sending: false,
       items: [],
       error: undefined,
     });
   }
 
-  deactivate(): void {
+  suspendSession(): void {
+    if (this.state.kind !== "active") return;
+    if (!this.state.connectionAvailable && this.token === undefined) return;
+    this.setConnectionAvailable(false);
     this.beginNewGeneration();
     this.token = undefined;
+  }
+
+  deactivate(): void {
+    if (this.draftScopeId !== undefined) this.draftStore.clear(this.draftScopeId);
+    this.beginNewGeneration();
+    this.token = undefined;
+    this.draftScopeId = undefined;
     this.retryCommands.clear();
     this.emit({ kind: "inactive" });
   }
 
   dispose(): void {
-    this.deactivate();
+    this.beginNewGeneration();
+    this.token = undefined;
+    this.draftScopeId = undefined;
+    this.retryCommands.clear();
+    this.emit({ kind: "inactive" });
+  }
+
+  setConnectionAvailable(available: boolean): void {
+    if (this.state.kind !== "active" || this.state.connectionAvailable === available) return;
+    if (!available) {
+      this.abortController?.abort();
+      this.abortController = undefined;
+    }
+    const items = available
+      ? this.state.items
+      : this.state.items.map((item) =>
+          item.status === "SENDING"
+            ? { ...item, status: "UNCERTAIN" as const, retryable: true }
+            : item
+        );
+    this.emit({ ...this.state, connectionAvailable: available, sending: false, items });
   }
 
   updateDraft(draft: string): void {
     if (this.state.kind !== "active") return;
     this.emit({ ...this.state, draft, error: undefined });
+    const scopeId = this.draftScopeId;
+    if (scopeId !== undefined) {
+      if (draft.length === 0) this.draftStore.clear(scopeId);
+      else this.draftStore.save(scopeId, draft);
+    }
   }
 
   sendDraft(): void {
-    if (this.state.kind !== "active" || this.state.sending) return;
+    if (
+      this.state.kind !== "active" ||
+      !this.state.connectionAvailable ||
+      this.state.sending
+    ) return;
     if (this.state.draft.trim().length === 0) return;
     const command: TextSendCommand = {
       messageId: this.createMessageId(),
@@ -110,7 +175,11 @@ export class TextTransferController {
   }
 
   retry(messageId: string): void {
-    if (this.state.kind !== "active" || this.state.sending) return;
+    if (
+      this.state.kind !== "active" ||
+      !this.state.connectionAvailable ||
+      this.state.sending
+    ) return;
     const command = this.retryCommands.get(messageId);
     if (command !== undefined) this.send(command);
   }
@@ -148,7 +217,11 @@ export class TextTransferController {
   }
 
   private send(command: TextSendCommand): void {
-    if (this.state.kind !== "active" || this.token === undefined) return;
+    if (
+      this.state.kind !== "active" ||
+      !this.state.connectionAvailable ||
+      this.token === undefined
+    ) return;
     const generation = this.generation;
     const token = this.token;
     const controller = new AbortController();
@@ -162,8 +235,11 @@ export class TextTransferController {
       })
       .catch((error: unknown) => {
         if (!this.isCurrent(generation, token) || isAbortError(error)) return;
-        if (error instanceof TextApiError && error.code === "UNAUTHORIZED") {
-          this.deactivate();
+        if (
+          error instanceof TextApiError &&
+          (error.code === "UNAUTHORIZED" || error.code === "SESSION_CLOSED")
+        ) {
+          this.suspendSession();
           this.onUnauthorized();
           return;
         }
@@ -187,6 +263,7 @@ export class TextTransferController {
       direction: "BROWSER_TO_ANDROID",
       senderLabel: "Этот браузер",
       status,
+      retryable: false,
     };
     this.emit({
       ...this.state,
@@ -201,15 +278,22 @@ export class TextTransferController {
     const previous = this.state.items.find((item) => item.messageId === command.messageId);
     if (previous === undefined) return;
     this.retryCommands.delete(command.messageId);
+    const draft = this.state.draft === command.content ? "" : this.state.draft;
+    const scopeId = this.draftScopeId;
+    if (scopeId !== undefined) {
+      if (draft.length === 0) this.draftStore.clear(scopeId);
+      else this.draftStore.save(scopeId, draft);
+    }
     this.emit({
       ...this.state,
-      draft: this.state.draft === command.content ? "" : this.state.draft,
+      draft,
       sending: false,
       items: upsertBounded(this.state.items, {
         ...previous,
         timestamp: accepted.timestamp,
         contentKind: accepted.contentKind,
         status: accepted.status,
+        retryable: false,
       }),
       error: undefined,
     });
@@ -218,12 +302,14 @@ export class TextTransferController {
   private applyFailure(command: TextSendCommand, error: unknown): void {
     if (this.state.kind !== "active") return;
     const code = error instanceof TextApiError ? error.code : "SESSION_UNAVAILABLE";
+    const retryable = code === "SESSION_UNAVAILABLE";
+    if (!retryable) this.retryCommands.delete(command.messageId);
     const message = error instanceof Error
       ? error.message
       : "Не удалось отправить текст";
     const items = this.state.items.map((item) =>
       item.messageId === command.messageId
-        ? { ...item, status: "FAILED" as const }
+        ? { ...item, status: "FAILED" as const, retryable }
         : item
     );
     this.emit({

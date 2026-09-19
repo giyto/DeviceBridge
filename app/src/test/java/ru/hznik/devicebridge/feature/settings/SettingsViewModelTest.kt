@@ -1,13 +1,18 @@
 package ru.hznik.devicebridge.feature.settings
 
+import kotlinx.coroutines.async
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.emitAll
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runCurrent
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
 import org.junit.After
@@ -67,6 +72,103 @@ class SettingsViewModelTest {
         assertEquals("Pixel 8", recreated.uiState.value.settings.deviceName)
         assertEquals("Pixel 8", recreated.uiState.value.deviceNameInput)
     }
+    @Test
+    fun settingsReadFailureIsNotShownAsDefaultsAndCanBeRetried() = runTest(dispatcher) {
+        val repository = FakeSettingsRepository().apply { failReads = true }
+        val viewModel = viewModel(repository)
+        assertEquals(SettingsLoadState.LOADING, viewModel.uiState.value.loadState)
+
+        runCurrent()
+
+        assertEquals(SettingsLoadState.ERROR, viewModel.uiState.value.loadState)
+        assertTrue(requireNotNull(viewModel.uiState.value.loadErrorMessage).isNotBlank())
+
+        repository.failReads = false
+        repository.current.value = repository.current.value.copy(deviceName = "Pixel 9")
+        viewModel.onAction(SettingsAction.RetryLoad)
+        runCurrent()
+
+        assertEquals(SettingsLoadState.CONTENT, viewModel.uiState.value.loadState)
+        assertEquals("Pixel 9", viewModel.uiState.value.settings.deviceName)
+    }
+
+    @Test
+    fun failedSaveKeepsPersistedValueAndDraftThenRetriesWithoutDuplicateWrite() =
+        runTest(dispatcher) {
+            val repository = FakeSettingsRepository().apply { failDeviceNameWrites = 1 }
+            val viewModel = viewModel(repository)
+            runCurrent()
+
+            viewModel.onAction(SettingsAction.DeviceNameChanged("  Pixel draft  "))
+            viewModel.onAction(SettingsAction.SaveDeviceName)
+            runCurrent()
+
+            assertEquals(
+                DeviceSettings.defaults().deviceName,
+                viewModel.uiState.value.settings.deviceName,
+            )
+            assertEquals("  Pixel draft  ", viewModel.uiState.value.deviceNameInput)
+            assertTrue(viewModel.uiState.value.deviceNameState.isDirty)
+            assertTrue(
+                requireNotNull(viewModel.uiState.value.deviceNameState.errorMessage).isNotBlank(),
+            )
+
+            viewModel.onAction(SettingsAction.SaveDeviceName)
+            runCurrent()
+
+            assertEquals("Pixel draft", viewModel.uiState.value.settings.deviceName)
+            assertEquals("Pixel draft", viewModel.uiState.value.deviceNameInput)
+            assertFalse(viewModel.uiState.value.deviceNameState.isDirty)
+            assertNull(viewModel.uiState.value.deviceNameState.errorMessage)
+            assertEquals(2, repository.deviceNameWriteAttempts)
+        }
+
+    @Test
+    fun revokedDestinationIsMarkedUnavailableWithoutClearingOtherState() =
+        runTest(dispatcher) {
+            val repository = FakeSettingsRepository().apply {
+                current.value = current.value.copy(
+                    deviceName = "My phone",
+                    destinationTree = DestinationTree("content://provider/tree/original"),
+                )
+            }
+            val trusted = FakeTrustedBrowserRepository()
+            val viewModel = viewModel(repository, trusted)
+            runCurrent()
+
+            viewModel.onAction(
+                SettingsAction.DestinationAvailabilityChecked(
+                    uri = "content://provider/tree/original",
+                    isAvailable = false,
+                ),
+            )
+            viewModel.onAction(SettingsAction.DestinationCancelled)
+
+            assertEquals(
+                DestinationAvailability.UNAVAILABLE,
+                viewModel.uiState.value.destinationAvailability,
+            )
+            assertEquals("My phone", viewModel.uiState.value.settings.deviceName)
+            assertEquals(
+                "content://provider/tree/original",
+                viewModel.uiState.value.settings.destinationTree?.value,
+            )
+            assertEquals(1, viewModel.uiState.value.trustedBrowsers.size)
+
+            viewModel.onAction(
+                SettingsAction.DestinationSelected("content://provider/tree/replacement"),
+            )
+            runCurrent()
+
+            assertEquals(
+                DestinationAvailability.AVAILABLE,
+                viewModel.uiState.value.destinationAvailability,
+            )
+            assertEquals(
+                "content://provider/tree/replacement",
+                viewModel.uiState.value.settings.destinationTree?.value,
+            )
+        }
 
     @Test
     fun eachFieldHasIndependentSavingAndErrorState() = runTest(dispatcher) {
@@ -137,6 +239,23 @@ class SettingsViewModelTest {
         assertTrue(viewModel.uiState.value.revokingTrustedBrowserIds.isEmpty())
     }
 
+    @Test
+    fun destinationPickerEffectIsDeliveredOnceWithoutReplay() = runTest(dispatcher) {
+        val viewModel = viewModel(FakeSettingsRepository())
+        runCurrent()
+        val firstEffect = async { viewModel.effects.first() }
+        runCurrent()
+
+        viewModel.onAction(SettingsAction.ChooseDestination)
+
+        assertEquals(SettingsEffect.ChooseDestination, firstEffect.await())
+        assertNull(
+            withTimeoutOrNull(100) {
+                viewModel.effects.first()
+            },
+        )
+    }
+
     private fun viewModel(
         repository: SettingsRepository,
         trustedRepository: FakeTrustedBrowserRepository = FakeTrustedBrowserRepository(),
@@ -202,9 +321,20 @@ class SettingsViewModelTest {
 
     private class FakeSettingsRepository : SettingsRepository {
         val current = MutableStateFlow(DeviceSettings.defaults())
-        override val settings: Flow<DeviceSettings> = current
+        var failReads = false
+        var failDeviceNameWrites = 0
+        var deviceNameWriteAttempts = 0
+        override val settings: Flow<DeviceSettings> = flow {
+            if (failReads) throw java.io.IOException("settings unavailable")
+            emitAll(current)
+        }
 
         override suspend fun updateDeviceName(value: String): SettingsUpdateResult {
+            deviceNameWriteAttempts += 1
+            if (failDeviceNameWrites > 0) {
+                failDeviceNameWrites -= 1
+                throw java.io.IOException("write unavailable")
+            }
             val normalized = value.trim()
             if (normalized.isBlank() || normalized.codePointCount(0, normalized.length) > 40) {
                 return SettingsUpdateResult.Invalid(SettingsValidationError.DEVICE_NAME)

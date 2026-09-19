@@ -88,6 +88,16 @@ class HistoryViewModelTest {
 
         assertEquals(HistoryLoadState.ERROR, viewModel.uiState.value.loadState)
         assertTrue(requireNotNull(viewModel.uiState.value.errorMessage).isNotBlank())
+
+        repository.failReads = false
+        repository.records.value = listOf(record())
+        viewModel.onAction(HistoryAction.RetryLoad)
+        assertEquals(HistoryLoadState.ERROR, viewModel.uiState.value.loadState)
+
+        runCurrent()
+
+        assertEquals(HistoryLoadState.CONTENT, viewModel.uiState.value.loadState)
+        assertEquals(listOf("record-1"), viewModel.uiState.value.records.map { it.id.value })
     }
 
     @Test
@@ -146,7 +156,7 @@ class HistoryViewModelTest {
     )
 
     private class FakeHistoryRepository(
-        private val failReads: Boolean = false,
+        var failReads: Boolean = false,
         private val deleteSucceeds: Boolean = true,
     ) : HistoryRepository {
         val records = MutableStateFlow<List<HistoryRecord>>(emptyList())

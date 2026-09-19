@@ -1,5 +1,6 @@
 package ru.hznik.devicebridge.feature.file
 
+import kotlin.math.roundToInt
 import ru.hznik.devicebridge.domain.file.FileDestinationId
 import ru.hznik.devicebridge.domain.file.FileDraftId
 import ru.hznik.devicebridge.domain.file.FileTransferDirection
@@ -49,6 +50,14 @@ data class FileTransferItemUiState(
             (bytesTransferred.toDouble() / sizeBytes.toDouble()).toFloat().coerceIn(0f, 1f)
         }
     val canCancel: Boolean get() = !phase.isTerminal
+    val hasActiveProgress: Boolean
+        get() = phase == FileTransferPhase.CONNECTING ||
+            phase == FileTransferPhase.TRANSFERRING ||
+            phase == FileTransferPhase.VERIFYING
+    val hasDeterminateProgress: Boolean
+        get() = phase == FileTransferPhase.TRANSFERRING && sizeBytes > 0
+    val progressPercent: Int?
+        get() = progress.takeIf { hasDeterminateProgress }?.times(100)?.roundToInt()
     val canRetry: Boolean get() = phase == FileTransferPhase.FAILED || phase == FileTransferPhase.CANCELLED
     val canOpen: Boolean get() = phase == FileTransferPhase.COMPLETED && direction == FileTransferDirection.BROWSER_TO_ANDROID
     val awaitsApproval: Boolean get() = direction == FileTransferDirection.BROWSER_TO_ANDROID && phase == FileTransferPhase.CONNECTING
@@ -60,9 +69,17 @@ data class FileTransferItemUiState(
         FileTransferFailure.SessionUnavailable ->
             "Браузер отключён. Подключите его снова и повторите передачу."
         FileTransferFailure.StorageUnavailable ->
-            "Папка недоступна или на устройстве недостаточно места."
+            "Выбранная папка недоступна. Выберите другую папку."
+        FileTransferFailure.InsufficientSpace ->
+            "На устройстве недостаточно свободного места."
         FileTransferFailure.CapacityReached ->
             "Очередь передач заполнена. Завершите или отмените другие файлы."
+        FileTransferFailure.FileLimitExceeded ->
+            "Файл превышает допустимый размер. Выберите другой файл."
+        FileTransferFailure.SourceUnavailable ->
+            "Исходный файл больше недоступен или был изменён. Выберите его заново."
+        FileTransferFailure.ProtocolMismatch ->
+            "Версия протокола не поддерживается. Обновите DeviceBridge."
         null -> null
     }
 }

@@ -86,6 +86,18 @@ describe("FileApiClient", () => {
     expect(error).toMatchObject({ status: 401, code: "UNAUTHORIZED" });
     expect((error as Error).message).not.toContain("internal detail");
   });
+
+  it.each([
+    "DESTINATION_UNAVAILABLE",
+    "INSUFFICIENT_SPACE",
+    "SOURCE_UNAVAILABLE",
+  ] as const)("parses the distinct %s file failure", async (code) => {
+    const client = new FileApiClient(vi.fn<typeof fetch>().mockResolvedValue(
+      jsonResponse({ error: { code } }, 409),
+    ));
+    const error = await client.offer("token", offer).catch((caught: unknown) => caught);
+    expect(error).toMatchObject({ status: 409, code });
+  });
 });
 
 function snapshot(status = "CONNECTING") {

@@ -4,6 +4,8 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+import ru.hznik.devicebridge.core.protocol.error.ProtocolErrorDetails
+import ru.hznik.devicebridge.core.protocol.error.toFailureCode
 
 const val SESSION_PROTOCOL_VERSION = 1
 const val MAX_SESSION_JSON_BYTES = 4 * 1024
@@ -35,6 +37,31 @@ data class SessionConfirmRequest(
     val clientLabel: String,
 )
 
+@Serializable
+data class SessionConfirmationStatusRequest(
+    val protocolVersion: Int,
+    val challengeId: String,
+    val clientLabel: String,
+)
+
+@Serializable
+enum class SessionConfirmationStatusState {
+    PENDING,
+    APPROVED,
+    DENIED,
+    EXPIRED,
+}
+
+@Serializable
+data class SessionConfirmationStatusResponse(
+    val protocolVersion: Int,
+    val state: SessionConfirmationStatusState,
+    val sessionId: String? = null,
+    val token: String? = null,
+    val serverTimeEpochMillis: Long? = null,
+    val trustedCredential: String? = null,
+    val trustedCredentialExpiresAtEpochMillis: Long? = null,
+)
 @Serializable
 data class SessionConfirmResponse(
     val protocolVersion: Int,
@@ -71,6 +98,8 @@ data class SessionErrorBody(
     val message: String,
     val retryAfterSeconds: Int? = null,
     val attemptsRemaining: Int? = null,
+    val errorCode: String = code.toFailureCode().wireValue,
+    val details: ProtocolErrorDetails? = null,
 )
 
 @Serializable
@@ -111,6 +140,15 @@ enum class SessionValidationError {
 object SessionPayloadValidator {
     fun validate(request: SessionChallengeRequest): SessionValidationError = when {
         request.protocolVersion != SESSION_PROTOCOL_VERSION -> SessionValidationError.UNSUPPORTED_VERSION
+        !request.clientLabel.isValidBoundedText(MAX_CLIENT_LABEL_LENGTH) ->
+            SessionValidationError.INVALID_CLIENT_LABEL
+        else -> SessionValidationError.NONE
+    }
+
+    fun validate(request: SessionConfirmationStatusRequest): SessionValidationError = when {
+        request.protocolVersion != SESSION_PROTOCOL_VERSION -> SessionValidationError.UNSUPPORTED_VERSION
+        !request.challengeId.isValidOpaqueId(MAX_CHALLENGE_ID_LENGTH) ->
+            SessionValidationError.INVALID_CHALLENGE_ID
         !request.clientLabel.isValidBoundedText(MAX_CLIENT_LABEL_LENGTH) ->
             SessionValidationError.INVALID_CLIENT_LABEL
         else -> SessionValidationError.NONE

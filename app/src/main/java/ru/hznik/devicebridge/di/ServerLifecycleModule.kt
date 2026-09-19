@@ -140,12 +140,14 @@ abstract class ServerLifecycleModule {
         @Singleton
         fun provideFileTransferCoordinator(
             browserSessions: BrowserSessionCoordinator,
+            retrySourceValidator: ru.hznik.devicebridge.data.file.AndroidFileRetrySourceValidator,
             wifiLock: FileTransferWifiLock,
             historyRecorder: ru.hznik.devicebridge.data.file.FileTerminalHistoryRecorder,
         ): FileTransferCoordinator = FileTransferCoordinator(
             browserSessionState = { browserSessions.state.value },
             wifiLock = wifiLock,
             historyRecorder = historyRecorder,
+            retrySourceValidator = retrySourceValidator,
         )
 
         @Provides

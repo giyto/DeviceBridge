@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   TextTransferController,
+  type TextDraftStore,
   type TextSender,
   type TextTransferUiState,
 } from "../src/textTransferController";
@@ -65,11 +66,27 @@ describe("TextTransferController", () => {
     );
   });
 
+  it("keeps the draft and blocks sending while the session reconnects", () => {
+    const api = fakeSender();
+    const fixture = createFixture(api);
+    fixture.controller.activate("token");
+    fixture.controller.updateDraft("Сохранённый черновик");
+
+    fixture.controller.setConnectionAvailable(false);
+    fixture.controller.sendDraft();
+
+    expect(api.send).not.toHaveBeenCalled();
+    expect(fixture.states.at(-1)).toMatchObject({
+      kind: "active",
+      connectionAvailable: false,
+      draft: "Сохранённый черновик",
+    });
+  });
   it("keeps a failed item and retries the same idempotency command", async () => {
     const api = fakeSender();
     api.send = vi.fn()
       .mockRejectedValueOnce(
-        new TextApiError(409, "MESSAGE_CONFLICT", "Конфликт messageId", "browser-1"),
+        new TextApiError(503, "SESSION_UNAVAILABLE", "Получатель недоступен", "browser-1"),
       )
       .mockResolvedValueOnce(accepted("browser-1"));
     const fixture = createFixture(api);
@@ -81,7 +98,7 @@ describe("TextTransferController", () => {
       expect(fixture.states.at(-1)).toMatchObject({
         kind: "active",
         sending: false,
-        error: { code: "MESSAGE_CONFLICT" },
+        error: { code: "SESSION_UNAVAILABLE" },
         items: [{ messageId: "browser-1", status: "FAILED" }],
       }),
     );
@@ -99,6 +116,24 @@ describe("TextTransferController", () => {
     expect(api.send.mock.calls[1]?.[1]).toEqual(api.send.mock.calls[0]?.[1]);
   });
 
+  it("does not retry an unchanged payload for a terminal validation failure", async () => {
+    const api = fakeSender();
+    api.send = vi.fn().mockRejectedValue(
+      new TextApiError(413, "CONTENT_TOO_LARGE", "Текст превышает лимит", "browser-1"),
+    );
+    const fixture = createFixture(api);
+    fixture.controller.activate("token");
+    fixture.controller.updateDraft("Слишком большой текст");
+    fixture.controller.sendDraft();
+    await vi.waitFor(() => expect(fixture.states.at(-1)).toMatchObject({
+      error: { code: "CONTENT_TOO_LARGE" },
+      items: [{ messageId: "browser-1", status: "FAILED", retryable: false }],
+    }));
+
+    fixture.controller.retry("browser-1");
+
+    expect(api.send).toHaveBeenCalledOnce();
+  });
   it("merges snapshot and live events without duplicates", () => {
     const fixture = createFixture();
     fixture.controller.activate("token");
@@ -132,7 +167,116 @@ describe("TextTransferController", () => {
     });
   });
 
-  it("clears draft on session loss and deactivates on 401", async () => {
+  it("marks an in-flight operation uncertain on disconnect and retries the same messageId", async () => {
+    const api = fakeSender();
+    api.send = vi.fn()
+      .mockImplementationOnce((_token: string, _command: unknown, signal?: AbortSignal) =>
+        new Promise<TextAccepted>((_resolve, reject) => {
+          signal?.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError")));
+        })
+      )
+      .mockResolvedValueOnce(accepted("browser-1"));
+    const fixture = createFixture(api);
+    fixture.controller.activate("token");
+    fixture.controller.updateDraft("Не потерять");
+    fixture.controller.sendDraft();
+    expect(fixture.states.at(-1)).toMatchObject({
+      kind: "active",
+      draft: "Не потерять",
+      items: [{ messageId: "browser-1", status: "SENDING" }],
+    });
+
+    fixture.controller.setConnectionAvailable(false);
+    expect(fixture.states.at(-1)).toMatchObject({
+      kind: "active",
+      connectionAvailable: false,
+      draft: "Не потерять",
+      items: [{ messageId: "browser-1", status: "UNCERTAIN" }],
+    });
+
+    fixture.controller.setConnectionAvailable(true);
+    fixture.controller.retry("browser-1");
+    await vi.waitFor(() => expect(fixture.states.at(-1)).toMatchObject({
+      items: [{ messageId: "browser-1", status: "DELIVERED" }],
+    }));
+    expect(api.send.mock.calls.map((call) => call[1].messageId))
+      .toEqual(["browser-1", "browser-1"]);
+  });
+
+  it("creates a new operation when the failed draft is edited and sent", async () => {
+    const api = fakeSender();
+    api.send = vi.fn()
+      .mockRejectedValueOnce(new Error("network"))
+      .mockImplementationOnce(async (_token: string, command: { messageId: string }) =>
+        accepted(command.messageId)
+      );
+    const fixture = createFixture(api);
+    fixture.controller.activate("token");
+    fixture.controller.updateDraft("Первый вариант");
+    fixture.controller.sendDraft();
+    await vi.waitFor(() => expect(fixture.states.at(-1)).toMatchObject({
+      items: [{ messageId: "browser-1", status: "FAILED" }],
+    }));
+
+    fixture.controller.updateDraft("Изменённый вариант");
+    fixture.controller.sendDraft();
+    await vi.waitFor(() => expect(api.send).toHaveBeenCalledTimes(2));
+
+    expect(api.send.mock.calls.map((call) => call[1].messageId))
+      .toEqual(["browser-1", "browser-2"]);
+  });
+
+  it("restores a draft after reload only for the same browser session scope", async () => {
+    const draftStore = new FakeDraftStore();
+    const firstStates: TextTransferUiState[] = [];
+    const first = new TextTransferController(
+      fakeSender(),
+      (state) => firstStates.push(state),
+      () => "browser-1",
+      () => 1_000,
+      vi.fn(),
+      draftStore,
+    );
+    first.activate("token-1", "session-1");
+    first.updateDraft("Черновик после reload");
+    first.dispose();
+
+    const restoredStates: TextTransferUiState[] = [];
+    const restored = new TextTransferController(
+      fakeSender(),
+      (state) => restoredStates.push(state),
+      () => "browser-2",
+      () => 2_000,
+      vi.fn(),
+      draftStore,
+    );
+    restored.activate("token-2", "session-1");
+    expect(restoredStates.at(-1)).toMatchObject({
+      kind: "active",
+      draft: "Черновик после reload",
+    });
+
+    restored.updateDraft("");
+    expect(draftStore.read("session-1")).toBeUndefined();
+    restored.updateDraft("Доставить и очистить");
+    restored.sendDraft();
+    await vi.waitFor(() => {
+      expect(draftStore.read("session-1")).toBeUndefined();
+    });
+
+    restored.deactivate();
+    const another = new TextTransferController(
+      fakeSender(),
+      () => undefined,
+      () => "browser-3",
+      () => 3_000,
+      vi.fn(),
+      draftStore,
+    );
+    another.activate("token-3", "session-2");
+    expect(draftStore.read("session-2")).toBeUndefined();
+  });
+  it("preserves draft on unexpected 401 and clears it on explicit deactivation", async () => {
     const unauthorized = vi.fn();
     const api = fakeSender();
     api.send = vi.fn().mockRejectedValue(
@@ -144,18 +288,30 @@ describe("TextTransferController", () => {
     fixture.controller.sendDraft();
 
     await vi.waitFor(() =>
-      expect(fixture.states.at(-1)).toEqual({ kind: "inactive" }),
+      expect(fixture.states.at(-1)).toMatchObject({
+        kind: "active",
+        connectionAvailable: false,
+        draft: "секретный черновик",
+      }),
     );
     expect(unauthorized).toHaveBeenCalledOnce();
 
-    fixture.controller.activate("new-token");
-    fixture.controller.updateDraft("ещё черновик");
     fixture.controller.deactivate();
     expect(fixture.states.at(-1)).toEqual({ kind: "inactive" });
     expect(JSON.stringify(fixture.states.at(-1))).not.toContain("черновик");
   });
 });
 
+class FakeDraftStore implements TextDraftStore {
+  private value?: { scopeId: string; draft: string };
+  read(scopeId: string): string | undefined {
+    return this.value?.scopeId === scopeId ? this.value.draft : undefined;
+  }
+  save(scopeId: string, draft: string): void { this.value = { scopeId, draft }; }
+  clear(scopeId: string): void {
+    if (this.value?.scopeId === scopeId) this.value = undefined;
+  }
+}
 function createFixture(
   api = fakeSender(),
   onUnauthorized = vi.fn(),

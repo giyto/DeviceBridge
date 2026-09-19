@@ -5,6 +5,7 @@ import ru.hznik.devicebridge.domain.session.PairingRequestId
 import ru.hznik.devicebridge.domain.file.FileTransferDirection
 import ru.hznik.devicebridge.domain.file.FileTransferId
 import ru.hznik.devicebridge.domain.file.FileTransferPhase
+import ru.hznik.devicebridge.domain.error.UserFacingFailure
 
 enum class HomeServerStatus {
     Stopped,
@@ -26,6 +27,7 @@ data class ServerSessionUiState(
     val localAddress: String? = null,
     val uptimeSeconds: Long = 0,
     val errorMessage: String? = null,
+    val failure: UserFacingFailure? = null,
     val commandPending: Boolean = false,
     val isPermissionExplanationVisible: Boolean = false,
     val openSettingsForPermission: Boolean = false,
@@ -85,8 +87,11 @@ data class ActiveBrowserUiState(
 
 sealed interface HomeAction {
     data object StartClicked : HomeAction
+    data object StartAgainClicked : HomeAction
     data object StopClicked : HomeAction
     data object RetryPermissionClicked : HomeAction
+    data object RequestPermissionClicked : HomeAction
+    data object OpenSettingsClicked : HomeAction
     data class PermissionsResolved(
         val localNetworkCanAskAgain: Boolean,
     ) : HomeAction

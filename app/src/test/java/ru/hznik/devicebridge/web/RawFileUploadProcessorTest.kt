@@ -2,6 +2,8 @@ package ru.hznik.devicebridge.web
 
 import io.ktor.utils.io.ByteReadChannel
 import java.io.ByteArrayOutputStream
+import java.io.IOException
+import java.io.OutputStream
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
@@ -67,6 +69,32 @@ class RawFileUploadProcessorTest {
             assertEquals(0, target.commits)
             assertEquals(1, target.aborts)
         }
+    }
+
+    @Test
+    fun classifiesNoSpaceWriteFailureAndAbortsPartialOutput() = runTest {
+        val target = NoSpaceTarget()
+        val result = RawFileUploadProcessor(bufferSize = 2).receive(
+            channel = ByteReadChannel("hello".encodeToByteArray()),
+            metadata = metadata(5, sha256("hello".encodeToByteArray())),
+            declaredContentLength = 5,
+            target = target,
+        )
+
+        assertEquals(RawFileUploadResult.InsufficientSpace, result)
+        assertEquals(1, target.aborts)
+    }
+
+    private class NoSpaceTarget : FileUploadTarget {
+        var aborts = 0
+        override fun outputStream() = object : OutputStream() {
+            override fun write(value: Int) {
+                throw IOException("ENOSPC: no space left on device")
+            }
+        }
+        override suspend fun commit() = Unit
+        override suspend fun abort() { aborts += 1 }
+        override suspend fun close() = Unit
     }
 
     private class FakeTarget : FileUploadTarget {

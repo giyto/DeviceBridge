@@ -6,6 +6,7 @@ import {
   type SessionTokenStore,
   type TrustedCredentialStore,
   type SessionUiState,
+  type SessionUiEffect,
 } from "../src/sessionController";
 import { SessionApiError } from "../src/sessionApiClient";
 import type { WebManifest } from "../src/webManifestClient";
@@ -37,6 +38,10 @@ describe("SessionController", () => {
     expect(fixture.fileSession.effectiveFileLimitBytes).toBe(1_073_741_824);
     expect(fixture.events.connectedWith).toBe("secret-token");
     expect(fixture.trustedStore.saved).toBeUndefined();
+    expect(fixture.effects).toEqual([{
+      id: "clear-pairing-form:session-1",
+      kind: "clearPairingForm",
+    }]);
   });
 
   it("blocks conflicting submissions and maps rate-limit, denied and expired errors", async () => {
@@ -91,6 +96,43 @@ describe("SessionController", () => {
     expect(rejectedStore.saved).toBeUndefined();
   });
 
+  it("recovers an uncertain pairing result without resubmitting the code", async () => {
+    const api = fakeApi();
+    api.confirm = vi.fn().mockRejectedValueOnce(new TypeError("connection lost"));
+    api.recoverConfirmation = vi.fn()
+      .mockResolvedValueOnce({ protocolVersion: 1, state: "PENDING" })
+      .mockResolvedValueOnce({
+        protocolVersion: 1,
+        state: "APPROVED",
+        sessionId: "session-recovered",
+        token: "recovered-token",
+        serverTimeEpochMillis: 12_000,
+      });
+    const fixture = createFixture(api);
+    fixture.controller.start();
+    await vi.waitFor(() => expect(fixture.states.at(-1)?.kind).toBe("ready"));
+
+    fixture.controller.submitCode("123456");
+    await vi.waitFor(() => expect(fixture.states.at(-1)?.kind).toBe("uncertain"));
+
+    fixture.controller.retry();
+    await vi.waitFor(() => expect(api.recoverConfirmation).toHaveBeenCalledOnce());
+    expect(fixture.states.at(-1)?.kind).toBe("uncertain");
+
+    fixture.controller.retry();
+    await vi.waitFor(() => expect(fixture.states.at(-1)?.kind).toBe("connected"));
+
+    expect(api.confirm).toHaveBeenCalledOnce();
+    expect(api.createChallenge).toHaveBeenCalledOnce();
+    expect(api.recoverConfirmation).toHaveBeenCalledTimes(2);
+    expect(api.recoverConfirmation).toHaveBeenCalledWith(
+      "challenge-1",
+      "Edge on Windows",
+      expect.any(AbortSignal),
+    );
+    expect(fixture.store.saved).toBe("recovered-token");
+  });
+
   it("clears the token when protocol is incompatible or event channel loses auth", async () => {
     const incompatibleStore = new FakeTokenStore("old-token");
     const incompatible = createFixture(
@@ -137,6 +179,61 @@ describe("SessionController", () => {
     expect(connected.events.connectedWith).toBe("token");
   });
 
+
+  it("reports bounded event reconnect then revalidates the authoritative session", async () => {
+    const api = fakeApi();
+    const store = new FakeTokenStore("token");
+    const fixture = createFixture(api, store);
+    fixture.controller.start();
+    await vi.waitFor(() => expect(fixture.states.at(-1)?.kind).toBe("connected"));
+
+    fixture.events.reconnect(1, 1_000);
+    expect(fixture.states.at(-1)).toMatchObject({
+      kind: "reconnecting",
+      attempt: 1,
+      nextRetryInMs: 1_000,
+    });
+    expect(store.saved).toBe("token");
+    expect(api.confirm).not.toHaveBeenCalled();
+    expect(api.createChallenge).not.toHaveBeenCalled();
+    expect(fixture.textSession.connectionAvailable).toBe(false);
+    expect(fixture.fileSession.connectionAvailable).toBe(false);
+
+    fixture.events.authenticate();
+    await vi.waitFor(() => expect(api.status).toHaveBeenCalledTimes(2));
+    expect(fixture.states.at(-1)?.kind).toBe("connected");
+    expect(api.confirm).not.toHaveBeenCalled();
+    expect(api.createChallenge).not.toHaveBeenCalled();
+    expect(fixture.textSession.connectionAvailable).toBe(true);
+    expect(fixture.fileSession.connectionAvailable).toBe(true);
+  });
+
+  it("stops after the event reconnect budget is exhausted without deleting credentials", async () => {
+    const api = fakeApi();
+    const store = new FakeTokenStore("token");
+    const trusted = new FakeTrustedStore({
+      credential: "trusted-token",
+      expiresAtEpochMillis: 99_000,
+    });
+    const fixture = createFixture(
+      api,
+      store,
+      { load: vi.fn().mockResolvedValue(manifest) },
+      new FakeTextSession(),
+      new FakeFileSession(),
+      trusted,
+    );
+    fixture.controller.start();
+    await vi.waitFor(() => expect(fixture.states.at(-1)?.kind).toBe("connected"));
+
+    fixture.events.lose("reconnect_exhausted");
+
+    expect(fixture.states.at(-1)?.kind).toBe("needsUserAction");
+    expect(store.saved).toBe("token");
+    expect(trusted.saved?.credential).toBe("trusted-token");
+    expect(api.status).toHaveBeenCalledOnce();
+    expect(api.createChallenge).not.toHaveBeenCalled();
+  });
   it("activates text only for a connected session and routes socket text events", async () => {
     const text = new FakeTextSession();
     const fixture = createFixture(
@@ -161,6 +258,7 @@ describe("SessionController", () => {
     expect(fixture.states.at(-1)?.kind).toBe("sessionLost");
     expect(fixture.store.saved).toBeUndefined();
     expect(text.activeToken).toBeUndefined();
+    expect(text.suspendCount).toBe(1);
   });
 
   it("uses bounded offline retries and lets the user start a fresh cycle", async () => {
@@ -296,6 +394,7 @@ function createFixture(
   trustedStore = new FakeTrustedStore(),
 ) {
   const states: SessionUiState[] = [];
+  const effects: SessionUiEffect[] = [];
   const events = new FakeEventChannel();
   const controller = new SessionController(
     loader,
@@ -303,12 +402,13 @@ function createFixture(
     store,
     events,
     (state) => states.push(state),
+    (effect) => effects.push(effect),
     "Edge on Windows",
     textSession,
     fileSession,
     trustedStore,
   );
-  return { controller, states, api, store, events, textSession, fileSession, trustedStore };
+  return { controller, states, effects, api, store, events, textSession, fileSession, trustedStore };
 }
 
 function fakeApi(): SessionApi {
@@ -325,6 +425,10 @@ function fakeApi(): SessionApi {
       sessionId: "session-1",
       token: "secret-token",
       serverTimeEpochMillis: 11_000,
+    }),
+    recoverConfirmation: vi.fn().mockResolvedValue({
+      protocolVersion: 1,
+      state: "PENDING",
     }),
     exchangeTrusted: vi.fn().mockResolvedValue({
       protocolVersion: 1,
@@ -367,7 +471,11 @@ class FakeEventChannel implements SessionEventChannel {
     this.callbacks = callbacks;
   }
   disconnect(): void { this.connectedWith = undefined; }
-  lose(): void { this.callbacks?.onSessionLost(); }
+  lose(reason: "authorization" | "reconnect_exhausted" = "authorization"): void {
+    this.callbacks?.onSessionLost(reason);
+  }
+  reconnect(attempt: number, delayMs: number): void { this.callbacks?.onReconnecting?.(attempt, delayMs); }
+  authenticate(): void { this.callbacks?.onAuthenticated?.(); }
   receiveText(event: TextReceivedEvent): void { this.callbacks?.onTextReceived?.(event); }
   receiveSnapshot(event: TextSnapshotEvent): void { this.callbacks?.onTextSnapshot?.(event); }
   receiveTextError(event: TextErrorEvent): void { this.callbacks?.onTextError?.(event); }
@@ -375,11 +483,25 @@ class FakeEventChannel implements SessionEventChannel {
 
 class FakeTextSession {
   activeToken?: string;
+  connectionAvailable = true;
+  suspendCount = 0;
+  disposeCount = 0;
   readonly received: TextReceivedEvent[] = [];
   readonly snapshots: TextSnapshotEvent[] = [];
   readonly errors: TextErrorEvent[] = [];
   activate(token: string): void { this.activeToken = token; }
   deactivate(): void { this.activeToken = undefined; }
+  setConnectionAvailable(available: boolean): void { this.connectionAvailable = available; }
+  suspendSession(): void {
+    if (this.activeToken === undefined) return;
+    this.activeToken = undefined;
+    this.connectionAvailable = false;
+    this.suspendCount += 1;
+  }
+  dispose(): void {
+    this.activeToken = undefined;
+    this.disposeCount += 1;
+  }
   receive(event: TextReceivedEvent): void { this.received.push(event); }
   applySnapshot(event: TextSnapshotEvent): void { this.snapshots.push(event); }
   receiveError(event: TextErrorEvent): void { this.errors.push(event); }
@@ -387,12 +509,14 @@ class FakeTextSession {
 
 class FakeFileSession {
   activeToken?: string;
+  connectionAvailable = true;
   effectiveFileLimitBytes?: number;
   activate(token: string, effectiveFileLimitBytes?: number): void {
     this.activeToken = token;
     this.effectiveFileLimitBytes = effectiveFileLimitBytes;
   }
   deactivate(): void { this.activeToken = undefined; }
+  setConnectionAvailable(available: boolean): void { this.connectionAvailable = available; }
   receiveOffer(): void {}
   receiveProgress(): void {}
   applySnapshot(): void {}

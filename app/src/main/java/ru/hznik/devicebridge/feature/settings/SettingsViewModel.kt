@@ -4,9 +4,15 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.launch
 import ru.hznik.devicebridge.domain.file.HARD_MAX_FILE_BYTES
 import ru.hznik.devicebridge.domain.settings.DestinationTree
@@ -25,8 +31,9 @@ import ru.hznik.devicebridge.domain.trust.TrustedBrowserId
 private const val BYTES_PER_MIB = 1024L * 1024
 
 @HiltViewModel
+@OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
 class SettingsViewModel @Inject constructor(
-    observeSettings: ObserveSettingsUseCase,
+    private val observeSettings: ObserveSettingsUseCase,
     private val updateDeviceName: UpdateDeviceNameUseCase,
     private val updateRetentionDays: UpdateRetentionDaysUseCase,
     private val updateDestinationTree: UpdateDestinationTreeUseCase,
@@ -35,25 +42,30 @@ class SettingsViewModel @Inject constructor(
     private val revokeTrustedBrowser: RevokeTrustedBrowserUseCase,
     private val revokeAllTrustedBrowsers: RevokeAllTrustedBrowsersUseCase,
 ) : ViewModel() {
+    private sealed interface LoadResult {
+        data object Loading : LoadResult
+        data class Loaded(val settings: ru.hznik.devicebridge.domain.settings.DeviceSettings) :
+            LoadResult
+        data object Failed : LoadResult
+    }
     private val mutableUiState = MutableStateFlow(SettingsUiState())
-    private val mutableEffects = MutableStateFlow<SettingsEffect?>(null)
+    private val effectChannel = Channel<SettingsEffect>(Channel.BUFFERED)
     val uiState: StateFlow<SettingsUiState> = mutableUiState
-    val effects: StateFlow<SettingsEffect?> = mutableEffects
+    private val settingsReloadRevision = MutableStateFlow(0)
+    val effects = effectChannel.receiveAsFlow()
 
     init {
         viewModelScope.launch {
-            observeSettings().collect { settings ->
-                mutableUiState.update { current ->
-                    current.copy(
-                        settings = settings,
-                        isLoading = false,
-                        deviceNameInput = settings.deviceName,
-                        retentionInput = settings.retentionDays.toString(),
-                        fileLimitMiBInput =
-                            (settings.effectiveFileLimitBytes / BYTES_PER_MIB).toString(),
-                    )
+            settingsReloadRevision
+                .flatMapLatest {
+                    observeSettings()
+                        .map<ru.hznik.devicebridge.domain.settings.DeviceSettings, LoadResult>(
+                            LoadResult::Loaded,
+                        )
+                        .onStart { emit(LoadResult.Loading) }
+                        .catch { emit(LoadResult.Failed) }
                 }
-            }
+                .collect(::applyLoadResult)
         }
         viewModelScope.launch {
             observeTrustedBrowsers().collect { browsers ->
@@ -73,71 +85,138 @@ class SettingsViewModel @Inject constructor(
         }
     }
 
+    private fun applyLoadResult(result: LoadResult) {
+        mutableUiState.update { current ->
+            when (result) {
+                LoadResult.Loading -> current.copy(
+                    loadState = SettingsLoadState.LOADING,
+                    loadErrorMessage = null,
+                )
+                is LoadResult.Loaded -> {
+                    val settings = result.settings
+                    val destinationAvailability = when {
+                        settings.destinationTree == null -> DestinationAvailability.NONE
+                        current.settings.destinationTree == settings.destinationTree &&
+                            current.destinationAvailability != DestinationAvailability.NONE ->
+                            current.destinationAvailability
+                        else -> DestinationAvailability.CHECKING
+                    }
+                    current.copy(
+                        settings = settings,
+                        loadState = SettingsLoadState.CONTENT,
+                        loadErrorMessage = null,
+                        deviceNameInput = if (current.deviceNameState.isDirty) {
+                            current.deviceNameInput
+                        } else {
+                            settings.deviceName
+                        },
+                        retentionInput = if (current.retentionState.isDirty) {
+                            current.retentionInput
+                        } else {
+                            settings.retentionDays.toString()
+                        },
+                        fileLimitMiBInput = if (current.fileLimitState.isDirty) {
+                            current.fileLimitMiBInput
+                        } else {
+                            (settings.effectiveFileLimitBytes / BYTES_PER_MIB).toString()
+                        },
+                        destinationAvailability = destinationAvailability,
+                    )
+                }
+                LoadResult.Failed -> current.copy(
+                    loadState = SettingsLoadState.ERROR,
+                    loadErrorMessage = "Не удалось прочитать локальные настройки.",
+                )
+            }
+        }
+    }
+
     fun onAction(action: SettingsAction) {
         when (action) {
             is SettingsAction.DeviceNameChanged -> mutableUiState.update {
                 it.copy(
                     deviceNameInput = action.value,
-                    deviceNameState = it.deviceNameState.copy(errorMessage = null),
+                    deviceNameState = it.deviceNameState.copy(
+                        errorMessage = null,
+                        isDirty = action.value.trim() != it.settings.deviceName,
+                    ),
                 )
             }
             SettingsAction.SaveDeviceName -> saveDeviceName()
+            SettingsAction.RetryLoad -> settingsReloadRevision.update(Int::inc)
             is SettingsAction.RetentionChanged -> mutableUiState.update {
                 it.copy(
                     retentionInput = action.value,
-                    retentionState = it.retentionState.copy(errorMessage = null),
+                    retentionState = it.retentionState.copy(
+                        errorMessage = null,
+                        isDirty = action.value.toIntOrNull() != it.settings.retentionDays,
+                    ),
                 )
             }
             SettingsAction.SaveRetention -> saveRetention()
             is SettingsAction.FileLimitMiBChanged -> mutableUiState.update {
+                val bytes = action.value.toLongOrNull()?.let { mebibytes ->
+                    runCatching { Math.multiplyExact(mebibytes, BYTES_PER_MIB) }.getOrNull()
+                }
                 it.copy(
                     fileLimitMiBInput = action.value,
-                    fileLimitState = it.fileLimitState.copy(errorMessage = null),
+                    fileLimitState = it.fileLimitState.copy(
+                        errorMessage = null,
+                        isDirty = bytes != it.settings.effectiveFileLimitBytes,
+                    ),
                 )
             }
             SettingsAction.SaveFileLimit -> saveFileLimit()
             SettingsAction.ChooseDestination ->
-                mutableEffects.value = SettingsEffect.ChooseDestination
+                effectChannel.trySend(SettingsEffect.ChooseDestination)
             is SettingsAction.DestinationSelected ->
-                saveDestination(runCatching { DestinationTree(action.uri) }.getOrNull())
+                saveDestination(
+                    value = runCatching { DestinationTree(action.uri) }.getOrNull(),
+                    availabilityOnSuccess = DestinationAvailability.AVAILABLE,
+                )
             SettingsAction.DestinationCancelled -> Unit
             SettingsAction.DestinationPermissionUnavailable -> setFieldError(
                 SettingField.DESTINATION,
                 "Не удалось сохранить доступ к выбранной папке.",
             )
-            SettingsAction.ClearDestination -> saveDestination(null)
+            is SettingsAction.DestinationAvailabilityChecked ->
+                applyDestinationAvailability(action)
+            SettingsAction.ClearDestination -> saveDestination(
+                value = null,
+                availabilityOnSuccess = DestinationAvailability.NONE,
+            )
             is SettingsAction.RevokeTrustedBrowser -> revokeTrusted(action.browserId)
             SettingsAction.RevokeAllTrustedBrowsers -> revokeAllTrusted()
         }
     }
 
-    fun consumeEffect(effect: SettingsEffect) {
-        if (mutableEffects.value == effect) {
-            mutableEffects.value = null
-        }
-    }
 
     private fun saveDeviceName() {
+        val draft = mutableUiState.value.deviceNameInput
         updateField(
             field = SettingField.DEVICE_NAME,
-            operation = { updateDeviceName(mutableUiState.value.deviceNameInput) },
+            submittedDraft = draft,
+            operation = { updateDeviceName(draft) },
         )
     }
 
     private fun saveRetention() {
-        val value = mutableUiState.value.retentionInput.toIntOrNull()
+        val draft = mutableUiState.value.retentionInput
+        val value = draft.toIntOrNull()
         if (value == null || value !in 1..365) {
             setFieldError(SettingField.RETENTION, "Введите число от 1 до 365.")
             return
         }
         updateField(
             field = SettingField.RETENTION,
+            submittedDraft = draft,
             operation = { updateRetentionDays(value) },
         )
     }
 
     private fun saveFileLimit() {
-        val mebibytes = mutableUiState.value.fileLimitMiBInput.toLongOrNull()
+        val draft = mutableUiState.value.fileLimitMiBInput
+        val mebibytes = draft.toLongOrNull()
         val bytes = mebibytes?.let {
             runCatching { Math.multiplyExact(it, BYTES_PER_MIB) }.getOrNull()
         }
@@ -147,15 +226,45 @@ class SettingsViewModel @Inject constructor(
         }
         updateField(
             field = SettingField.FILE_LIMIT,
+            submittedDraft = draft,
             operation = { updateFileLimit(bytes) },
         )
     }
 
-    private fun saveDestination(value: DestinationTree?) {
+    private fun saveDestination(
+        value: DestinationTree?,
+        availabilityOnSuccess: DestinationAvailability,
+    ) {
         updateField(
             field = SettingField.DESTINATION,
+            availabilityOnSuccess = availabilityOnSuccess,
             operation = { updateDestinationTree(value) },
         )
+    }
+
+    private fun applyDestinationAvailability(
+        action: SettingsAction.DestinationAvailabilityChecked,
+    ) {
+        mutableUiState.update { current ->
+            if (current.settings.destinationTree?.value != action.uri) {
+                current
+            } else {
+                current.copy(
+                    destinationAvailability = if (action.isAvailable) {
+                        DestinationAvailability.AVAILABLE
+                    } else {
+                        DestinationAvailability.UNAVAILABLE
+                    },
+                    destinationState = current.destinationState.copy(
+                        errorMessage = if (action.isAvailable) {
+                            null
+                        } else {
+                            "Сохранённая папка недоступна. Выберите папку снова."
+                        },
+                    ),
+                )
+            }
+        }
     }
 
     private fun revokeTrusted(browserId: TrustedBrowserId) {
@@ -204,31 +313,97 @@ class SettingsViewModel @Inject constructor(
 
     private fun updateField(
         field: SettingField,
+        submittedDraft: String? = null,
+        availabilityOnSuccess: DestinationAvailability? = null,
         operation: suspend () -> SettingsUpdateResult,
     ) {
-        setFieldState(field, SettingsFieldState(isSaving = true))
+        updateFieldState(field) { it.copy(isSaving = true, errorMessage = null) }
         viewModelScope.launch {
-            val result = runCatching { operation() }.getOrNull()
-            val error = when (result) {
-                is SettingsUpdateResult.Updated -> null
-                is SettingsUpdateResult.Invalid -> result.reason.message()
-                null -> "Не удалось сохранить настройку."
+            when (val result = runCatching { operation() }.getOrNull()) {
+                is SettingsUpdateResult.Updated -> applySuccessfulFieldUpdate(
+                    field = field,
+                    settings = result.settings,
+                    submittedDraft = submittedDraft,
+                    availabilityOnSuccess = availabilityOnSuccess,
+                )
+                is SettingsUpdateResult.Invalid ->
+                    setFieldError(field, result.reason.message())
+                null -> setFieldError(field, "Не удалось сохранить настройку.")
             }
-            setFieldState(field, SettingsFieldState(errorMessage = error))
+        }
+    }
+
+    private fun applySuccessfulFieldUpdate(
+        field: SettingField,
+        settings: ru.hznik.devicebridge.domain.settings.DeviceSettings,
+        submittedDraft: String?,
+        availabilityOnSuccess: DestinationAvailability?,
+    ) {
+        mutableUiState.update { current ->
+            val currentDraft = when (field) {
+                SettingField.DEVICE_NAME -> current.deviceNameInput
+                SettingField.RETENTION -> current.retentionInput
+                SettingField.FILE_LIMIT -> current.fileLimitMiBInput
+                SettingField.DESTINATION -> null
+            }
+            val hasNewerDraft = submittedDraft != null && currentDraft != submittedDraft
+            val base = current.copy(
+                settings = settings,
+                destinationAvailability =
+                    availabilityOnSuccess ?: current.destinationAvailability,
+            )
+            when (field) {
+                SettingField.DEVICE_NAME -> base.copy(
+                    deviceNameInput = if (hasNewerDraft) {
+                        current.deviceNameInput
+                    } else {
+                        settings.deviceName
+                    },
+                    deviceNameState = SettingsFieldState(isDirty = hasNewerDraft),
+                )
+                SettingField.RETENTION -> base.copy(
+                    retentionInput = if (hasNewerDraft) {
+                        current.retentionInput
+                    } else {
+                        settings.retentionDays.toString()
+                    },
+                    retentionState = SettingsFieldState(isDirty = hasNewerDraft),
+                )
+                SettingField.FILE_LIMIT -> base.copy(
+                    fileLimitMiBInput = if (hasNewerDraft) {
+                        current.fileLimitMiBInput
+                    } else {
+                        (settings.effectiveFileLimitBytes / BYTES_PER_MIB).toString()
+                    },
+                    fileLimitState = SettingsFieldState(isDirty = hasNewerDraft),
+                )
+                SettingField.DESTINATION -> base.copy(
+                    destinationState = SettingsFieldState(),
+                )
+            }
         }
     }
 
     private fun setFieldError(field: SettingField, message: String) {
-        setFieldState(field, SettingsFieldState(errorMessage = message))
+        updateFieldState(field) {
+            it.copy(isSaving = false, errorMessage = message)
+        }
     }
 
-    private fun setFieldState(field: SettingField, state: SettingsFieldState) {
+    private fun updateFieldState(
+        field: SettingField,
+        transform: (SettingsFieldState) -> SettingsFieldState,
+    ) {
         mutableUiState.update { current ->
             when (field) {
-                SettingField.DEVICE_NAME -> current.copy(deviceNameState = state)
-                SettingField.RETENTION -> current.copy(retentionState = state)
-                SettingField.DESTINATION -> current.copy(destinationState = state)
-                SettingField.FILE_LIMIT -> current.copy(fileLimitState = state)
+                SettingField.DEVICE_NAME ->
+                    current.copy(deviceNameState = transform(current.deviceNameState))
+                SettingField.RETENTION ->
+                    current.copy(retentionState = transform(current.retentionState))
+                SettingField.DESTINATION ->
+                    current.copy(destinationState = transform(current.destinationState))
+                SettingField.FILE_LIMIT ->
+                    current.copy(fileLimitState = transform(current.fileLimitState))
             }
         }
     }

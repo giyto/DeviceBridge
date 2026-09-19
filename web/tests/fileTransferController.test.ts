@@ -33,6 +33,26 @@ describe("FileTransferController", () => {
     expect(uploader.upload).not.toHaveBeenCalled();
   });
 
+  it("keeps selected files and blocks confirmation while the session reconnects", async () => {
+    const api = fakeApi();
+    const states: unknown[] = [];
+    const controller = createController(
+      api,
+      { upload: vi.fn().mockResolvedValue(snapshot("COMPLETED")) },
+      states,
+    );
+    controller.activate("token");
+    controller.selectFiles([new File(["draft"], "draft.txt", { type: "text/plain" })]);
+
+    controller.setConnectionAvailable(false);
+    await controller.confirmSelection();
+
+    expect(api.offer).not.toHaveBeenCalled();
+    expect(lastActive(states)).toMatchObject({
+      connectionAvailable: false,
+      selection: [{ displayName: "draft.txt" }],
+    });
+  });
   it("appends picker and drop files, deduplicates the same source, and keeps same-name files distinct", () => {
     const states: unknown[] = [];
     const controller = createController(
@@ -192,14 +212,8 @@ describe("FileTransferController", () => {
     const offered = api.offer.mock.calls[0]![1].items;
     const firstId = offered[0]!.transferId;
     const secondId = offered[1]!.transferId;
-    api.cancel.mockResolvedValueOnce(snapshotItems([
-      [firstId, "CANCELLED"],
-      [secondId, "CONNECTING"],
-    ]));
-    api.retry.mockResolvedValueOnce(snapshotItems([
-      [firstId, "QUEUED"],
-      [secondId, "CONNECTING"],
-    ]));
+    api.cancel.mockResolvedValueOnce(snapshotOffered(offered, ["CANCELLED", "CONNECTING"]));
+    api.retry.mockResolvedValueOnce(snapshotOffered(offered, ["QUEUED", "CONNECTING"]));
     await controller.cancel(firstId);
 
     await controller.retry(firstId);
@@ -229,6 +243,42 @@ describe("FileTransferController", () => {
       status: "FAILED",
       localError: "Исходный файл больше недоступен. Выберите его заново.",
     });
+  });
+
+  it("rejects retry when the original browser source hash changed", async () => {
+    const api = fakeApi();
+    const states: unknown[] = [];
+    const hasher = vi.fn()
+      .mockResolvedValueOnce("a".repeat(64))
+      .mockResolvedValueOnce("b".repeat(64));
+    const controller = createController(
+      api,
+      { upload: vi.fn().mockResolvedValue(snapshot("COMPLETED")) },
+      states,
+      { start: vi.fn() },
+      () => undefined,
+      hasher,
+    );
+    controller.activate("token");
+    controller.selectFiles([
+      new File(["data"], "report.bin", { type: "application/octet-stream" }),
+    ]);
+    await controller.confirmSelection();
+    const transferId = api.offer.mock.calls[0]![1].items[0]!.transferId;
+    api.cancel.mockResolvedValueOnce(snapshot("CANCELLED", transferId));
+    await controller.cancel(transferId);
+
+    await controller.retry(transferId);
+
+    expect(hasher).toHaveBeenCalledTimes(2);
+    expect(api.retry).not.toHaveBeenCalled();
+    expect(lastActive(states).transfers).toMatchObject([
+      {
+        id: transferId,
+        status: "FAILED",
+        localError: "Исходный файл изменился. Выберите его заново.",
+      },
+    ]);
   });
 
   it("deactivates file state and reports an unauthorized API response to the session", async () => {
@@ -300,11 +350,16 @@ function createController(
   states: unknown[],
   downloader: FileDownloader = { start: vi.fn() },
   onUnauthorized: () => void = () => undefined,
+  hashFile: (
+    file: File,
+    onProgress?: (bytesRead: number, totalBytes: number) => void,
+    signal?: AbortSignal,
+  ) => Promise<string> = async (file) => file.name === "wrong.bin" ? "b".repeat(64) : "a".repeat(64),
 ) {
   let id = 0;
   return new FileTransferController(
     api, uploader, downloader,
-    async (file) => file.name === "wrong.bin" ? "b".repeat(64) : "a".repeat(64),
+    hashFile,
     (state) => states.push(state),
     () => `id-${++id}`,
     () => 1_000,
@@ -357,6 +412,24 @@ function snapshotItems(
       metadata: metadata(id, id === "phone-file" ? "ANDROID_TO_BROWSER" : "BROWSER_TO_ANDROID"),
       status: status as FileSnapshotEvent["items"][number]["status"],
       bytesTransferred: status === "COMPLETED" ? 4 : 0,
+      speedBytesPerSecond: 0,
+    })),
+  };
+}
+
+function snapshotOffered(
+  items: FileOfferCommand["items"],
+  statuses: ReadonlyArray<FileSnapshotEvent["items"][number]["status"]>,
+): FileSnapshotEvent {
+  return {
+    protocolVersion: 1,
+    messageId: "snapshot-offered",
+    type: "file.snapshot",
+    timestamp: 1_000,
+    items: items.map((item, index) => ({
+      metadata: item,
+      status: statuses[index]!,
+      bytesTransferred: statuses[index] === "COMPLETED" ? item.sizeBytes : 0,
       speedBytesPerSecond: 0,
     })),
   };

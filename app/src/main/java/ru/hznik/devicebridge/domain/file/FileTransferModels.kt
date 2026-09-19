@@ -78,7 +78,11 @@ sealed interface FileTransferFailure {
     data object StreamFailed : FileTransferFailure
     data object SessionUnavailable : FileTransferFailure
     data object StorageUnavailable : FileTransferFailure
+    data object InsufficientSpace : FileTransferFailure
     data object CapacityReached : FileTransferFailure
+    data object FileLimitExceeded : FileTransferFailure
+    data object SourceUnavailable : FileTransferFailure
+    data object ProtocolMismatch : FileTransferFailure
 }
 
 data class FileTransferMetadata(

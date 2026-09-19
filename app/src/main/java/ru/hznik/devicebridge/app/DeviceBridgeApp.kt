@@ -10,11 +10,15 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.app.ActivityCompat
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.NavigationRail
+import androidx.compose.material3.NavigationRailItem
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -22,13 +26,18 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.Dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.NavHostController
@@ -76,6 +85,8 @@ import kotlinx.coroutines.launch
 
 private const val TEXT_ROUTE = "text"
 private const val FILE_ROUTE = "files"
+
+internal val LocalNavigationWidthOverride = staticCompositionLocalOf<Dp?> { null }
 
 @Composable
 fun DeviceBridgeApp(
@@ -147,11 +158,15 @@ fun DeviceBridgeApp(
         }
     }
 
-    Scaffold(
-        modifier = modifier.fillMaxSize(),
-        bottomBar = {
-            if (TopLevelDestination.entries.any { it.route == currentRoute }) {
-                NavigationBar {
+    val showTopLevelNavigation = TopLevelDestination.entries.any { it.route == currentRoute }
+    BoxWithConstraints(modifier = modifier.fillMaxSize()) {
+        val navigationWidth = LocalNavigationWidthOverride.current ?: maxWidth
+        val useNavigationRail = navigationWidth >= 600.dp
+        Scaffold(
+            modifier = Modifier.fillMaxSize(),
+            bottomBar = {
+                if (!useNavigationRail && showTopLevelNavigation) {
+                    NavigationBar(modifier = Modifier.testTag("top_level_navigation_bar")) {
                     TopLevelDestination.entries.forEach { destination ->
                         NavigationBarItem(
                             selected = currentRoute == destination.route,
@@ -180,12 +195,48 @@ fun DeviceBridgeApp(
             }
         },
     ) { innerPadding ->
+        Row(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(innerPadding),
+        ) {
+            if (useNavigationRail && showTopLevelNavigation) {
+                NavigationRail(
+                    modifier = Modifier.testTag("top_level_navigation_rail"),
+                ) {
+                    TopLevelDestination.entries.forEach { destination ->
+                        NavigationRailItem(
+                            selected = currentRoute == destination.route,
+                            onClick = {
+                                navController.navigate(destination.route) {
+                                    popUpTo(navController.graph.findStartDestination().id) {
+                                        saveState = true
+                                    }
+                                    launchSingleTop = true
+                                    restoreState = true
+                                }
+                            },
+                            icon = {
+                                Text(
+                                    text = destination.symbol,
+                                    style = MaterialTheme.typography.labelLarge,
+                                )
+                            },
+                            label = { Text(destination.label) },
+                            modifier = Modifier.semantics {
+                                contentDescription = "Раздел ${destination.label}"
+                            },
+                        )
+                    }
+                }
+            }
+
         NavHost(
             navController = navController,
             startDestination = initialRoute,
             modifier = Modifier
-                .fillMaxSize()
-                .padding(innerPadding),
+                .weight(1f)
+                .fillMaxSize(),
         ) {
             composable(TopLevelDestination.Home.route) {
                 homeContent(
@@ -216,6 +267,8 @@ fun DeviceBridgeApp(
                 )
             }
         }
+        }
+    }
     }
 
     LaunchedEffect(sharedTextDraft?.requestId, currentRoute) {
@@ -245,7 +298,6 @@ private fun SettingsRoute(viewModel: SettingsViewModel) {
         )
     }
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
-    val effect by viewModel.effects.collectAsStateWithLifecycle()
     val destinationPicker = rememberLauncherForActivityResult(
         AndroidFileDestinationGateway.contract(),
     ) { uri ->
@@ -258,13 +310,32 @@ private fun SettingsRoute(viewModel: SettingsViewModel) {
                 viewModel.onAction(SettingsAction.DestinationPermissionUnavailable)
         }
     }
+    val savedDestinationUri = uiState.settings.destinationTree?.value
+    LaunchedEffect(savedDestinationUri) {
+        val uri = savedDestinationUri ?: return@LaunchedEffect
+        when (val approval = permissionController.openPersisted(uri)) {
+            is DestinationApproval.Approved -> {
+                approval.lease.release()
+                viewModel.onAction(
+                    SettingsAction.DestinationAvailabilityChecked(uri, isAvailable = true),
+                )
+            }
+            DestinationApproval.Unavailable,
+            DestinationApproval.Cancelled,
+            -> viewModel.onAction(
+                SettingsAction.DestinationAvailabilityChecked(uri, isAvailable = false),
+            )
+        }
+    }
 
-    LaunchedEffect(effect) {
-        val current = effect
-        if (current == SettingsEffect.ChooseDestination) {
-            val initialUri = uiState.settings.destinationTree?.value?.let(Uri::parse)
-            destinationPicker.launch(initialUri)
-            viewModel.consumeEffect(current)
+    LaunchedEffect(viewModel, destinationPicker) {
+        viewModel.effects.collect { effect ->
+            if (effect == SettingsEffect.ChooseDestination) {
+                val initialUri = viewModel.uiState.value.settings.destinationTree
+                    ?.value
+                    ?.let(Uri::parse)
+                destinationPicker.launch(initialUri)
+            }
         }
     }
 
@@ -400,9 +471,8 @@ private fun FileRoute(
     val completedFileOpener = remember(context) {
         AndroidCompletedFileOpener(ContextExternalFileViewerGateway(context))
     }
-    var pendingDestination by remember { mutableStateOf<FileTransferId?>(null) }
+    var pendingDestinationId by rememberSaveable { mutableStateOf<String?>(null) }
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
-    val effect by viewModel.effects.collectAsStateWithLifecycle()
     val sourcePicker = rememberLauncherForActivityResult(
         AndroidFileSourcePickerGateway.contract(),
     ) { uris ->
@@ -418,8 +488,8 @@ private fun FileRoute(
     val destinationPicker = rememberLauncherForActivityResult(
         AndroidFileDestinationGateway.contract(),
     ) { uri ->
-        val transferId = pendingDestination
-        pendingDestination = null
+        val transferId = pendingDestinationId?.let(::FileTransferId)
+        pendingDestinationId = null
         if (transferId != null) {
             when (
                 val approval = destinationGateway.approve(
@@ -450,66 +520,66 @@ private fun FileRoute(
         }
     }
 
-    LaunchedEffect(effect) {
-        val current = effect
-        when (current) {
-            FileEffect.ChooseFiles -> sourcePicker.launch(arrayOf("*/*"))
-            is FileEffect.ChooseDestination -> {
-                pendingDestination = current.transferId
-                destinationPicker.launch(null)
-            }
-            is FileEffect.UseDefaultDestination -> {
-                pendingDestination = current.transferId
-                when (val approval = persistedDestinationController.openPersisted(current.uri)) {
-                    is DestinationApproval.Approved -> {
-                        val leases = destinationLeaseRegistry
-                        if (leases == null) {
-                            approval.lease.release()
-                            viewModel.onAction(
-                                FileAction.DestinationUnavailable(current.transferId),
-                            )
-                        } else {
-                            val destinationId = leases.register(
-                                current.transferId,
-                                approval.lease,
-                            )
-                            pendingDestination = null
-                            viewModel.onAction(
-                                FileAction.DestinationSelected(
-                                    current.transferId,
-                                    destinationId,
-                                ),
-                            )
+    LaunchedEffect(viewModel, sourcePicker, destinationPicker) {
+        viewModel.effects.collect { effect ->
+            when (effect) {
+                FileEffect.ChooseFiles -> sourcePicker.launch(arrayOf("*/*"))
+                is FileEffect.ChooseDestination -> {
+                    pendingDestinationId = effect.transferId.value
+                    destinationPicker.launch(null)
+                }
+                is FileEffect.UseDefaultDestination -> {
+                    pendingDestinationId = effect.transferId.value
+                    when (val approval = persistedDestinationController.openPersisted(effect.uri)) {
+                        is DestinationApproval.Approved -> {
+                            val leases = destinationLeaseRegistry
+                            if (leases == null) {
+                                approval.lease.release()
+                                viewModel.onAction(
+                                    FileAction.DestinationUnavailable(effect.transferId),
+                                )
+                            } else {
+                                val destinationId = leases.register(
+                                    effect.transferId,
+                                    approval.lease,
+                                )
+                                pendingDestinationId = null
+                                viewModel.onAction(
+                                    FileAction.DestinationSelected(
+                                        effect.transferId,
+                                        destinationId,
+                                    ),
+                                )
+                            }
                         }
+                        DestinationApproval.Unavailable -> destinationPicker.launch(null)
+                        DestinationApproval.Cancelled -> destinationPicker.launch(null)
                     }
-                    DestinationApproval.Unavailable -> destinationPicker.launch(null)
-                    DestinationApproval.Cancelled -> destinationPicker.launch(null)
+                }
+                is FileEffect.OpenCompleted -> {
+                    val item = viewModel.uiState.value.transfers
+                        .firstOrNull { it.id == effect.transferId }
+                    val uri = completedFileRegistry?.uri(effect.transferId)
+                    val result = if (item == null || uri == null) {
+                        CompletedFileOpenResult.UnsafeUri
+                    } else {
+                        completedFileOpener.open(item.phase, uri, item.mimeType)
+                    }
+                    if (result != CompletedFileOpenResult.Opened) {
+                        val message = when (result) {
+                            CompletedFileOpenResult.NoViewer ->
+                                "На устройстве нет приложения для открытия этого файла."
+                            CompletedFileOpenResult.NotCompleted ->
+                                "Файл ещё не завершён и не может быть открыт."
+                            CompletedFileOpenResult.UnsafeUri ->
+                                "Сохранённый файл больше недоступен."
+                            CompletedFileOpenResult.Opened -> ""
+                        }
+                        viewModel.onAction(FileAction.OpenFailed(message))
+                    }
                 }
             }
-            is FileEffect.OpenCompleted -> {
-                val item = uiState.transfers.firstOrNull { it.id == current.transferId }
-                val uri = completedFileRegistry?.uri(current.transferId)
-                val result = if (item == null || uri == null) {
-                    CompletedFileOpenResult.UnsafeUri
-                } else {
-                    completedFileOpener.open(item.phase, uri, item.mimeType)
-                }
-                if (result != CompletedFileOpenResult.Opened) {
-                    val message = when (result) {
-                        CompletedFileOpenResult.NoViewer ->
-                            "На устройстве нет приложения для открытия этого файла."
-                        CompletedFileOpenResult.NotCompleted ->
-                            "Файл ещё не завершён и не может быть открыт."
-                        CompletedFileOpenResult.UnsafeUri ->
-                            "Сохранённый файл больше недоступен."
-                        CompletedFileOpenResult.Opened -> ""
-                    }
-                    viewModel.onAction(FileAction.OpenFailed(message))
-                }
-            }
-            null -> Unit
         }
-        current?.let(viewModel::consumeEffect)
     }
     LaunchedEffect(sharedDraft?.requestId) {
         sharedDraft?.let { draft ->

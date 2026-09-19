@@ -76,6 +76,18 @@ sealed interface SessionConfirmationResult {
     data object GenerationClosed : SessionConfirmationResult
 }
 
+sealed interface SessionConfirmationRecoveryResult {
+    data object Pending : SessionConfirmationRecoveryResult
+    data class Approved(
+        val confirmation: SessionConfirmationResult.Approved,
+    ) : SessionConfirmationRecoveryResult
+    data object Denied : SessionConfirmationRecoveryResult
+    data object Expired : SessionConfirmationRecoveryResult
+    data object CapacityReached : SessionConfirmationRecoveryResult
+    data object GenerationClosed : SessionConfirmationRecoveryResult
+    data object InvalidMetadata : SessionConfirmationRecoveryResult
+}
+
 sealed interface TrustedSessionExchangeResult {
     data class Approved(
         val sessionId: BrowserSessionId,
@@ -121,6 +133,11 @@ class BrowserSessionCoordinator(
         data class Immediate(val result: SessionConfirmationResult) : ConfirmationPreparation
     }
 
+    private sealed interface RecoveryPreparation {
+        data class Await(val entry: PendingEntry) : RecoveryPreparation
+        data class Immediate(val result: SessionConfirmationRecoveryResult) : RecoveryPreparation
+    }
+
     private data class ApprovalPreparation(
         val entry: PendingEntry,
         val handle: SessionGenerationHandle,
@@ -137,6 +154,11 @@ class BrowserSessionCoordinator(
         clock = clock,
         maxEntries = maxPendingRequests,
     )
+    private val confirmationRecovery =
+        BoundedExpiringRegistry<PairingChallengeId, PendingEntry>(
+            clock = clock,
+            maxEntries = maxChallenges,
+        )
     private val sessions = LinkedHashMap<BrowserSessionId, StoredSession>()
     private val connections = LinkedHashMap<BrowserSessionId, MutableSet<SessionConnection>>()
     private val mutableState = MutableStateFlow(BrowserSessionState.inactive())
@@ -249,6 +271,7 @@ class BrowserSessionCoordinator(
         mutex.withLock {
             val removed = pending.remove(entry.request.id)
             if (removed === entry && activeHandle?.generationId == entry.request.generationId) {
+                entry.decision.complete(SessionConfirmationResult.TimedOut)
                 mutableState.value = BrowserSessionReducer.reduce(
                     mutableState.value,
                     BrowserSessionEvent.RequestExpired(
@@ -259,6 +282,59 @@ class BrowserSessionCoordinator(
             }
         }
         return SessionConfirmationResult.TimedOut
+    }
+
+    suspend fun recoverConfirmation(
+        handle: SessionGenerationHandle,
+        challengeId: PairingChallengeId,
+        browserLabel: String,
+        sourceIpv4: String,
+    ): SessionConfirmationRecoveryResult {
+        val preparation = mutex.withLock<RecoveryPreparation> {
+            if (activeHandle !== handle) {
+                return@withLock RecoveryPreparation.Immediate(
+                    SessionConfirmationRecoveryResult.GenerationClosed,
+                )
+            }
+            val entry = confirmationRecovery.get(challengeId)
+                ?: return@withLock RecoveryPreparation.Immediate(
+                    SessionConfirmationRecoveryResult.Expired,
+                )
+            val metadata = when (
+                val normalized = ClientMetadataNormalizer.normalize(browserLabel, sourceIpv4)
+            ) {
+                is ClientMetadataResult.Valid -> normalized.metadata
+                is ClientMetadataResult.Invalid -> {
+                    return@withLock RecoveryPreparation.Immediate(
+                        SessionConfirmationRecoveryResult.InvalidMetadata,
+                    )
+                }
+            }
+            if (
+                metadata.browserLabel != entry.request.browserLabel ||
+                metadata.sourceIpv4 != entry.request.sourceIpv4
+            ) {
+                return@withLock RecoveryPreparation.Immediate(
+                    SessionConfirmationRecoveryResult.InvalidMetadata,
+                )
+            }
+            if (!entry.decision.isCompleted) {
+                RecoveryPreparation.Immediate(SessionConfirmationRecoveryResult.Pending)
+            } else {
+                RecoveryPreparation.Await(entry)
+            }
+        }
+        if (preparation is RecoveryPreparation.Immediate) return preparation.result
+        return when (val result = (preparation as RecoveryPreparation.Await).entry.decision.await()) {
+            is SessionConfirmationResult.Approved ->
+                SessionConfirmationRecoveryResult.Approved(result)
+            SessionConfirmationResult.Denied -> SessionConfirmationRecoveryResult.Denied
+            SessionConfirmationResult.CapacityReached ->
+                SessionConfirmationRecoveryResult.CapacityReached
+            SessionConfirmationResult.GenerationClosed ->
+                SessionConfirmationRecoveryResult.GenerationClosed
+            else -> SessionConfirmationRecoveryResult.Expired
+        }
     }
 
     override suspend fun approve(requestId: PairingRequestId) {
@@ -646,6 +722,17 @@ class BrowserSessionCoordinator(
         if (pending.put(requestId, entry, request.expiresAtElapsedRealtimeMs) == RegistryPutResult.CAPACITY_REACHED) {
             return ConfirmationPreparation.Immediate(SessionConfirmationResult.CapacityReached)
         }
+        val recoveryExpiry = Math.addExact(
+            request.expiresAtElapsedRealtimeMs,
+            CONFIRMATION_RECOVERY_RETENTION_MS,
+        )
+        if (
+            confirmationRecovery.put(challengeId, entry, recoveryExpiry) ==
+            RegistryPutResult.CAPACITY_REACHED
+        ) {
+            pending.remove(requestId)
+            return ConfirmationPreparation.Immediate(SessionConfirmationResult.CapacityReached)
+        }
         challenges.remove(challengeId)
         rateLimiter.recordSuccess(metadata.sourceIpv4)
         mutableState.value = BrowserSessionReducer.reduce(
@@ -678,6 +765,7 @@ class BrowserSessionCoordinator(
         pending.clear().forEach { entry ->
             entry.decision.complete(SessionConfirmationResult.GenerationClosed)
         }
+        confirmationRecovery.clear()
         sessions.clear()
         rateLimiter.clear()
         val toClose = connections.values.flatten().distinct()
@@ -702,5 +790,6 @@ class BrowserSessionCoordinator(
 
     private companion object {
         const val TRUSTED_BROWSER_CLEANUP_INTERVAL_MS = 60_000L
+        const val CONFIRMATION_RECOVERY_RETENTION_MS = 5 * 60_000L
     }
 }

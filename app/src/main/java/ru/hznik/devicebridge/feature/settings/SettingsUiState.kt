@@ -3,14 +3,29 @@ package ru.hznik.devicebridge.feature.settings
 import ru.hznik.devicebridge.domain.settings.DeviceSettings
 import ru.hznik.devicebridge.domain.trust.TrustedBrowserId
 
+enum class SettingsLoadState {
+    LOADING,
+    CONTENT,
+    ERROR,
+}
+
+enum class DestinationAvailability {
+    NONE,
+    CHECKING,
+    AVAILABLE,
+    UNAVAILABLE,
+}
+
 data class SettingsFieldState(
     val isSaving: Boolean = false,
     val errorMessage: String? = null,
+    val isDirty: Boolean = false,
 )
 
 data class SettingsUiState(
     val settings: DeviceSettings = DeviceSettings.defaults(),
-    val isLoading: Boolean = true,
+    val loadState: SettingsLoadState = SettingsLoadState.LOADING,
+    val loadErrorMessage: String? = null,
     val deviceNameInput: String = DeviceSettings.defaults().deviceName,
     val retentionInput: String = DeviceSettings.defaults().retentionDays.toString(),
     val fileLimitMiBInput: String =
@@ -20,6 +35,7 @@ data class SettingsUiState(
     val destinationState: SettingsFieldState = SettingsFieldState(),
     val fileLimitState: SettingsFieldState = SettingsFieldState(),
     val trustedBrowsers: List<TrustedBrowserUiState> = emptyList(),
+    val destinationAvailability: DestinationAvailability = DestinationAvailability.NONE,
     val revokingTrustedBrowserIds: Set<TrustedBrowserId> = emptySet(),
     val revokeAllTrustedBrowsersPending: Boolean = false,
     val trustedBrowsersError: String? = null,
@@ -35,6 +51,7 @@ data class TrustedBrowserUiState(
 sealed interface SettingsAction {
     data class DeviceNameChanged(val value: String) : SettingsAction
     data object SaveDeviceName : SettingsAction
+    data object RetryLoad : SettingsAction
     data class RetentionChanged(val value: String) : SettingsAction
     data object SaveRetention : SettingsAction
     data class FileLimitMiBChanged(val value: String) : SettingsAction
@@ -45,6 +62,10 @@ sealed interface SettingsAction {
     data object DestinationPermissionUnavailable : SettingsAction
     data object ClearDestination : SettingsAction
     data class RevokeTrustedBrowser(val browserId: TrustedBrowserId) : SettingsAction
+    data class DestinationAvailabilityChecked(
+        val uri: String,
+        val isAvailable: Boolean,
+    ) : SettingsAction
     data object RevokeAllTrustedBrowsers : SettingsAction
 }
 

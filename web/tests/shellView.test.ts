@@ -170,7 +170,14 @@ describe("createShellView", () => {
       ?.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
     expect(onSubmitCode).toHaveBeenCalledWith("123456", false);
 
+    view.render({ kind: "submitting", manifest });
+    expect(document.querySelector<HTMLButtonElement>('[data-action="pair"]')?.textContent)
+      .toContain("Проверяем");
+    expect(document.querySelector<HTMLButtonElement>('[data-action="pair"]')?.disabled).toBe(true);
+
     view.render({ kind: "awaiting", manifest });
+    expect(document.querySelector<HTMLButtonElement>('[data-action="pair"]')?.textContent)
+      .toContain("Ожидаем");
     expect(document.querySelector('[data-role="session-title"]')?.textContent).toContain(
       "Подтвердите",
     );
@@ -190,6 +197,176 @@ describe("createShellView", () => {
     document.querySelector<HTMLButtonElement>('[data-action="disconnect"]')?.click();
     expect(onDisconnect).toHaveBeenCalledOnce();
     expect(document.body.textContent).not.toContain("session-1");
+  });
+
+  it("shows automatic reconnect progress without offering a competing manual retry", () => {
+    const view = createShellView(document, actions());
+
+    view.render({
+      kind: "reconnecting",
+      manifest: { protocolVersion: 1, webAssetVersion: "sha256-abcd" },
+      status: {
+        protocolVersion: 1,
+        sessionId: "session-1",
+        connected: true,
+        activeSessionCount: 1,
+        effectiveFileLimitBytes: 1_073_741_824,
+      },
+      attempt: 2,
+      nextRetryInMs: 2_000,
+    });
+
+    expect(document.querySelector('[data-role="status-title"]')?.textContent).toContain(
+      "Восстанавливаем",
+    );
+    expect(document.querySelector('[data-role="status-detail"]')?.textContent).toContain(
+      "2 сек",
+    );
+    expect(document.querySelector<HTMLButtonElement>('[data-action="retry"]')?.hidden).toBe(true);
+  });
+
+  it("offers an explicit retry after automatic reconnect is exhausted", () => {
+    const retry = vi.fn();
+    const view = createShellView(document, { ...actions(), onRetry: retry });
+
+    view.render({
+      kind: "needsUserAction",
+      manifest: { protocolVersion: 1, webAssetVersion: "sha256-abcd" },
+      status: {
+        protocolVersion: 1,
+        sessionId: "session-1",
+        connected: true,
+        activeSessionCount: 1,
+        effectiveFileLimitBytes: 1_073_741_824,
+      },
+      message: "Проверьте сеть и повторите попытку.",
+    });
+
+    const retryButton = document.querySelector<HTMLButtonElement>('[data-action="retry"]')!;
+    expect(document.querySelector('[data-role="status-title"]')?.textContent).toContain(
+      "Нужно проверить подключение",
+    );
+    expect(retryButton.textContent).toContain("Проверить подключение");
+    expect(retryButton.hidden).toBe(false);
+    retryButton.click();
+    expect(retry).toHaveBeenCalledOnce();
+  });
+
+  it("renders uncertain pairing as a status check instead of a new submission", () => {
+    const retry = vi.fn();
+    const view = createShellView(document, { ...actions(), onRetry: retry });
+
+    view.render({
+      kind: "uncertain",
+      manifest: { protocolVersion: 1, webAssetVersion: "sha256-abcd" },
+      message: "Ответ о подключении не получен.",
+      checking: false,
+    });
+
+    const retryButton = document.querySelector<HTMLButtonElement>('[data-action="retry"]')!;
+    expect(document.querySelector('[data-role="status-title"]')?.textContent).toContain(
+      "Результат подключения неизвестен",
+    );
+    expect(retryButton.textContent).toContain("Проверить результат");
+    expect(retryButton.hidden).toBe(false);
+    retryButton.click();
+    expect(retry).toHaveBeenCalledOnce();
+  });
+  it("restores focus to the code after a pairing error", () => {
+    const view = createShellView(document, actions());
+    const manifest = { protocolVersion: 1, webAssetVersion: "sha256-abcd" };
+    const challenge = {
+      protocolVersion: 1,
+      challengeId: "challenge-focus",
+      expiresAtEpochMillis: 10_000,
+      confirmTimeoutSeconds: 60,
+      attemptsRemaining: 5,
+    };
+    const input = document.querySelector<HTMLInputElement>("#pairing-code")!;
+
+    view.render({ kind: "ready", manifest, challenge });
+    input.focus();
+    view.render({ kind: "submitting", manifest });
+    document.body.tabIndex = -1;
+    document.body.focus();
+    view.render({ kind: "ready", manifest, challenge: { ...challenge, attemptsRemaining: 4 } });
+
+    expect(document.activeElement).toBe(input);
+  });
+
+  it("restores focus after a manual retry finishes", () => {
+    const retry = vi.fn();
+    const view = createShellView(document, { ...actions(), onRetry: retry });
+    const button = document.querySelector<HTMLButtonElement>('[data-action="retry"]')!;
+
+    view.render({ kind: "offline", message: "Нет связи" });
+    button.focus();
+    button.click();
+    view.render({ kind: "checking" });
+    document.body.tabIndex = -1;
+    document.body.focus();
+    view.render({ kind: "offline", message: "Связь всё ещё недоступна" });
+
+    expect(retry).toHaveBeenCalledOnce();
+    expect(document.activeElement).toBe(button);
+  });
+  it("exposes explicit presentation states and consumes the pairing reset once per session", () => {
+    const callbacks = {
+      onRetry: vi.fn(),
+      onSubmitCode: vi.fn(),
+      onDisconnect: vi.fn(),
+    };
+    const view = createShellView(document, callbacks);
+    const status = document.querySelector<HTMLElement>('[data-role="status"]')!;
+    const input = document.querySelector<HTMLInputElement>("#pairing-code")!;
+    const remember = document.querySelector<HTMLInputElement>("#remember-browser")!;
+    const manifest = { protocolVersion: 1, webAssetVersion: "sha256-abcd" };
+    const connected = {
+      kind: "connected" as const,
+      manifest,
+      status: {
+        protocolVersion: 1,
+        sessionId: "session-effect-1",
+        connected: true,
+        activeSessionCount: 1,
+        effectiveFileLimitBytes: 1_073_741_824,
+      },
+    };
+
+    view.render({
+      kind: "ready",
+      manifest,
+      challenge: {
+        protocolVersion: 1,
+        challengeId: "challenge-state",
+        expiresAtEpochMillis: 10_000,
+        confirmTimeoutSeconds: 60,
+        attemptsRemaining: 5,
+      },
+    });
+    expect(status.dataset.viewState).toBe("ready");
+
+    input.value = "123456";
+    remember.checked = true;
+    view.consume({ id: "clear-pairing-form:session-effect-1", kind: "clearPairingForm" });
+    view.render(connected);
+    expect(input.value).toBe("");
+    expect(remember.checked).toBe(false);
+
+    input.value = "654321";
+    remember.checked = true;
+    view.render(connected);
+    view.consume({ id: "clear-pairing-form:session-effect-1", kind: "clearPairingForm" });
+    expect(input.value).toBe("654321");
+    expect(remember.checked).toBe(true);
+
+    view.render({ kind: "offline", message: "Нет связи" });
+    expect(status.dataset.viewState).toBe("offline");
+    view.render({ kind: "denied", manifest, message: "Отклонено" });
+    expect(status.dataset.viewState).toBe("error");
+    expect(callbacks.onRetry).not.toHaveBeenCalled();
+    expect(callbacks.onSubmitCode).not.toHaveBeenCalled();
+    expect(callbacks.onDisconnect).not.toHaveBeenCalled();
   });
 });
 

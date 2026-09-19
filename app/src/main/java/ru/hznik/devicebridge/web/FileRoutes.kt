@@ -235,12 +235,20 @@ fun Application.installFileRoutes(
             }
             val factory = uploadTargetFactory
             if (factory == null) {
-                call.respondFileError(HttpStatusCode.ServiceUnavailable, FileProtocolErrorCode.STREAM_FAILED, wallClockMs, transferId.value)
+                fileCoordinator.transition(
+                    transferId,
+                    FileTransferEvent.Failed(FileTransferFailure.StorageUnavailable),
+                )
+                call.respondFileError(HttpStatusCode.ServiceUnavailable, FileProtocolErrorCode.DESTINATION_UNAVAILABLE, wallClockMs, transferId.value)
                 return@post
             }
             val target = runCatching { factory.create(destination, item.metadata) }.getOrNull()
             if (target == null) {
-                call.respondFileError(HttpStatusCode.ServiceUnavailable, FileProtocolErrorCode.STREAM_FAILED, wallClockMs, transferId.value)
+                fileCoordinator.transition(
+                    transferId,
+                    FileTransferEvent.Failed(FileTransferFailure.StorageUnavailable),
+                )
+                call.respondFileError(HttpStatusCode.ServiceUnavailable, FileProtocolErrorCode.DESTINATION_UNAVAILABLE, wallClockMs, transferId.value)
                 return@post
             }
             val managedTarget = ManagedFileUploadTarget(target)
@@ -283,17 +291,21 @@ fun Application.installFileRoutes(
                 )
                 call.respondOwnedFileSnapshot(fileCoordinator, authorized, transferId.value, wallClockMs)
             } else {
-                fileCoordinator.onNetworkFailure(transferId)
-                val code = when (uploadResult) {
-                    RawFileUploadResult.Oversize -> FileProtocolErrorCode.FILE_TOO_LARGE
-                    RawFileUploadResult.ChecksumMismatch -> FileProtocolErrorCode.CHECKSUM_MISMATCH
+                val failure = when (uploadResult) {
+                    RawFileUploadResult.Oversize -> FileTransferFailure.FileLimitExceeded
+                    RawFileUploadResult.ChecksumMismatch -> FileTransferFailure.ChecksumMismatch
+                    RawFileUploadResult.InsufficientSpace -> FileTransferFailure.InsufficientSpace
                     RawFileUploadResult.InvalidContentLength,
                     RawFileUploadResult.PrematureEof,
                     RawFileUploadResult.Failed,
-                    -> FileProtocolErrorCode.STREAM_FAILED
+                    -> FileTransferFailure.StreamFailed
                     RawFileUploadResult.Completed -> error("Handled above")
                 }
-                call.respondFileError(HttpStatusCode.BadRequest, code, wallClockMs, transferId.value)
+                fileCoordinator.transition(
+                    transferId,
+                    FileTransferEvent.Failed(failure),
+                )
+                call.respondFileError(HttpStatusCode.BadRequest, failure.toProtocolErrorCode(), wallClockMs, transferId.value)
             }
         }
 
@@ -416,7 +428,7 @@ fun Application.installFileRoutes(
                 )
                 return@post
             }
-            when (fileCoordinator.retry(transferId)) {
+            when (val result = fileCoordinator.retry(transferId)) {
                 FileTransferOperationResult.Accepted -> call.respondOwnedFileSnapshot(
                     fileCoordinator,
                     authorized,
@@ -430,7 +442,7 @@ fun Application.installFileRoutes(
                 )
                 is FileTransferOperationResult.Rejected -> call.respondFileError(
                     HttpStatusCode.Conflict,
-                    FileProtocolErrorCode.SESSION_UNAVAILABLE,
+                    result.failure.toProtocolErrorCode(),
                     wallClockMs,
                     transferId.value,
                 )
@@ -683,3 +695,15 @@ internal fun FileTransferState.toSnapshotItem() = FileSnapshotItem(
     bytesTransferred = bytesTransferred,
     speedBytesPerSecond = speedBytesPerSecond,
 )
+
+private fun FileTransferFailure.toProtocolErrorCode(): FileProtocolErrorCode = when (this) {
+    FileTransferFailure.ChecksumMismatch -> FileProtocolErrorCode.CHECKSUM_MISMATCH
+    FileTransferFailure.StreamFailed -> FileProtocolErrorCode.STREAM_FAILED
+    FileTransferFailure.SessionUnavailable -> FileProtocolErrorCode.SESSION_UNAVAILABLE
+    FileTransferFailure.StorageUnavailable -> FileProtocolErrorCode.DESTINATION_UNAVAILABLE
+    FileTransferFailure.InsufficientSpace -> FileProtocolErrorCode.INSUFFICIENT_SPACE
+    FileTransferFailure.CapacityReached -> FileProtocolErrorCode.INVALID_PAYLOAD
+    FileTransferFailure.FileLimitExceeded -> FileProtocolErrorCode.FILE_TOO_LARGE
+    FileTransferFailure.SourceUnavailable -> FileProtocolErrorCode.SOURCE_UNAVAILABLE
+    FileTransferFailure.ProtocolMismatch -> FileProtocolErrorCode.UNSUPPORTED_VERSION
+}

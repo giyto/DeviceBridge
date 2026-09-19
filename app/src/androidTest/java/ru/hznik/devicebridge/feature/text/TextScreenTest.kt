@@ -2,15 +2,22 @@ package ru.hznik.devicebridge.feature.text
 
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.test.SemanticsMatcher
+import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsFocused
 import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.Density
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import org.junit.Assert.assertEquals
@@ -129,6 +136,54 @@ class TextScreenTest {
 
         assertEquals(listOf(TextAction.RetryClicked(messageId)), actions)
     }
+    @Test
+    fun feedExposesParticipantDirectionTimeStatusAndLongUrlAction() {
+        val longUrl = "https://example.com/" + "very-long-segment/".repeat(18) + "?source=devicebridge"
+        val openRequests = mutableListOf<String>()
+        setScreen(
+            state = TextUiState(
+                items = listOf(
+                    TextItemUiState(
+                        id = TextMessageId("long-link"),
+                        sessionId = BrowserSessionId("session-long"),
+                        browserLabel = "Firefox",
+                        content = longUrl,
+                        contentKind = TextContentKind.LINK,
+                        direction = TextTransferDirection.BROWSER_TO_ANDROID,
+                        status = TextTransferStatus.DELIVERED,
+                        timestampEpochMillis = 1_700_000_000_000,
+                        canRetry = false,
+                        isRetrying = false,
+                    ),
+                ),
+            ),
+            onOpenLinkRequested = openRequests::add,
+        )
+
+        composeRule.onNodeWithText("Отправитель: Firefox")
+            .performScrollTo()
+            .assertIsDisplayed()
+        composeRule.onNodeWithText("На телефон").performScrollTo().assertIsDisplayed()
+        composeRule.onNodeWithText("Время:", substring = true)
+            .performScrollTo()
+            .assertIsDisplayed()
+        composeRule.onNodeWithText("Доставлено").performScrollTo().assertIsDisplayed()
+        composeRule.onNodeWithContentDescription("Статус передачи текста: Доставлено")
+            .assert(
+                SemanticsMatcher.expectValue(
+                    SemanticsProperties.LiveRegion,
+                    LiveRegionMode.Polite,
+                ),
+            )
+        composeRule.onNodeWithText(longUrl).performScrollTo().assertIsDisplayed()
+        composeRule.onNodeWithContentDescription("Открыть ссылку от Firefox")
+            .performScrollTo()
+            .assertIsDisplayed()
+            .performClick()
+
+        assertEquals(listOf(longUrl), openRequests)
+    }
+
 
     @Test
     fun editorReceivesKeyboardFocusAndLargeFontLayoutRemainsScrollable() {
@@ -154,6 +209,12 @@ class TextScreenTest {
             }
         }
 
+        composeRule.onNodeWithContentDescription("Область создания сообщения")
+            .performScrollTo()
+            .assertIsDisplayed()
+        composeRule.onNodeWithContentDescription("Отправить текст в выбранный браузер")
+            .performScrollTo()
+            .assertIsDisplayed()
         composeRule.onNodeWithContentDescription("Текст для отправки")
             .performClick()
             .assertIsFocused()
@@ -161,6 +222,55 @@ class TextScreenTest {
         composeRule.onNodeWithText("Текущая лента").performScrollTo().assertIsDisplayed()
     }
 
+    @Test
+    fun recipientUsesOneRadioButtonSemanticsNode() {
+        val sessionId = BrowserSessionId("accessible-recipient")
+        setScreen(
+            TextUiState(
+                recipients = listOf(
+                    TextRecipientUiState(
+                        id = sessionId,
+                        browserLabel = "Chrome",
+                        sourceIpv4 = "192.168.1.2",
+                        selected = true,
+                    ),
+                    TextRecipientUiState(
+                        id = BrowserSessionId("accessible-recipient-2"),
+                        browserLabel = "Edge",
+                        sourceIpv4 = "192.168.1.3",
+                        selected = false,
+                    ),
+                ),
+                selectedSessionId = sessionId,
+            ),
+        )
+        val radioButton = SemanticsMatcher.expectValue(
+            SemanticsProperties.Role,
+            Role.RadioButton,
+        )
+
+        composeRule.onAllNodesWithContentDescription(
+            "Выбрать Chrome",
+            useUnmergedTree = true,
+        ).assertCountEquals(1)
+        composeRule.onNodeWithContentDescription(
+            "Выбрать Chrome",
+            useUnmergedTree = true,
+        ).assert(radioButton)
+    }
+
+    @Test
+    fun feedbackCardIsAnExplicitDismissAction() {
+        setScreen(TextUiState(errorMessage = "Соединение потеряно."))
+        val button = SemanticsMatcher.expectValue(
+            SemanticsProperties.Role,
+            Role.Button,
+        )
+
+        composeRule.onNodeWithContentDescription(
+            "Соединение потеряно. Закрыть сообщение",
+        ).assert(button)
+    }
     private fun setScreen(
         state: TextUiState,
         onAction: (TextAction) -> Unit = {},

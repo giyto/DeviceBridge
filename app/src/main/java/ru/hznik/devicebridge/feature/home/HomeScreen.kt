@@ -21,11 +21,18 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalClipboard
 import androidx.compose.ui.platform.toClipEntry
+import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.font.FontFamily
@@ -34,6 +41,7 @@ import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
 import ru.hznik.devicebridge.core.ui.ConnectionStatusCard
 import ru.hznik.devicebridge.core.ui.QuickActionCard
+import ru.hznik.devicebridge.domain.error.RecoveryAction
 import ru.hznik.devicebridge.ui.theme.DeviceBridgeTheme
 
 @Composable
@@ -47,6 +55,14 @@ fun HomeScreen(
     val clipboard = LocalClipboard.current
     val coroutineScope = rememberCoroutineScope()
     val statusContent = statusContent(uiState)
+    val hasConnectedBrowser = uiState.activeBrowsers.isNotEmpty()
+    var connectionGuideExpanded by rememberSaveable {
+        mutableStateOf(!hasConnectedBrowser)
+    }
+
+    LaunchedEffect(hasConnectedBrowser) {
+        connectionGuideExpanded = !hasConnectedBrowser
+    }
 
     Column(
         modifier = modifier
@@ -74,6 +90,21 @@ fun HomeScreen(
             statusColor = statusContent.color,
             statusContainerColor = statusContent.containerColor,
         )
+
+        if (connectionGuideExpanded) {
+            ConnectionGuideCard(
+                uiState = uiState,
+                canCollapse = hasConnectedBrowser,
+                onCollapse = { connectionGuideExpanded = false },
+            )
+        } else if (hasConnectedBrowser) {
+            OutlinedButton(
+                modifier = Modifier.fillMaxWidth(),
+                onClick = { connectionGuideExpanded = true },
+            ) {
+                Text("Показать инструкцию подключения")
+            }
+        }
 
         if (
             uiState.status == HomeServerStatus.Running &&
@@ -195,6 +226,62 @@ fun HomeScreen(
 }
 
 @Composable
+private fun ConnectionGuideCard(
+    uiState: ServerSessionUiState,
+    canCollapse: Boolean,
+    onCollapse: () -> Unit,
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(22.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.primaryContainer,
+        ),
+    ) {
+        Column(
+            modifier = Modifier.padding(18.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Text(
+                text = "Как подключить компьютер",
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.SemiBold,
+            )
+            Text("Подключите телефон и компьютер к одной доверенной Wi-Fi сети.")
+
+            if (uiState.status != HomeServerStatus.Running) {
+                Text("Запустите сервер на телефоне.")
+            } else {
+                Text(
+                    text = "Откройте адрес на компьютере",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                Text("Скопируйте актуальный адрес из блока ниже и откройте его в браузере.")
+                if (uiState.activeBrowsers.isEmpty()) {
+                    uiState.pairingCode?.let { code ->
+                        Text("Введите код $code и подтвердите браузер на телефоне.")
+                    }
+                } else {
+                    Text("Браузер подключён. Можно передавать текст и файлы.")
+                }
+            }
+
+            Text(
+                text = "Аккаунт и отдельная программа для компьютера не нужны.",
+                color = MaterialTheme.colorScheme.onPrimaryContainer,
+            )
+
+            if (canCollapse) {
+                TextButton(onClick = onCollapse) {
+                    Text("Скрыть инструкцию")
+                }
+            }
+        }
+    }
+}
+
+@Composable
 private fun ActiveFileTransfersSection(items: List<HomeFileTransferUiState>) {
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text(
@@ -260,6 +347,7 @@ private fun PairingCodeCard(
                 fontWeight = FontWeight.Bold,
                 modifier = Modifier.semantics {
                     contentDescription = "Код подключения $code"
+                    liveRegion = LiveRegionMode.Polite
                 },
             )
             Text(
@@ -299,7 +387,15 @@ private fun PendingBrowsersSection(
                     modifier = Modifier.padding(18.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    Text(request.browserLabel, fontWeight = FontWeight.SemiBold)
+                    Text(
+                        text = request.browserLabel,
+                        fontWeight = FontWeight.SemiBold,
+                        modifier = Modifier.semantics {
+                            contentDescription =
+                                "Новый запрос на подключение: ${request.browserLabel}, ${request.sourceIpv4}"
+                            liveRegion = LiveRegionMode.Polite
+                        },
+                    )
                     Text(
                         text = request.sourceIpv4,
                         style = MaterialTheme.typography.bodyMedium,
@@ -379,6 +475,7 @@ private fun ActiveBrowsersSection(
             text = "Подключённые браузеры: ${sessions.size}",
             style = MaterialTheme.typography.titleLarge,
             fontWeight = FontWeight.SemiBold,
+            modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
         )
         sessions.forEach { session ->
             Card(
@@ -438,7 +535,19 @@ private fun LifecycleButton(
         ) { Text("Остановка…") }
 
         else -> Button(
-            onClick = { onAction(HomeAction.StartClicked) },
+            onClick = {
+                when {
+                    uiState.status != HomeServerStatus.Error ->
+                        onAction(HomeAction.StartClicked)
+                    RecoveryAction.REQUEST_PERMISSION in
+                        uiState.failure?.recoveryActions.orEmpty() ->
+                        onAction(HomeAction.RequestPermissionClicked)
+                    RecoveryAction.OPEN_SETTINGS in
+                        uiState.failure?.recoveryActions.orEmpty() ->
+                        onAction(HomeAction.OpenSettingsClicked)
+                    else -> onAction(HomeAction.StartAgainClicked)
+                }
+            },
             enabled = uiState.canStart,
             modifier = Modifier.fillMaxWidth(),
             contentPadding = PaddingValues(vertical = 15.dp),
@@ -446,7 +555,16 @@ private fun LifecycleButton(
             Text(
                 when (uiState.status) {
                     HomeServerStatus.Starting -> "Запуск…"
-                    HomeServerStatus.Error -> "Повторить запуск"
+                    HomeServerStatus.Error -> when {
+                        RecoveryAction.REQUEST_PERMISSION in
+                            uiState.failure?.recoveryActions.orEmpty() ->
+                            "Запросить разрешение"
+                        RecoveryAction.OPEN_SETTINGS in
+                            uiState.failure?.recoveryActions.orEmpty() ->
+                            "Открыть настройки"
+                        uiState.failure != null -> "Запустить снова"
+                        else -> "Повторить запуск"
+                    }
                     else -> "Запустить сервер"
                 },
             )

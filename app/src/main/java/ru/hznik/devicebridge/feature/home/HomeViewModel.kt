@@ -16,6 +16,7 @@ import ru.hznik.devicebridge.data.permission.ServerPermissionRequestPlanner
 import ru.hznik.devicebridge.data.server.MonotonicClock
 import ru.hznik.devicebridge.domain.model.ServerLifecycleError
 import ru.hznik.devicebridge.domain.model.ServerLifecycleState
+import ru.hznik.devicebridge.domain.error.toUserFacingFailure
 import ru.hznik.devicebridge.domain.session.BrowserSessionId
 import ru.hznik.devicebridge.domain.session.BrowserApprovalDecision
 import ru.hznik.devicebridge.domain.session.BrowserSessionState
@@ -109,8 +110,11 @@ class HomeViewModel @Inject constructor(
     fun onAction(action: HomeAction) {
         when (action) {
             HomeAction.StartClicked -> requestPermissionsOrStart()
+            HomeAction.StartAgainClicked -> requestPermissionsOrStart()
             HomeAction.StopClicked -> requestStop()
             HomeAction.RetryPermissionClicked -> retryPermission()
+            HomeAction.RequestPermissionClicked -> requestPermissionsOrStart()
+            HomeAction.OpenSettingsClicked -> effectChannel.trySend(HomeEffect.OpenAppSettings)
             is HomeAction.PermissionsResolved -> {
                 localNetworkCanAskAgain = action.localNetworkCanAskAgain
                 continueAfterPermissionResult()
@@ -265,9 +269,7 @@ class HomeViewModel @Inject constructor(
             is ServerLifecycleState.Error -> ServerSessionUiState(
                 status = HomeServerStatus.Error,
                 errorMessage = cause.userMessage(),
-                isPermissionExplanationVisible =
-                    cause == ServerLifecycleError.LocalNetworkPermissionDenied ||
-                        cause == ServerLifecycleError.PermissionRevoked,
+                failure = cause.toUserFacingFailure(),
             )
         }
         val showSessions = this is ServerLifecycleState.Running && sessions.isActive
@@ -275,9 +277,11 @@ class HomeViewModel @Inject constructor(
             commandPending = false,
             showNotificationWarning = previous.showNotificationWarning,
             isPermissionExplanationVisible =
-                base.isPermissionExplanationVisible ||
-                    previous.isPermissionExplanationVisible,
-            openSettingsForPermission = previous.openSettingsForPermission,
+                previous.isPermissionExplanationVisible &&
+                    this is ServerLifecycleState.Stopped,
+            openSettingsForPermission =
+                previous.openSettingsForPermission &&
+                    this is ServerLifecycleState.Stopped,
             pairingCode = sessions.pairingCode?.value.takeIf { showSessions },
             pairingExpiresInSeconds = sessions.pairingCode
                 ?.expiresAtElapsedRealtimeMs

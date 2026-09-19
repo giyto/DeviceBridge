@@ -3,6 +3,7 @@ package ru.hznik.devicebridge.feature.text
 import android.content.res.Configuration
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -25,7 +26,11 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.isTraversalGroup
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -38,6 +43,11 @@ import ru.hznik.devicebridge.domain.text.TextMessageId
 import ru.hznik.devicebridge.domain.text.TextTransferDirection
 import ru.hznik.devicebridge.domain.text.TextTransferStatus
 import ru.hznik.devicebridge.ui.theme.DeviceBridgeTheme
+import java.time.Instant
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
+private val transferTimeFormatter = DateTimeFormatter.ofPattern("HH:mm")
+
 
 @Composable
 fun TextScreen(
@@ -183,7 +193,11 @@ private fun RecipientCard(
             .then(
                 if (selectable) {
                     Modifier
-                        .clickable { onSelect(recipient.id) }
+                        .selectable(
+                            selected = recipient.selected,
+                            role = Role.RadioButton,
+                            onClick = { onSelect(recipient.id) },
+                        )
                         .semantics {
                             contentDescription = "Выбрать ${recipient.browserLabel}"
                         }
@@ -214,10 +228,7 @@ private fun RecipientCard(
             if (selectable) {
                 RadioButton(
                     selected = recipient.selected,
-                    onClick = { onSelect(recipient.id) },
-                    modifier = Modifier.semantics {
-                        contentDescription = "Выбрать ${recipient.browserLabel}"
-                    },
+                    onClick = null,
                 )
             }
             Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
@@ -241,7 +252,12 @@ private fun EditorSection(
     onOpenLinkRequested: (String) -> Unit,
 ) {
     Card(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier
+            .fillMaxWidth()
+            .semantics {
+                isTraversalGroup = true
+                contentDescription = "Область создания сообщения"
+            },
         shape = RoundedCornerShape(24.dp),
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surfaceContainer,
@@ -290,7 +306,9 @@ private fun EditorSection(
             Button(
                 onClick = { onAction(TextAction.SendClicked) },
                 enabled = uiState.canSend,
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .semantics { contentDescription = "Отправить текст в выбранный браузер" },
                 contentPadding = PaddingValues(vertical = 15.dp),
             ) {
                 Text(if (uiState.isSending) "Отправляем…" else "Отправить")
@@ -398,28 +416,34 @@ private fun TransferItemCard(
             modifier = Modifier.padding(18.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-            ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(item.browserLabel, fontWeight = FontWeight.SemiBold)
-                    Text(
-                        text = item.direction.label(),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-                Text(
-                    text = item.status.label(),
-                    style = MaterialTheme.typography.labelLarge,
-                    color = if (item.status == TextTransferStatus.FAILED) {
-                        MaterialTheme.colorScheme.error
-                    } else {
-                        MaterialTheme.colorScheme.primary
-                    },
-                )
-            }
+            Text(
+                text = item.participantLabel(),
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold,
+            )
+            Text(
+                text = item.direction.label(),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Text(
+                text = "Время: ${item.timestampEpochMillis.transferTimeLabel()}",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Text(
+                text = item.status.label(),
+                style = MaterialTheme.typography.labelLarge,
+                color = if (item.status == TextTransferStatus.FAILED) {
+                    MaterialTheme.colorScheme.error
+                } else {
+                    MaterialTheme.colorScheme.primary
+                },
+                modifier = Modifier.semantics {
+                    contentDescription = "Статус передачи текста: ${item.status.label()}"
+                    liveRegion = LiveRegionMode.Polite
+                },
+            )
             HorizontalDivider()
             Text(text = item.content, style = MaterialTheme.typography.bodyLarge)
             Text(
@@ -466,7 +490,14 @@ private fun FeedbackCard(
     Card(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable(onClick = onDismiss),
+            .clickable(
+                onClickLabel = "Закрыть сообщение",
+                role = Role.Button,
+                onClick = onDismiss,
+            )
+            .semantics {
+                contentDescription = "${message.trim()} Закрыть сообщение"
+            },
         shape = RoundedCornerShape(20.dp),
         colors = CardDefaults.cardColors(
             containerColor = if (isError) {
@@ -507,6 +538,16 @@ private fun StateCard(title: String, message: String) {
         }
     }
 }
+
+private fun TextItemUiState.participantLabel(): String = when (direction) {
+    TextTransferDirection.ANDROID_TO_BROWSER -> "Получатель: $browserLabel"
+    TextTransferDirection.BROWSER_TO_ANDROID -> "Отправитель: $browserLabel"
+}
+
+private fun Long.transferTimeLabel(): String =
+    Instant.ofEpochMilli(this)
+        .atZone(ZoneId.systemDefault())
+        .format(transferTimeFormatter)
 
 private fun TextContentKind.label(): String = when (this) {
     TextContentKind.TEXT -> "Текст"

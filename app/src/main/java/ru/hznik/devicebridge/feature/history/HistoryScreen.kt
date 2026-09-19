@@ -26,6 +26,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
@@ -130,6 +131,8 @@ fun HistoryScreen(
                 HistoryMessageCard(
                     title = "История временно недоступна",
                     body = uiState.errorMessage ?: "Повторите попытку позже.",
+                    actionLabel = "Повторить",
+                    onAction = { onAction(HistoryAction.RetryLoad) },
                 )
             }
             HistoryLoadState.CONTENT -> items(
@@ -291,9 +294,11 @@ private fun HistoryRecordCard(
     Card(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable(enabled = !disabled) {
-                onAction(HistoryAction.OpenDetails(record.id))
-            }
+            .clickable(
+                enabled = !disabled,
+                role = Role.Button,
+                onClick = { onAction(HistoryAction.OpenDetails(record.id)) },
+            )
             .semantics {
                 contentDescription = "Открыть детали " + record.primaryLabel()
             },
@@ -352,7 +357,12 @@ private fun HistoryRecordCard(
 }
 
 @Composable
-private fun HistoryMessageCard(title: String, body: String) {
+private fun HistoryMessageCard(
+    title: String,
+    body: String,
+    actionLabel: String? = null,
+    onAction: (() -> Unit)? = null,
+) {
     Card(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(24.dp),
@@ -373,6 +383,11 @@ private fun HistoryMessageCard(title: String, body: String) {
                 text = body,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+            if (actionLabel != null && onAction != null) {
+                OutlinedButton(onClick = onAction) {
+                    Text(actionLabel)
+                }
+            }
         }
     }
 }

@@ -28,6 +28,18 @@ export interface SessionConfirmation {
   readonly trustedCredentialExpiresAtEpochMillis?: number;
 }
 
+export type SessionConfirmationRecovery =
+  | Readonly<{ protocolVersion: number; state: "PENDING" | "DENIED" | "EXPIRED" }>
+  | Readonly<{
+      protocolVersion: number;
+      state: "APPROVED";
+      sessionId: string;
+      token: string;
+      serverTimeEpochMillis: number;
+      trustedCredential?: string;
+      trustedCredentialExpiresAtEpochMillis?: number;
+    }>;
+
 export interface SessionStatus {
   readonly protocolVersion: number;
   readonly sessionId: string;
@@ -98,6 +110,27 @@ export class SessionApiClient {
     return parseConfirmation(value);
   }
 
+
+  async recoverConfirmation(
+    challengeId: string,
+    clientLabel: string,
+    signal?: AbortSignal,
+  ): Promise<SessionConfirmationRecovery> {
+    const value = await this.requestJson(
+      "/api/v1/session/confirmation/status",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          protocolVersion: SESSION_PROTOCOL_VERSION,
+          challengeId,
+          clientLabel,
+        }),
+        signal,
+      },
+    );
+    return parseConfirmationRecovery(value);
+  }
   async exchangeTrusted(
     trustedCredential: string,
     signal?: AbortSignal,
@@ -218,6 +251,23 @@ function parseConfirmation(value: unknown): SessionConfirmation {
     ...confirmation,
     trustedCredential,
     trustedCredentialExpiresAtEpochMillis: expiresAtEpochMillis,
+  };
+}
+
+function parseConfirmationRecovery(value: unknown): SessionConfirmationRecovery {
+  const record = requireRecord(value);
+  const protocolVersion = requireNumber(record.protocolVersion);
+  requireCompatible(protocolVersion);
+  if (record.state === "PENDING" || record.state === "DENIED" || record.state === "EXPIRED") {
+    return { protocolVersion, state: record.state };
+  }
+  if (record.state !== "APPROVED") {
+    throw new Error("Invalid DeviceBridge response");
+  }
+  const confirmation = parseConfirmation({ ...record, protocolVersion });
+  return {
+    ...confirmation,
+    state: "APPROVED",
   };
 }
 

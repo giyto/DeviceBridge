@@ -8,6 +8,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.TestDispatcher
 import kotlinx.coroutines.test.resetMain
@@ -279,6 +280,27 @@ class HomeViewModelTest {
     }
 
     @Test
+    fun consumedPermissionEffectDoesNotReplayOrStartServer() = runTest(dispatcher) {
+        val repository = FakeRepository()
+        val viewModel = createViewModel(
+            repository,
+            FakePermissionGateway(snapshot(sdk = 37, lan = false)),
+        )
+        val firstEffect = async { viewModel.effects.first() }
+        runCurrent()
+
+        viewModel.onAction(HomeAction.StartClicked)
+
+        assertEquals(
+            HomeEffect.RequestPermissions(
+                listOf("android.permission.ACCESS_LOCAL_NETWORK"),
+            ),
+            firstEffect.await(),
+        )
+        assertNull(withTimeoutOrNull(100) { viewModel.effects.first() })
+        assertEquals(0, repository.startCalls)
+    }
+    @Test
     fun api29StartsWithoutLanRequestAndStopIsIdempotent() = runTest(dispatcher) {
         val repository = FakeRepository()
         val viewModel = createViewModel(
@@ -337,6 +359,74 @@ class HomeViewModelTest {
             assertFalse(source.contains("io.ktor"))
             assertFalse(source.contains("ServerForegroundService"))
             assertFalse(source.contains("android.app.Service"))
+        }
+
+    @Test
+    fun lifecycleFailuresExposeDistinctFailureCodeAndRecoveryAction() =
+        runTest(dispatcher) {
+            val repository = FakeRepository()
+            val viewModel = createViewModel(repository)
+            val cases = listOf(
+                Triple(
+                    ServerLifecycleError.LocalNetworkPermissionDenied,
+                    ru.hznik.devicebridge.domain.error.FailureCode.LOCAL_NETWORK_PERMISSION_DENIED,
+                    ru.hznik.devicebridge.domain.error.RecoveryAction.REQUEST_PERMISSION,
+                ),
+                Triple(
+                    ServerLifecycleError.PermissionRevoked,
+                    ru.hznik.devicebridge.domain.error.FailureCode.LOCAL_NETWORK_PERMISSION_REVOKED,
+                    ru.hznik.devicebridge.domain.error.RecoveryAction.OPEN_SETTINGS,
+                ),
+                Triple(
+                    ServerLifecycleError.NetworkLost,
+                    ru.hznik.devicebridge.domain.error.FailureCode.NETWORK_LOST,
+                    ru.hznik.devicebridge.domain.error.RecoveryAction.CONNECT_TO_LOCAL_NETWORK,
+                ),
+            )
+
+            cases.forEachIndexed { index, (cause, code, action) ->
+                repository.mutableState.value = ServerLifecycleState.Error(index + 1L, cause)
+                runCurrent()
+                assertEquals(code, viewModel.uiState.value.failure?.code)
+                assertTrue(action in viewModel.uiState.value.failure?.recoveryActions.orEmpty())
+                assertNull(viewModel.uiState.value.localAddress)
+            }
+        }
+
+    @Test
+    fun explicitRecoveryIntentsRequestPermissionOpenSettingsOrStartAgain() =
+        runTest(dispatcher) {
+            val repository = FakeRepository(
+                ServerLifecycleState.Error(
+                    1,
+                    ServerLifecycleError.LocalNetworkPermissionDenied,
+                ),
+            )
+            val gateway = FakePermissionGateway(snapshot(sdk = 37, lan = false))
+            val viewModel = createViewModel(repository, gateway)
+            val permissionEffect = async { viewModel.effects.first() }
+            runCurrent()
+
+            viewModel.onAction(HomeAction.RequestPermissionClicked)
+            runCurrent()
+            assertEquals(
+                HomeEffect.RequestPermissions(
+                    listOf("android.permission.ACCESS_LOCAL_NETWORK"),
+                ),
+                permissionEffect.await(),
+            )
+            assertEquals(0, repository.startCalls)
+
+            val settingsEffect = async { viewModel.effects.first() }
+            viewModel.onAction(HomeAction.OpenSettingsClicked)
+            runCurrent()
+            assertEquals(HomeEffect.OpenAppSettings, settingsEffect.await())
+            assertEquals(0, repository.startCalls)
+
+            gateway.current = snapshot(sdk = 29, lan = true)
+            viewModel.onAction(HomeAction.StartAgainClicked)
+            runCurrent()
+            assertEquals(1, repository.startCalls)
         }
 
     private fun createViewModel(

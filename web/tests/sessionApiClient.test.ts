@@ -124,6 +124,44 @@ describe("SessionApiClient", () => {
     expect(JSON.stringify(fetcher.mock.calls)).not.toContain("Authorization");
     expect(fetcher.mock.calls.every(([url]) => !String(url).includes("?"))).toBe(true);
   });
+
+  it("checks the original pairing request without resending its code", async () => {
+    const fetcher = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(jsonResponse({
+        protocolVersion: 1,
+        state: "PENDING",
+      }))
+      .mockResolvedValueOnce(jsonResponse({
+        protocolVersion: 1,
+        state: "APPROVED",
+        sessionId: "session-recovered",
+        token: "recovered-token",
+        serverTimeEpochMillis: 12_000,
+      }));
+    const client = new SessionApiClient(fetcher);
+
+    const pending = await client.recoverConfirmation("challenge-1", "Edge");
+    const approved = await client.recoverConfirmation("challenge-1", "Edge");
+
+    expect(pending).toEqual({ protocolVersion: 1, state: "PENDING" });
+    expect(approved).toMatchObject({
+      state: "APPROVED",
+      token: "recovered-token",
+    });
+    expect(fetcher.mock.calls.map(([url]) => url)).toEqual([
+      "/api/v1/session/confirmation/status",
+      "/api/v1/session/confirmation/status",
+    ]);
+    for (const [, init] of fetcher.mock.calls) {
+      expect(JSON.parse(String(init?.body))).toEqual({
+        protocolVersion: 1,
+        challengeId: "challenge-1",
+        clientLabel: "Edge",
+      });
+      expect(String(init?.body)).not.toContain("123456");
+    }
+  });
 });
 
 function jsonResponse(body: unknown, status = 200): Response {

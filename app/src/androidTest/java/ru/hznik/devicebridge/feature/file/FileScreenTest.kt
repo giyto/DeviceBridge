@@ -1,16 +1,29 @@
 package ru.hznik.devicebridge.feature.file
 
+import androidx.compose.ui.test.SemanticsMatcher
+import androidx.compose.ui.test.assert
+import androidx.compose.ui.test.assertCountEquals
+import androidx.compose.ui.test.onAllNodesWithContentDescription
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.junit4.StateRestorationTester
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.Density
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalDensity
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import org.junit.Assert.assertEquals
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -19,6 +32,7 @@ import ru.hznik.devicebridge.domain.file.FileTransferId
 import ru.hznik.devicebridge.domain.file.FileTransferPhase
 import ru.hznik.devicebridge.domain.file.FileTransferFailure
 import ru.hznik.devicebridge.domain.file.FileDraftId
+import ru.hznik.devicebridge.domain.session.BrowserSessionId
 import ru.hznik.devicebridge.ui.theme.DeviceBridgeTheme
 
 @RunWith(AndroidJUnit4::class)
@@ -102,11 +116,16 @@ class FileScreenTest {
                         .copy(failure = FileTransferFailure.StorageUnavailable),
                     item("checksum", FileTransferPhase.FAILED, 100, 100)
                         .copy(failure = FileTransferFailure.ChecksumMismatch),
+                    item("space", FileTransferPhase.FAILED, 0, 100)
+                        .copy(failure = FileTransferFailure.InsufficientSpace),
                 ),
             ),
         )
 
-        composeRule.onNodeWithText("Папка недоступна или на устройстве недостаточно места.")
+        composeRule.onNodeWithText("Выбранная папка недоступна. Выберите другую папку.")
+            .performScrollTo()
+            .assertIsDisplayed()
+        composeRule.onNodeWithText("На устройстве недостаточно свободного места.")
             .performScrollTo()
             .assertIsDisplayed()
         composeRule.onNodeWithText("Контрольная сумма не совпала. Повторите передачу.")
@@ -141,6 +160,185 @@ class FileScreenTest {
         assert(actions.contains(FileAction.ChangeIncomingDestination(incoming.id)))
     }
 
+    @Test
+    fun longFilenameAndTerminalStatesExposeOnlyApplicableActionsAtLargeFont() {
+        val longName = "quarterly-report-".repeat(14) + ".pdf"
+        composeRule.setContent {
+            CompositionLocalProvider(LocalDensity provides Density(1f, 2f)) {
+                DeviceBridgeTheme(darkTheme = true) {
+                    FileScreen(
+                        FileUiState(
+                            transfers = listOf(
+                                item("verify", FileTransferPhase.VERIFYING, 100, 100),
+                                item("cancelled", FileTransferPhase.CANCELLED, 60, 100),
+                                item("completed", FileTransferPhase.COMPLETED, 100, 100),
+                                item("failed", FileTransferPhase.FAILED, 25, 100).copy(
+                                    displayName = longName,
+                                    mimeType = "application/pdf",
+                                    failure = FileTransferFailure.StreamFailed,
+                                ),
+                            ),
+                        ),
+                    )
+                }
+            }
+        }
+
+        composeRule.onNodeWithText(longName).performScrollTo().assertIsDisplayed()
+        composeRule.onNodeWithContentDescription("Тип файла PDF")
+            .performScrollTo()
+            .assertIsDisplayed()
+        composeRule.onNodeWithContentDescription("Отменить передачу verify.bin")
+            .performScrollTo()
+            .assertIsDisplayed()
+        composeRule.onNodeWithContentDescription("Повторить передачу cancelled.bin")
+            .performScrollTo()
+            .assertIsDisplayed()
+        composeRule.onAllNodesWithContentDescription("Отменить передачу cancelled.bin")
+            .assertCountEquals(0)
+        composeRule.onNodeWithContentDescription("Открыть файл completed.bin")
+            .performScrollTo()
+            .assertIsDisplayed()
+        composeRule.onNodeWithContentDescription("Повторить передачу $longName")
+            .performScrollTo()
+            .assertIsDisplayed()
+        composeRule.onAllNodesWithText("100%").assertCountEquals(0)
+    }
+
+    @Test
+    fun transferStageIsLiveRegionAndProgressDoesNotStealFocus() {
+        var state by mutableStateOf(
+            FileUiState(
+                transfers = listOf(
+                    item("focus", FileTransferPhase.TRANSFERRING, 10, 100),
+                ),
+            ),
+        )
+        composeRule.setContent {
+            DeviceBridgeTheme {
+                FileScreen(uiState = state)
+            }
+        }
+        val polite = SemanticsMatcher.expectValue(
+            SemanticsProperties.LiveRegion,
+            LiveRegionMode.Polite,
+        )
+        composeRule.onNodeWithContentDescription("Этап передачи focus.bin: Передаётся")
+            .performScrollTo()
+            .assert(polite)
+        val progress = composeRule.onNode(
+            SemanticsMatcher.keyIsDefined(SemanticsProperties.ProgressBarRangeInfo),
+        ).performScrollTo()
+        val doesNotCaptureFocusOrAnnounceEveryUpdate = SemanticsMatcher(
+            "progress does not expose focus or live-region state",
+        ) {
+            !it.config.contains(SemanticsProperties.Focused) &&
+                !it.config.contains(SemanticsProperties.LiveRegion)
+        }
+        progress.assert(doesNotCaptureFocusOrAnnounceEveryUpdate)
+
+        composeRule.runOnIdle {
+            state = state.copy(
+                transfers = listOf(
+                    item("focus", FileTransferPhase.TRANSFERRING, 50, 100),
+                ),
+            )
+        }
+
+        progress.assert(doesNotCaptureFocusOrAnnounceEveryUpdate)
+        composeRule.onNodeWithText("50%").assertIsDisplayed()
+    }
+    @Test
+    fun confirmAndRetryCommandsAreNotRepeatedAfterRecompositionOrRestoration() {
+        val actions = mutableListOf<FileAction>()
+        val sessionId = BrowserSessionId("session-effect-test")
+        val failedId = FileTransferId("failed-effect-test")
+        var state by mutableStateOf(
+            FileUiState(
+                selection = listOf(
+                    FileDraftItem(
+                        id = FileDraftId("draft-effect-test"),
+                        displayName = "notes.txt",
+                        sizeBytes = 42,
+                        mimeType = "text/plain",
+                        sha256 = "a".repeat(64),
+                        sourceIdentity = "content://notes",
+                        sourceLease = NoOpDraftSourceLease,
+                    ),
+                ),
+                recipients = listOf(
+                    FileRecipientUiState(sessionId, "Chrome", "192.168.1.2", selected = true),
+                ),
+                selectedSessionId = sessionId,
+                transfers = listOf(
+                    item("failed-effect-test", FileTransferPhase.FAILED, 10, 42).copy(
+                        failure = FileTransferFailure.StreamFailed,
+                    ),
+                ),
+            ),
+        )
+        val restorationTester = StateRestorationTester(composeRule)
+        restorationTester.setContent {
+            DeviceBridgeTheme {
+                FileScreen(uiState = state, onAction = actions::add)
+            }
+        }
+
+        composeRule.onNodeWithContentDescription("Подтвердить отправку файлов")
+            .performScrollTo()
+            .performClick()
+        composeRule.onNodeWithContentDescription("Повторить передачу failed-effect-test.bin")
+            .performScrollTo()
+            .performClick()
+        composeRule.runOnIdle {
+            state = state.copy(errorMessage = "Проверка recomposition")
+        }
+        restorationTester.emulateSavedInstanceStateRestore()
+
+        composeRule.runOnIdle {
+            assertEquals(
+                listOf(FileAction.ConfirmSend, FileAction.Retry(failedId)),
+                actions,
+            )
+        }
+    }
+    @Test
+    fun recipientCardUsesRadioButtonRole() {
+        val sessionId = BrowserSessionId("accessible-file-recipient")
+        setScreen(
+            FileUiState(
+                recipients = listOf(
+                    FileRecipientUiState(
+                        id = sessionId,
+                        browserLabel = "Edge",
+                        sourceIpv4 = "192.168.1.3",
+                        selected = true,
+                    ),
+                ),
+                selectedSessionId = sessionId,
+            ),
+        )
+        val radioButton = SemanticsMatcher.expectValue(
+            SemanticsProperties.Role,
+            Role.RadioButton,
+        )
+
+        composeRule.onNodeWithContentDescription("Выбрать браузер Edge")
+            .assert(radioButton)
+    }
+
+    @Test
+    fun feedbackCardIsAnExplicitDismissAction() {
+        setScreen(FileUiState(errorMessage = "Файл недоступен."))
+        val button = SemanticsMatcher.expectValue(
+            SemanticsProperties.Role,
+            Role.Button,
+        )
+
+        composeRule.onNodeWithContentDescription(
+            "Файл недоступен. Закрыть сообщение",
+        ).assert(button)
+    }
     private fun setScreen(state: FileUiState) {
         composeRule.setContent { DeviceBridgeTheme { FileScreen(state) } }
     }

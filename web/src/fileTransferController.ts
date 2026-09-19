@@ -43,6 +43,7 @@ export type FileTransferUiState =
   | Readonly<{ kind: "inactive" }>
   | Readonly<{
       kind: "active";
+      connectionAvailable: boolean;
       selection: readonly FileSelectionPreview[];
       transfers: readonly FileTransferUiItem[];
       preparing: boolean;
@@ -103,7 +104,13 @@ export class FileTransferController {
     this.token = token;
     this.draftFiles = [];
     this.sourceFiles.clear();
-    this.emit({ kind: "active", selection: [], transfers: [], preparing: false });
+    this.emit({
+      kind: "active",
+      connectionAvailable: true,
+      selection: [],
+      transfers: [],
+      preparing: false,
+    });
   }
 
   deactivate(): void {
@@ -117,6 +124,16 @@ export class FileTransferController {
 
   dispose(): void {
     this.deactivate();
+  }
+
+  setConnectionAvailable(available: boolean): void {
+    if (this.state.kind !== "active" || this.state.connectionAvailable === available) return;
+    if (!available) this.resetOperations();
+    this.emit({
+      ...this.state,
+      connectionAvailable: available,
+      preparing: available ? this.state.preparing : false,
+    });
   }
 
   currentState(): FileTransferUiState {
@@ -167,6 +184,7 @@ export class FileTransferController {
   async confirmSelection(): Promise<void> {
     if (
       this.state.kind !== "active" ||
+      !this.state.connectionAvailable ||
       this.token === undefined ||
       this.state.preparing ||
       this.draftFiles.every((draft) => draft.error !== undefined)
@@ -326,7 +344,11 @@ export class FileTransferController {
   }
 
   async cancel(transferId: string): Promise<void> {
-    if (this.state.kind !== "active" || this.token === undefined) return;
+    if (
+      this.state.kind !== "active" ||
+      !this.state.connectionAvailable ||
+      this.token === undefined
+    ) return;
     this.operations.get(transferId)?.abort();
     const controller = new AbortController();
     this.operations.set(transferId, controller);
@@ -343,15 +365,22 @@ export class FileTransferController {
   }
 
   async retry(transferId: string): Promise<void> {
-    if (this.state.kind !== "active" || this.token === undefined) return;
+    if (
+      this.state.kind !== "active" ||
+      !this.state.connectionAvailable ||
+      this.token === undefined
+    ) return;
     const item = this.transfer(transferId);
     if (
       item === undefined ||
       item.status !== "FAILED" && item.status !== "CANCELLED"
     ) return;
+    const sourceFile = item.metadata.direction === "BROWSER_TO_ANDROID"
+      ? this.sourceFiles.get(transferId)
+      : undefined;
     if (
       item.metadata.direction === "BROWSER_TO_ANDROID" &&
-      !this.sourceFiles.has(transferId)
+      sourceFile === undefined
     ) {
       this.failLocal(
         transferId,
@@ -362,6 +391,30 @@ export class FileTransferController {
     const context = this.operationContext(transferId);
     if (context === undefined) return;
     try {
+      if (sourceFile !== undefined) {
+        if (!matchesSourceMetadata(sourceFile, item.metadata)) {
+          this.sourceFiles.delete(transferId);
+          this.failLocal(
+            transferId,
+            "Исходный файл изменился. Выберите его заново.",
+          );
+          return;
+        }
+        const currentSha256 = await this.hashFile(
+          sourceFile,
+          undefined,
+          context.controller.signal,
+        );
+        if (!this.isCurrent(context.generation, context.token)) return;
+        if (currentSha256.toLowerCase() !== item.metadata.sha256.toLowerCase()) {
+          this.sourceFiles.delete(transferId);
+          this.failLocal(
+            transferId,
+            "Исходный файл изменился. Выберите его заново.",
+          );
+          return;
+        }
+      }
       const snapshot = await this.api.retry(
         context.token,
         transferId,
@@ -380,6 +433,7 @@ export class FileTransferController {
   private startUpload(transferId: string): void {
     if (
       this.state.kind !== "active" ||
+      !this.state.connectionAvailable ||
       this.token === undefined ||
       this.operations.has(transferId)
     ) return;
@@ -416,7 +470,11 @@ export class FileTransferController {
   }
 
   private operationContext(transferId: string) {
-    if (this.state.kind !== "active" || this.token === undefined) return undefined;
+    if (
+      this.state.kind !== "active" ||
+      !this.state.connectionAvailable ||
+      this.token === undefined
+    ) return undefined;
     this.operations.get(transferId)?.abort();
     const controller = new AbortController();
     this.operations.set(transferId, controller);
@@ -540,6 +598,9 @@ function fileCodeMessage(
   switch (code) {
     case "FILE_TOO_LARGE": return fileLimitMessage(effectiveFileLimitBytes);
     case "CHECKSUM_MISMATCH": return "Контрольная сумма файла не совпала.";
+    case "DESTINATION_UNAVAILABLE": return "Папка назначения недоступна.";
+    case "INSUFFICIENT_SPACE": return "На устройстве недостаточно свободного места.";
+    case "SOURCE_UNAVAILABLE": return "Исходный файл недоступен или изменился.";
     case "NOT_APPROVED": return "Подтвердите передачу на телефоне.";
     case "CANCELLED": return "Передача отменена.";
     case "SESSION_UNAVAILABLE":
@@ -553,6 +614,12 @@ function fileCodeMessage(
 
 function isAbortError(error: unknown): boolean {
   return error instanceof DOMException && error.name === "AbortError";
+}
+
+function matchesSourceMetadata(file: File, metadata: FileMetadata): boolean {
+  return file.size === metadata.sizeBytes &&
+    (file.name || "file-" + metadata.transferId.slice(0, 8)) === metadata.displayName &&
+    (file.type || "application/octet-stream") === metadata.mimeType;
 }
 
 function selectionError(file: File, effectiveFileLimitBytes: number): string | undefined {

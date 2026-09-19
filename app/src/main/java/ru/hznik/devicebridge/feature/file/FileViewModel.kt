@@ -6,6 +6,7 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
 import java.util.concurrent.atomic.AtomicLong
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.collectLatest
@@ -13,6 +14,7 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.receiveAsFlow
 import ru.hznik.devicebridge.domain.file.CreateFileTransfersRequest
 import ru.hznik.devicebridge.domain.file.FileCommandId
 import ru.hznik.devicebridge.domain.file.FileDraftId
@@ -108,10 +110,10 @@ class FileViewModel private constructor(
     private val mutableUiState = MutableStateFlow(
         buildUiState(sessions.value, transfers.value, settings.value, local.value),
     )
-    private val mutableEffects = MutableStateFlow<FileEffect?>(null)
+    private val effectChannel = Channel<FileEffect>(Channel.BUFFERED)
 
     val uiState: StateFlow<FileUiState> = mutableUiState
-    val effects: StateFlow<FileEffect?> = mutableEffects
+    val effects = effectChannel.receiveAsFlow()
 
     init {
         viewModelScope.launch {
@@ -131,7 +133,7 @@ class FileViewModel private constructor(
 
     fun onAction(action: FileAction) {
         when (action) {
-            FileAction.PickFiles -> mutableEffects.value = FileEffect.ChooseFiles
+            FileAction.PickFiles -> effectChannel.trySend(FileEffect.ChooseFiles)
             is FileAction.SelectionReceived -> acceptSelection(action.items, shared = false)
             is FileAction.SharedSelectionReceived -> acceptSelection(action.items, shared = true)
             is FileAction.SelectionRejected -> if (action.count > 0) {
@@ -148,14 +150,16 @@ class FileViewModel private constructor(
             FileAction.ConfirmSend -> confirmSend()
             is FileAction.ApproveIncoming -> {
                 val saved = settings.value.destinationTree?.value
-                mutableEffects.value = if (saved == null) {
-                    FileEffect.ChooseDestination(action.transferId)
-                } else {
-                    FileEffect.UseDefaultDestination(action.transferId, saved)
-                }
+                effectChannel.trySend(
+                    if (saved == null) {
+                        FileEffect.ChooseDestination(action.transferId)
+                    } else {
+                        FileEffect.UseDefaultDestination(action.transferId, saved)
+                    },
+                )
             }
             is FileAction.ChangeIncomingDestination ->
-                mutableEffects.value = FileEffect.ChooseDestination(action.transferId)
+                effectChannel.trySend(FileEffect.ChooseDestination(action.transferId))
             is FileAction.DestinationSelected -> approve(action.transferId, action.destinationId)
             is FileAction.DestinationCancelled -> local.update {
                 it.copy(errorMessage = "Папка не выбрана. Файл остаётся в ожидании.", successMessage = null)
@@ -168,7 +172,7 @@ class FileViewModel private constructor(
             }
             is FileAction.Cancel -> execute(action.transferId, cancelTransfer::invoke)
             is FileAction.Retry -> execute(action.transferId, retryTransfer::invoke)
-            is FileAction.Open -> mutableEffects.value = FileEffect.OpenCompleted(action.transferId)
+            is FileAction.Open -> effectChannel.trySend(FileEffect.OpenCompleted(action.transferId))
             is FileAction.OpenFailed -> local.update {
                 it.copy(errorMessage = action.message, successMessage = null)
             }
@@ -176,9 +180,6 @@ class FileViewModel private constructor(
         }
     }
 
-    fun consumeEffect(effect: FileEffect) {
-        if (mutableEffects.value == effect) mutableEffects.value = null
-    }
 
     private fun acceptSelection(items: List<FileDraftItem>, shared: Boolean) {
         val valid = items.filter { item -> item.sizeBytes >= 0 }

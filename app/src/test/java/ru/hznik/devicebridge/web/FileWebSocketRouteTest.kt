@@ -103,7 +103,7 @@ class FileWebSocketRouteTest {
                         while (
                             server.fileCoordinator.state.value
                                 .item(FileTransferId("disconnect-file"))?.phase !=
-                            ru.hznik.devicebridge.domain.file.FileTransferPhase.CANCELLED
+                            ru.hznik.devicebridge.domain.file.FileTransferPhase.FAILED
                         ) {
                             delay(10)
                         }

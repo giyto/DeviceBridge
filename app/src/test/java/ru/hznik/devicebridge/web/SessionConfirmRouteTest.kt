@@ -10,6 +10,8 @@ import ru.hznik.devicebridge.core.protocol.session.SessionChallengeResponse
 import ru.hznik.devicebridge.core.protocol.session.SessionConfirmResponse
 import ru.hznik.devicebridge.core.protocol.session.SessionErrorCode
 import ru.hznik.devicebridge.core.protocol.session.SessionErrorEnvelope
+import ru.hznik.devicebridge.core.protocol.session.SessionConfirmationStatusResponse
+import ru.hznik.devicebridge.core.protocol.session.SessionConfirmationStatusState
 import ru.hznik.devicebridge.core.protocol.session.SessionProtocolJson
 
 class SessionConfirmRouteTest {
@@ -68,6 +70,55 @@ class SessionConfirmRouteTest {
         assertTrue(payload.token.isNotBlank())
         assertTrue(payload.sessionId.isNotBlank())
     }
+
+    @Test
+    fun confirmationStatusReturnsTheOriginalPendingThenApprovedResult() =
+        withSessionRouteServer { server ->
+            val challenge = server.challenge("Edge")
+            val confirmationFuture = server.requestAsync(
+                "POST",
+                "/api/v1/session/confirm",
+                server.confirmBody(challenge.challengeId, "123456", "Edge"),
+                server.sameOriginJsonHeaders(),
+            )
+            server.awaitPendingRequest()
+
+            val pendingResponse = server.request(
+                "POST",
+                "/api/v1/session/confirmation/status",
+                server.statusBody(challenge.challengeId, "Edge"),
+                server.sameOriginJsonHeaders(),
+            )
+            assertEquals(200, pendingResponse.statusCode())
+            assertEquals(
+                SessionConfirmationStatusState.PENDING,
+                SessionProtocolJson.decode<SessionConfirmationStatusResponse>(
+                    pendingResponse.body(),
+                ).state,
+            )
+            assertEquals(1, server.coordinator.state.value.pendingRequests.size)
+
+            runBlocking {
+                server.coordinator.approve(server.coordinator.state.value.pendingRequests.single().id)
+            }
+            val original = SessionProtocolJson.decode<SessionConfirmResponse>(
+                confirmationFuture.get(2, TimeUnit.SECONDS).body(),
+            )
+            val approvedResponse = server.request(
+                "POST",
+                "/api/v1/session/confirmation/status",
+                server.statusBody(challenge.challengeId, "Edge"),
+                server.sameOriginJsonHeaders(),
+            )
+            val recovered = SessionProtocolJson.decode<SessionConfirmationStatusResponse>(
+                approvedResponse.body(),
+            )
+
+            assertEquals(SessionConfirmationStatusState.APPROVED, recovered.state)
+            assertEquals(original.sessionId, recovered.sessionId)
+            assertEquals(original.token, recovered.token)
+            assertEquals(1, server.coordinator.state.value.sessions.size)
+        }
 
     @Test
     fun denyAndTimeoutNeverReturnToken() {
@@ -184,6 +235,12 @@ class SessionConfirmRouteTest {
         label: String,
     ): String =
         """{"protocolVersion":1,"challengeId":"$challengeId","code":"$code","clientLabel":"$label"}"""
+
+    private fun SessionRouteTestServer.statusBody(
+        challengeId: String,
+        label: String,
+    ): String =
+        """{"protocolVersion":1,"challengeId":"$challengeId","clientLabel":"$label"}"""
 
     private fun SessionRouteTestServer.awaitPendingRequest() {
         repeat(100) {

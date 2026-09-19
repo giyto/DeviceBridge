@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { SessionEventSocketClient, type SocketLike } from "../src/sessionEventSocketClient";
+import { BoundedReconnectPolicy } from "../src/reconnectPolicy";
 
 describe("SessionEventSocketClient", () => {
   it("authenticates on LAN HTTP when crypto.randomUUID is unavailable", () => {
@@ -170,6 +171,7 @@ describe("SessionEventSocketClient", () => {
       immediateScheduler,
       () => "client-message",
       () => 5_000,
+      new BoundedReconnectPolicy({ random: () => 0.5 }),
     );
     client.connect("token", {
       onSessionLost: lost,
@@ -206,6 +208,78 @@ describe("SessionEventSocketClient", () => {
       [3, 4_000],
     ]);
     expect(lost).toHaveBeenCalledOnce();
+  });
+
+  it("resets retry budget after authentication and ignores stale socket closes", () => {
+    const sockets: FakeSocket[] = [];
+    const scheduled: Array<{ callback: () => void; delayMs: number }> = [];
+    const scheduler = {
+      setTimeout(callback: () => void, delayMs: number): unknown {
+        scheduled.push({ callback, delayMs });
+        return scheduled.length;
+      },
+      clearTimeout(): void {},
+    };
+    const client = new SessionEventSocketClient(
+      (url) => {
+        const socket = new FakeSocket(url);
+        sockets.push(socket);
+        return socket;
+      },
+      "http://devicebridge.local",
+      scheduler,
+      () => "message-1",
+      () => 1_000,
+      new BoundedReconnectPolicy({ random: () => 0.5 }),
+    );
+    client.connect("token", { onSessionLost: vi.fn() });
+    const original = sockets[0]!;
+    original.closeFromServer(1006);
+    expect(scheduled[0]?.delayMs).toBe(1_000);
+    scheduled.shift()!.callback();
+    const reconnected = sockets[1]!;
+    reconnected.open();
+    reconnected.message({
+      protocolVersion: 1,
+      messageId: "authenticated-1",
+      type: "session.authenticated",
+      timestamp: 1_000,
+    });
+
+    original.closeFromServer(1006);
+    expect(scheduled).toHaveLength(0);
+    reconnected.closeFromServer(1006);
+    expect(scheduled[0]?.delayMs).toBe(1_000);
+  });
+
+  it("cancels a pending retry when disconnected", () => {
+    const sockets: FakeSocket[] = [];
+    const callbacks: Array<() => void> = [];
+    const scheduler = {
+      setTimeout(callback: () => void): unknown {
+        callbacks.push(callback);
+        return callbacks.length;
+      },
+      clearTimeout(): void {},
+    };
+    const lost = vi.fn();
+    const client = new SessionEventSocketClient(
+      (url) => {
+        const socket = new FakeSocket(url);
+        sockets.push(socket);
+        return socket;
+      },
+      "http://devicebridge.local",
+      scheduler,
+    );
+    client.connect("token", { onSessionLost: lost });
+    sockets[0]!.closeFromServer(1006);
+
+    client.disconnect();
+    callbacks[0]?.();
+
+    expect(sockets).toHaveLength(1);
+    expect(lost).not.toHaveBeenCalled();
   });
 });
 

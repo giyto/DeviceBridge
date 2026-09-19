@@ -138,7 +138,7 @@ class FileSessionEventBridgeTest {
         runCurrent()
 
         assertEquals(
-            FileTransferPhase.CANCELLED,
+            FileTransferPhase.FAILED,
             files.state.value.item(transferId)?.phase,
         )
         assertFalse(stage.exists())

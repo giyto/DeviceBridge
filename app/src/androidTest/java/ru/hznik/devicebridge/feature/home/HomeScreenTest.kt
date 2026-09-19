@@ -9,17 +9,22 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.ClipEntry
 import androidx.compose.ui.platform.Clipboard
 import androidx.compose.ui.platform.LocalClipboard
+import androidx.compose.ui.test.SemanticsMatcher
+import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertTextContains
+import androidx.compose.ui.test.junit4.StateRestorationTester
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.unit.Density
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import org.junit.Assert.assertEquals
@@ -62,6 +67,69 @@ class HomeScreenTest {
         composeRule.onNodeWithText("Повторить запуск").assertIsEnabled()
         composeRule.onNodeWithText("Адрес сервера", substring = true)
             .assertDoesNotExist()
+    }
+
+    @Test
+    fun lifecycleFailureShowsOnlyItsApplicableRecoveryAction() {
+        var received: HomeAction? = null
+        val permissionFailure = ru.hznik.devicebridge.domain.error.UserFacingFailure(
+            code = ru.hznik.devicebridge.domain.error.FailureCode.LOCAL_NETWORK_PERMISSION_DENIED,
+            severity = ru.hznik.devicebridge.domain.error.FailureSeverity.RECOVERABLE,
+            recoveryActions = setOf(
+                ru.hznik.devicebridge.domain.error.RecoveryAction.REQUEST_PERMISSION,
+            ),
+        )
+        var state by mutableStateOf(
+            ServerSessionUiState(
+                status = HomeServerStatus.Error,
+                errorMessage = "Нет разрешения на доступ к локальной сети.",
+                failure = permissionFailure,
+            ),
+        )
+        composeRule.setContent {
+            DeviceBridgeTheme {
+                HomeScreen(uiState = state, onAction = { received = it })
+            }
+        }
+
+        composeRule.onNodeWithText("Запросить разрешение")
+            .assertIsDisplayed()
+            .performClick()
+        composeRule.runOnIdle {
+            assertEquals(HomeAction.RequestPermissionClicked, received)
+            received = null
+            state = state.copy(
+                failure = ru.hznik.devicebridge.domain.error.UserFacingFailure(
+                    code = ru.hznik.devicebridge.domain.error.FailureCode.LOCAL_NETWORK_PERMISSION_REVOKED,
+                    severity = ru.hznik.devicebridge.domain.error.FailureSeverity.RECOVERABLE,
+                    recoveryActions = setOf(
+                        ru.hznik.devicebridge.domain.error.RecoveryAction.OPEN_SETTINGS,
+                    ),
+                ),
+            )
+        }
+        composeRule.onNodeWithText("Открыть настройки")
+            .assertIsDisplayed()
+            .performClick()
+        composeRule.runOnIdle {
+            assertEquals(HomeAction.OpenSettingsClicked, received)
+            received = null
+            state = state.copy(
+                failure = ru.hznik.devicebridge.domain.error.UserFacingFailure(
+                    code = ru.hznik.devicebridge.domain.error.FailureCode.NETWORK_LOST,
+                    severity = ru.hznik.devicebridge.domain.error.FailureSeverity.RECOVERABLE,
+                    recoveryActions = setOf(
+                        ru.hznik.devicebridge.domain.error.RecoveryAction.CONNECT_TO_LOCAL_NETWORK,
+                    ),
+                ),
+            )
+        }
+        composeRule.onNodeWithText("Запустить снова")
+            .assertIsDisplayed()
+            .performClick()
+        composeRule.runOnIdle {
+            assertEquals(HomeAction.StartAgainClicked, received)
+        }
     }
 
     @Test
@@ -185,9 +253,11 @@ class HomeScreenTest {
             DeviceBridgeTheme { HomeScreen(uiState = state) }
         }
 
-        composeRule.onNodeWithText("Код подключения").assertIsDisplayed()
-        composeRule.onNodeWithText("123456").assertIsDisplayed()
-        composeRule.onNodeWithText("Код обновится через 01:35").assertIsDisplayed()
+        composeRule.onNodeWithText("Код подключения").performScrollTo().assertIsDisplayed()
+        composeRule.onNodeWithText("123456").performScrollTo().assertIsDisplayed()
+        composeRule.onNodeWithText("Код обновится через 01:35")
+            .performScrollTo()
+            .assertIsDisplayed()
 
         composeRule.runOnIdle { state = ServerSessionUiState() }
         composeRule.onNodeWithText("123456").assertDoesNotExist()
@@ -323,6 +393,111 @@ class HomeScreenTest {
             .assertTextContains("192.168.1.24", substring = true)
     }
 
+    @Test
+    fun connectionGuideCoversTrustedWifiPairingAndCanBeReopened() {
+        var state by mutableStateOf(ServerSessionUiState())
+        composeRule.setContent {
+            DeviceBridgeTheme {
+                HomeScreen(uiState = state)
+            }
+        }
+
+        composeRule.onNodeWithText(
+            "Подключите телефон и компьютер к одной доверенной Wi-Fi сети.",
+        ).assertIsDisplayed()
+        composeRule.onNodeWithText(
+            "Аккаунт и отдельная программа для компьютера не нужны.",
+        ).assertIsDisplayed()
+
+        composeRule.runOnIdle {
+            state = ServerSessionUiState(
+                status = HomeServerStatus.Running,
+                localAddress = "http://192.168.1.24:8787",
+                pairingCode = "123456",
+                pairingExpiresInSeconds = 120,
+            )
+        }
+        composeRule.onNodeWithText("Откройте адрес на компьютере")
+            .performScrollTo()
+            .assertIsDisplayed()
+        composeRule.onNodeWithText(
+            "Введите код 123456 и подтвердите браузер на телефоне.",
+        ).performScrollTo().assertIsDisplayed()
+
+        composeRule.runOnIdle {
+            state = state.copy(
+                activeBrowsers = listOf(
+                    ActiveBrowserUiState(
+                        BrowserSessionId("session-guide"),
+                        "Edge",
+                        "192.168.1.2",
+                    ),
+                ),
+            )
+        }
+        composeRule.onNodeWithText("Показать инструкцию подключения")
+            .performScrollTo()
+            .assertIsDisplayed()
+            .performClick()
+        composeRule.onNodeWithText("Откройте адрес на компьютере")
+            .performScrollTo()
+            .assertIsDisplayed()
+    }
+
+    @Test
+    fun connectionPairingAndBrowserTransitionsArePoliteLiveRegions() {
+        setScreen(
+            ServerSessionUiState(
+                status = HomeServerStatus.Running,
+                pairingCode = "123456",
+                pairingExpiresInSeconds = 120,
+                pendingBrowsers = listOf(
+                    PendingBrowserUiState(
+                        PairingRequestId("live-request"),
+                        "Firefox",
+                        "192.168.1.5",
+                        42,
+                    ),
+                ),
+            ),
+        )
+        val polite = SemanticsMatcher.expectValue(
+            SemanticsProperties.LiveRegion,
+            LiveRegionMode.Polite,
+        )
+
+        composeRule.onNodeWithContentDescription("Состояние подключения: Сервер запущен")
+            .assert(polite)
+        composeRule.onNodeWithContentDescription("Код подключения 123456")
+            .performScrollTo()
+            .assert(polite)
+        composeRule.onNodeWithContentDescription(
+            "Новый запрос на подключение: Firefox, 192.168.1.5",
+        ).performScrollTo().assert(polite)
+    }
+    @Test
+    fun startCommandIsNotRepeatedAfterRecompositionOrRestoration() {
+        val actions = mutableListOf<HomeAction>()
+        var state by mutableStateOf(ServerSessionUiState())
+        val restorationTester = StateRestorationTester(composeRule)
+        restorationTester.setContent {
+            DeviceBridgeTheme {
+                HomeScreen(uiState = state, onAction = actions::add)
+            }
+        }
+
+        composeRule.onNodeWithText("Запустить сервер")
+            .performScrollTo()
+            .performClick()
+        composeRule.runOnIdle {
+            state = state.copy(commandPending = true)
+        }
+        restorationTester.emulateSavedInstanceStateRestore()
+
+        composeRule.runOnIdle {
+            assertEquals(listOf(HomeAction.StartClicked), actions)
+        }
+    }
     private fun setScreen(
         state: ServerSessionUiState,
         clipboard: Clipboard? = null,

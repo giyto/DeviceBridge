@@ -2,6 +2,7 @@ import { defineConfig } from "@playwright/test";
 
 export default defineConfig({
   testDir: "./integration",
+  testMatch: ["file-transfer-gate.spec.ts", "file-draft-editing.spec.ts"],
   fullyParallel: false,
   forbidOnly: true,
   retries: 0,

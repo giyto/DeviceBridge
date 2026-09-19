@@ -3,7 +3,7 @@ export const TEXT_SEND_TYPE = "text.send";
 export const TEXT_ACCEPTED_TYPE = "text.accepted";
 
 export type TextContentKind = "TEXT" | "LINK";
-export type TextTransferStatus = "PENDING" | "SENDING" | "DELIVERED" | "FAILED";
+export type TextTransferStatus = "PENDING" | "SENDING" | "UNCERTAIN" | "DELIVERED" | "FAILED";
 export type TextApiErrorCode =
   | "INVALID_PAYLOAD"
   | "UNSUPPORTED_VERSION"
