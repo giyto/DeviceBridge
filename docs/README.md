@@ -3,6 +3,7 @@
 - [Техническое задание](technical-specification.md)
 - [Руководство пользователя](user-guide.md)
 - [Справочник ошибок и восстановления](error-recovery-reference.md)
+- [Проверка Midnight Bridge interface](verification/midnight-bridge-interface.md)
 - [Отчёт harden errors and accessibility](verification/harden-errors-and-accessibility.md)
 - [Проверка server lifecycle](verification/server-lifecycle.md)
 - [Проверка secure browser session](verification/secure-browser-session.md)

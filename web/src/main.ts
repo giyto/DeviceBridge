@@ -17,10 +17,38 @@ import { createFileTransferView } from "./fileTransferView";
 import { hashFileStreaming } from "./fileVerifier";
 import { NativeFileDownloader } from "./nativeFileDownloader";
 import { XhrFileUploader } from "./xhrFileUploader";
+import { BrowserThemePreferenceStore } from "./browserThemePreferenceStore";
+import {
+  createDocumentThemeApplication,
+  ThemeController,
+} from "./themeController";
+import { createThemeControl } from "./themeControl";
+import { BrowserSecurityWarningPreferenceStore } from "./browserSecurityWarningPreferenceStore";
+import { createSecurityWarningController } from "./securityWarningController";
 
 let controller: SessionController;
 let textController: TextTransferController;
 let fileController: FileTransferController;
+let themeController: ThemeController;
+const documentThemeApplication = createDocumentThemeApplication(document);
+const themeControl = createThemeControl(
+  document,
+  (preference) => themeController.setPreference(preference),
+);
+themeController = new ThemeController(
+  new BrowserThemePreferenceStore(),
+  (application) => {
+    documentThemeApplication(application);
+    themeControl.render(application);
+  },
+  window,
+);
+themeController.start();
+const securityWarningController = createSecurityWarningController(
+  document,
+  new BrowserSecurityWarningPreferenceStore(),
+);
+securityWarningController.start();
 const view = createShellView(document, {
   onRetry: () => controller.retry(),
   onSubmitCode: (code, rememberBrowser) => controller.submitCode(code, rememberBrowser),
@@ -79,6 +107,9 @@ globalThis.addEventListener(
     controller.dispose();
     textController.dispose();
     fileController.dispose();
+    themeController.dispose();
+    themeControl.dispose();
+    securityWarningController.dispose();
     view.dispose();
     textView.dispose();
     fileView.dispose();

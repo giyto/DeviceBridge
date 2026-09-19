@@ -101,6 +101,7 @@ fun Application.installSessionRoutes(
     eventDispatcher: SessionEventDispatcher? = null,
     fileCoordinator: FileTransferCoordinator? = null,
     effectiveFileLimitBytes: () -> Long = { HARD_MAX_FILE_BYTES },
+    deviceName: () -> String = { "DeviceBridge Android" },
 ) {
     require(webSocketAuthTimeoutMs > 0)
     val trustedExchangeRateLimiter = PairingRateLimiter(
@@ -598,6 +599,7 @@ fun Application.installSessionRoutes(
                         effectiveFileLimitBytes = effectiveFileLimitBytes(
                             effectiveFileLimitBytes(),
                         ),
+                        deviceName = deviceName(),
                     ),
                 ),
             )

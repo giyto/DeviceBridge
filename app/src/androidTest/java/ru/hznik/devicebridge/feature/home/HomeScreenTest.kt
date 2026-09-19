@@ -367,7 +367,7 @@ class HomeScreenTest {
         composeRule.onNodeWithText("Разрешите доступ к локальной сети")
             .assertIsDisplayed()
         composeRule.onNodeWithText("Повторить запрос").assertIsEnabled()
-        composeRule.onNodeWithText("Уведомления отключены").assertIsDisplayed()
+        composeRule.onNodeWithText("Уведомления отключены").performScrollTo().assertIsDisplayed()
     }
 
     @Test
@@ -528,5 +528,16 @@ class HomeScreenTest {
 
         override val nativeClipboard: ClipboardManager
             get() = error("Native clipboard is not used by this test")
+    }
+
+    @Test
+    fun decorativeLocalityCopyIsOmittedButPrimaryHeadingRemains() {
+        setScreen(ServerSessionUiState())
+
+        composeRule.onNodeWithText("DeviceBridge").assertIsDisplayed()
+        composeRule.onNodeWithText("Локальная связь").assertDoesNotExist()
+        composeRule.onNodeWithText(
+            "Телефон и компьютер — рядом, без облака и внешнего сервера.",
+        ).assertDoesNotExist()
     }
 }

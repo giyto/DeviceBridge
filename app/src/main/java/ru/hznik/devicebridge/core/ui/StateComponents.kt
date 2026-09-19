@@ -9,9 +9,11 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -28,6 +30,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import ru.hznik.devicebridge.domain.error.FailureSeverity
@@ -39,10 +42,12 @@ import ru.hznik.devicebridge.ui.theme.bridgeStatusColors
 
 enum class StateTone {
     NEUTRAL,
+    LOADING,
     INFO,
     SUCCESS,
     WARNING,
     ERROR,
+    CANCELLED,
 }
 
 @Composable
@@ -241,6 +246,7 @@ fun PrimaryActionButton(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
+    loading: Boolean = false,
     interactionSource: MutableInteractionSource? = null,
     contentDescription: String = "Основное действие: $label",
 ) {
@@ -251,7 +257,7 @@ fun PrimaryActionButton(
     val shape = MaterialTheme.shapes.extraLarge
     Button(
         onClick = onClick,
-        enabled = enabled,
+        enabled = enabled && !loading,
         interactionSource = effectiveInteractionSource,
         shape = shape,
         modifier = modifier
@@ -265,8 +271,19 @@ fun PrimaryActionButton(
                 },
                 shape = shape,
             )
-            .semantics { this.contentDescription = contentDescription },
+            .semantics {
+                this.contentDescription = contentDescription
+                if (loading) stateDescription = "Выполняется"
+            },
     ) {
+        if (loading) {
+            CircularProgressIndicator(
+                modifier = Modifier.size(18.dp),
+                strokeWidth = 2.dp,
+                color = MaterialTheme.colorScheme.onPrimary,
+            )
+            Spacer(modifier = Modifier.width(BridgeSpacing.small))
+        }
         Text(label)
     }
 }
@@ -289,20 +306,25 @@ fun SecondaryActionButton(
     }
 }
 
-private data class StateSurfaceColors(
+internal data class StateSurfaceColors(
     val accent: Color,
     val container: Color,
     val content: Color,
 )
 
 @Composable
-private fun stateSurfaceColors(tone: StateTone): StateSurfaceColors {
+internal fun stateSurfaceColors(tone: StateTone): StateSurfaceColors {
     val status = MaterialTheme.bridgeStatusColors
     return when (tone) {
         StateTone.NEUTRAL -> StateSurfaceColors(
             accent = MaterialTheme.colorScheme.outline,
             container = MaterialTheme.colorScheme.surfaceContainer,
             content = MaterialTheme.colorScheme.onSurface,
+        )
+        StateTone.LOADING -> StateSurfaceColors(
+            accent = status.info,
+            container = status.infoContainer,
+            content = status.onInfoContainer,
         )
         StateTone.INFO -> StateSurfaceColors(
             accent = status.info,
@@ -320,9 +342,14 @@ private fun stateSurfaceColors(tone: StateTone): StateSurfaceColors {
             content = status.onWarningContainer,
         )
         StateTone.ERROR -> StateSurfaceColors(
-            accent = MaterialTheme.colorScheme.error,
-            container = MaterialTheme.colorScheme.errorContainer,
-            content = MaterialTheme.colorScheme.onErrorContainer,
+            accent = status.error,
+            container = status.errorContainer,
+            content = status.onErrorContainer,
+        )
+        StateTone.CANCELLED -> StateSurfaceColors(
+            accent = MaterialTheme.colorScheme.outline,
+            container = MaterialTheme.colorScheme.surfaceVariant,
+            content = MaterialTheme.colorScheme.onSurfaceVariant,
         )
     }
 }

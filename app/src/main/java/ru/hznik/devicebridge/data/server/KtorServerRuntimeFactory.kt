@@ -31,6 +31,7 @@ import ru.hznik.devicebridge.domain.session.ServerGenerationId
 import ru.hznik.devicebridge.domain.settings.DeviceSettings
 import ru.hznik.devicebridge.domain.usecase.ObserveSettingsUseCase
 import ru.hznik.devicebridge.di.ApplicationScope
+import ru.hznik.devicebridge.di.PhysicalDeviceName
 import ru.hznik.devicebridge.web.WebAssetProvider
 import ru.hznik.devicebridge.web.installSessionRoutes
 import ru.hznik.devicebridge.web.installTextRoutes
@@ -53,11 +54,12 @@ class EffectiveFileLimitProvider private constructor(
     constructor(
         observeSettings: ObserveSettingsUseCase,
         @ApplicationScope applicationScope: CoroutineScope,
+        @PhysicalDeviceName initialDeviceName: String,
     ) : this(
         observeSettings().stateIn(
             applicationScope,
             SharingStarted.Eagerly,
-            DeviceSettings.defaults(),
+            DeviceSettings.defaults().copy(deviceName = initialDeviceName),
         ),
     )
 
@@ -65,6 +67,8 @@ class EffectiveFileLimitProvider private constructor(
         ru.hznik.devicebridge.domain.file.effectiveFileLimitBytes(
             settingsState.value.effectiveFileLimitBytes,
         )
+
+    fun currentDeviceName(): String = settingsState.value.deviceName
 
     companion object {
         internal fun hardLimit(): EffectiveFileLimitProvider =
@@ -113,6 +117,7 @@ class KtorServerRuntimeFactory @Inject constructor(
         destinationLeaseRegistry = destinationLeaseRegistry,
         monotonicClock = monotonicClock,
         effectiveFileLimitBytes = effectiveFileLimitProvider::currentBytes,
+        deviceName = effectiveFileLimitProvider::currentDeviceName,
         preferredPort = preferredPort,
     )
 }
@@ -132,6 +137,7 @@ private class KtorServerRuntime(
     private val destinationLeaseRegistry: FileDestinationLeaseRegistry,
     private val monotonicClock: MonotonicClock,
     private val effectiveFileLimitBytes: () -> Long,
+    private val deviceName: () -> String,
     private val preferredPort: Int,
 ) : ServerRuntime {
 
@@ -174,6 +180,7 @@ private class KtorServerRuntime(
                     eventDispatcher = sessionEventDispatcher,
                     fileCoordinator = fileTransferCoordinator,
                     effectiveFileLimitBytes = effectiveFileLimitBytes,
+                    deviceName = deviceName,
                 )
                 installTextRoutes(
                     sessionCoordinator = browserSessionCoordinator,

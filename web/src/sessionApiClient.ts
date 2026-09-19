@@ -46,6 +46,7 @@ export interface SessionStatus {
   readonly connected: boolean;
   readonly activeSessionCount: number;
   readonly effectiveFileLimitBytes: number;
+  readonly deviceName: string;
 }
 
 export class SessionApiError extends Error {
@@ -281,6 +282,7 @@ function parseStatus(value: unknown): SessionStatus {
     effectiveFileLimitBytes: requireEffectiveFileLimit(
       record.effectiveFileLimitBytes,
     ),
+    deviceName: requireDeviceName(record.deviceName),
   };
   requireCompatible(status.protocolVersion);
   return status;
@@ -312,6 +314,18 @@ function requireString(value: unknown): string {
     throw new Error("Invalid DeviceBridge response");
   }
   return value;
+}
+
+function requireDeviceName(value: unknown): string {
+  const name = requireString(value).trim();
+  if (
+    name.length === 0
+    || [...name].length > 40
+    || [...name].some((character) => /[\u0000-\u001f\u007f-\u009f]/.test(character))
+  ) {
+    throw new Error("Invalid DeviceBridge response");
+  }
+  return name;
 }
 
 function requireNumber(value: unknown): number {

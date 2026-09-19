@@ -7,6 +7,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsOn
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
@@ -14,11 +15,13 @@ import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.SemanticsProperties
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import ru.hznik.devicebridge.domain.history.HistoryDirection
@@ -73,6 +76,7 @@ class HistoryScreenTest {
             }
         }
 
+        composeRule.onNodeWithTag("history-filter-trigger").performClick()
         composeRule.onNodeWithText("Файлы").performClick()
         assertEquals(HistoryAction.ToggleKind(HistoryKind.FILE), received)
         composeRule.onNodeWithText("По выбранным фильтрам ничего нет").assertIsDisplayed()
@@ -208,6 +212,93 @@ class HistoryScreenTest {
         composeRule.onNodeWithContentDescription("Открыть детали preview")
             .assert(button)
     }
+
+    @Test
+    fun recordsUseOneFullWidthCardPerRowAndExposeFileMetadata() {
+        val file = record("file-card", HistoryKind.FILE).copy(
+            file = HistoryFileMetadata(
+                displayName = "holiday-video.mp4",
+                sizeBytes = 2_048,
+                mimeType = "video/mp4",
+                sha256 = "d".repeat(64),
+            ),
+        )
+        val text = record("text-card", HistoryKind.TEXT).copy(
+            direction = HistoryDirection.ANDROID_TO_BROWSER,
+            browserLabel = "Edge",
+        )
+        composeRule.setContent {
+            MaterialTheme {
+                HistoryScreen(
+                    uiState = HistoryUiState(
+                        loadState = HistoryLoadState.CONTENT,
+                        records = listOf(file, text),
+                    ),
+                    onAction = {},
+                )
+            }
+        }
+
+        val first = composeRule.onNodeWithTag("history-record-card-${file.id.value}")
+            .assertIsDisplayed()
+            .fetchSemanticsNode().boundsInRoot
+        val second = composeRule.onNodeWithTag("history-record-card-${text.id.value}")
+            .assertIsDisplayed()
+            .fetchSemanticsNode().boundsInRoot
+
+        assertTrue("Карточки должны идти сверху вниз", second.top >= first.bottom)
+        composeRule.onNodeWithText("holiday-video.mp4").assertIsDisplayed()
+        composeRule.onNodeWithText("2.00 КиБ").assertIsDisplayed()
+        composeRule.onNodeWithText("На телефон").assertIsDisplayed()
+        composeRule.onNodeWithText("Chrome").assertIsDisplayed()
+        composeRule.onNodeWithText("Завершено").assertIsDisplayed()
+        composeRule.onNodeWithTag(
+            "history-record-time-" + file.id.value,
+            useUnmergedTree = true,
+        )
+            .performScrollTo()
+            .assertIsDisplayed()
+    }
+
+    @Test
+    fun filtersOpenAsVerticalSheetAndResetWithOneAction() {
+        val actions = mutableListOf<HistoryAction>()
+        composeRule.setContent {
+            MaterialTheme {
+                HistoryScreen(
+                    uiState = HistoryUiState(
+                        loadState = HistoryLoadState.EMPTY,
+                        filter = HistoryFilter(kinds = setOf(HistoryKind.FILE)),
+                    ),
+                    onAction = actions::add,
+                )
+            }
+        }
+
+        composeRule.onNodeWithTag("history-filter-trigger")
+            .assertIsDisplayed()
+            .performClick()
+        composeRule.onNodeWithTag("history-filter-sheet").assertIsDisplayed()
+        val directionGroup = composeRule.onNodeWithText("Направление")
+            .fetchSemanticsNode().boundsInRoot
+        val typeGroup = composeRule.onNodeWithText("Тип данных")
+            .fetchSemanticsNode().boundsInRoot
+        val resultGroup = composeRule.onNodeWithText("Результат")
+            .fetchSemanticsNode().boundsInRoot
+        assertTrue(directionGroup.top < typeGroup.top && typeGroup.top < resultGroup.top)
+        composeRule.onNodeWithTag("history-filter-option-Файлы").assertIsOn()
+        composeRule.onNodeWithText("Файлы").performClick()
+        composeRule.onNodeWithText("Сбросить").performClick()
+
+        assertEquals(
+            listOf(
+                HistoryAction.ToggleKind(HistoryKind.FILE),
+                HistoryAction.ResetFilters,
+            ),
+            actions,
+        )
+    }
+
     private fun record(id: String, kind: HistoryKind): HistoryRecord = HistoryRecord(
         id = HistoryRecordId("record-" + id),
         operationId = HistoryOperationId("operation-" + id),
@@ -233,4 +324,26 @@ class HistoryScreenTest {
         },
         failureReason = null,
     )
+
+    @Test
+    fun decorativeJournalCopyIsOmittedButHistoryAndFiltersRemain() {
+        composeRule.setContent {
+            MaterialTheme {
+                HistoryScreen(
+                    uiState = HistoryUiState(loadState = HistoryLoadState.EMPTY),
+                    onAction = {},
+                )
+            }
+        }
+
+        composeRule.onNodeWithText("История передач").assertIsDisplayed()
+        composeRule.onNodeWithText("Фильтры").assertIsDisplayed()
+        composeRule.onNodeWithText("Локальный журнал").assertDoesNotExist()
+        composeRule.onNodeWithText(
+            "Только локальные результаты. Файлы и полный текст здесь не хранятся.",
+        ).assertDoesNotExist()
+        composeRule.onNodeWithText(
+            "Показывайте только нужные направления, типы и результаты.",
+        ).assertDoesNotExist()
+    }
 }

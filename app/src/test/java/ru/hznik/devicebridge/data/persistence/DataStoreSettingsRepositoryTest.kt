@@ -93,6 +93,54 @@ class DataStoreSettingsRepositoryTest {
         )
     }
 
+    @Test
+    fun emptyStoreUsesTheInjectedPhysicalDeviceName() = runTest {
+        val repository = DataStoreSettingsRepository(
+            InMemoryPreferencesDataStore(),
+            defaultDeviceName = "Google Pixel 8",
+        )
+
+        assertEquals("Google Pixel 8", repository.settings.first().deviceName)
+    }
+
+    @Test
+    fun storedUserNameWinsOverAChangedPhysicalDeviceFallback() = runTest {
+        val dataStore = InMemoryPreferencesDataStore()
+        val first = DataStoreSettingsRepository(dataStore, defaultDeviceName = "Google Pixel 8")
+        first.updateDeviceName("Мой телефон")
+
+        val recreated = DataStoreSettingsRepository(
+            dataStore,
+            defaultDeviceName = "Samsung Galaxy S26",
+        )
+
+        assertEquals("Мой телефон", recreated.settings.first().deviceName)
+    }
+
+    @Test
+    fun legacyDefaultNameMigratesToPhysicalNameWithoutChangingOtherSettings() = runTest {
+        val dataStore = InMemoryPreferencesDataStore()
+        val legacyRepository = DataStoreSettingsRepository(dataStore)
+        legacyRepository.updateDeviceName("DeviceBridge Android")
+        legacyRepository.updateRetentionDays(90)
+        legacyRepository.updateDestinationTree(
+            DestinationTree("content://documents/tree/devicebridge"),
+        )
+        legacyRepository.updateEffectiveFileLimitBytes(512L * 1024 * 1024)
+
+        val migrated = DataStoreSettingsRepository(
+            dataStore,
+            defaultDeviceName = "Xiaomi 22081212UG",
+        ).settings.first()
+
+        assertEquals("Xiaomi 22081212UG", migrated.deviceName)
+        assertEquals(90, migrated.retentionDays)
+        assertEquals(
+            DestinationTree("content://documents/tree/devicebridge"),
+            migrated.destinationTree,
+        )
+        assertEquals(512L * 1024 * 1024, migrated.effectiveFileLimitBytes)
+    }
     private fun repository(): DataStoreSettingsRepository =
         DataStoreSettingsRepository(InMemoryPreferencesDataStore())
 

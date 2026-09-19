@@ -33,8 +33,8 @@ val BridgeShapes = Shapes(
     extraSmall = RoundedCornerShape(8.dp),
     small = RoundedCornerShape(12.dp),
     medium = RoundedCornerShape(16.dp),
-    large = RoundedCornerShape(22.dp),
-    extraLarge = RoundedCornerShape(28.dp),
+    large = RoundedCornerShape(20.dp),
+    extraLarge = RoundedCornerShape(24.dp),
 )
 
 @Immutable
@@ -48,30 +48,39 @@ data class BridgeStatusColors(
     val warning: Color,
     val warningContainer: Color,
     val onWarningContainer: Color,
+    val error: Color,
+    val errorContainer: Color,
+    val onErrorContainer: Color,
 )
 
 internal val LightBridgeStatusColors = BridgeStatusColors(
-    info = Color(0xFF2359B8),
-    infoContainer = Color(0xFFDCE7FF),
-    onInfoContainer = Color(0xFF08224F),
-    success = Color(0xFF1B6E46),
-    successContainer = Color(0xFFD6F4E4),
-    onSuccessContainer = Color(0xFF073A22),
-    warning = Color(0xFF8A5700),
-    warningContainer = Color(0xFFFFE5B2),
-    onWarningContainer = Color(0xFF3F2700),
+    info = Color(0xFF168EBA),
+    infoContainer = Color(0xFFDDF3FA),
+    onInfoContainer = Color(0xFF0B506A),
+    success = Color(0xFF168560),
+    successContainer = Color(0xFFDDF4EA),
+    onSuccessContainer = Color(0xFF0B4A36),
+    warning = Color(0xFFA86B16),
+    warningContainer = Color(0xFFFFF0D2),
+    onWarningContainer = Color(0xFF5F3A08),
+    error = Color(0xFFCF4A5A),
+    errorContainer = Color(0xFFFDE7EA),
+    onErrorContainer = Color(0xFF741E2B),
 )
 
 internal val DarkBridgeStatusColors = BridgeStatusColors(
-    info = Color(0xFF9DBBFF),
-    infoContainer = Color(0xFF17386F),
-    onInfoContainer = Color(0xFFDCE7FF),
-    success = Color(0xFF72D6A4),
-    successContainer = Color(0xFF123F2B),
-    onSuccessContainer = Color(0xFFD6F4E4),
-    warning = Color(0xFFFFC96B),
-    warningContainer = Color(0xFF4C350C),
-    onWarningContainer = Color(0xFFFFE5B2),
+    info = Color(0xFF49CFF5),
+    infoContainer = Color(0xFF123B4A),
+    onInfoContainer = Color(0xFFC8F3FF),
+    success = Color(0xFF45D39D),
+    successContainer = Color(0xFF123C31),
+    onSuccessContainer = Color(0xFFCFF9E9),
+    warning = Color(0xFFE8B45B),
+    warningContainer = Color(0xFF463516),
+    onWarningContainer = Color(0xFFFFEBC3),
+    error = Color(0xFFF07178),
+    errorContainer = Color(0xFF472127),
+    onErrorContainer = Color(0xFFFFD9DC),
 )
 
 internal val LocalBridgeStatusColors = staticCompositionLocalOf {

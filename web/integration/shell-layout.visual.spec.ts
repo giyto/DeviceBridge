@@ -1,6 +1,21 @@
 import { expect, test } from "@playwright/test";
 
-const WIDE_PROJECTS = new Set(["chrome-1920", "chrome-1920-light"]);
+test.beforeEach(async ({ page }, testInfo) => {
+  const preference = testInfo.project.name.endsWith("-light") ? "light" : "dark";
+  await page.addInitScript((theme) => {
+    localStorage.setItem(
+      "devicebridge.theme.v1",
+      JSON.stringify({ version: 1, preference: theme }),
+    );
+  }, preference);
+});
+
+const WIDE_PROJECTS = new Set([
+  "chrome-1920",
+  "chrome-1920-light",
+  "edge-1920",
+  "edge-1920-light",
+]);
 
 test("shell keeps its reading order and reflows without horizontal overflow", async ({
   page,
@@ -24,7 +39,22 @@ test("shell keeps its reading order and reflows without horizontal overflow", as
   }));
 
   await page.goto("/");
+  const expectedTheme = testInfo.project.name.endsWith("-light") ? "light" : "dark";
+  await expect(page.locator("html")).toHaveAttribute("data-theme", expectedTheme);
+  const themeToggle = page.locator('[data-role="theme-control"]');
+  await expect(themeToggle).toHaveAttribute("data-active-theme", expectedTheme);
+  const oppositeTheme = expectedTheme === "dark" ? "light" : "dark";
+  await themeToggle.click();
+  await expect(page.locator("html")).toHaveAttribute("data-theme", oppositeTheme);
+  await themeToggle.click();
+  await expect(page.locator("html")).toHaveAttribute("data-theme", expectedTheme);
+  await expect(page.locator(".site-header")).toHaveCount(0);
   await expect(page.getByRole("heading", { name: "DeviceBridge доступен" })).toBeVisible();
+  const warning = page.locator('[data-role="security-warning"]');
+  const warningDetail = page.locator('[data-role="security-warning-detail"]');
+  await expect(warning).toBeVisible();
+  await expect(warning).toHaveAttribute("aria-expanded", "true");
+  await expect(warningDetail).toBeVisible();
   const statusMotion = await page.locator('[data-role="status"]').evaluate((element) => ({
     transitionDuration: getComputedStyle(element).transitionDuration,
     pulseAnimation: getComputedStyle(element.querySelector(".status-card__pulse")!).animationName,
@@ -61,6 +91,19 @@ test("shell keeps its reading order and reflows without horizontal overflow", as
   });
   expect(overflow).toEqual([]);
   await expect(layout).toHaveScreenshot("shell-layout.png");
+  await warning.click();
+  await expect(warning).toBeVisible();
+  await expect(warning).toHaveAttribute("aria-expanded", "false");
+  await expect(warningDetail).toBeHidden();
+  await expect(layout).toHaveScreenshot("shell-layout-warning-hidden.png");
+
+  await page.reload();
+  await expect(page.getByRole("heading", { name: "DeviceBridge доступен" })).toBeVisible();
+  await expect(warning).toHaveAttribute("aria-expanded", "false");
+  await expect(warningDetail).toBeHidden();
+  await warning.click();
+  await expect(warning).toHaveAttribute("aria-expanded", "true");
+  await expect(warningDetail).toBeVisible();
 });
 test("text composer and long-link actions keep visual and keyboard order", async ({
   page,
@@ -83,6 +126,7 @@ test("text composer and long-link actions keep visual and keyboard order", async
       connected: true,
       activeSessionCount: 1,
       effectiveFileLimitBytes: 1_073_741_824,
+      deviceName: "Google Pixel 8",
     }),
   }));
   await page.routeWebSocket("**/api/v1/events", (socket) => {
@@ -162,6 +206,7 @@ test("file cards keep metadata, stages and applicable actions inside their bound
       connected: true,
       activeSessionCount: 1,
       effectiveFileLimitBytes: 1_073_741_824,
+      deviceName: "Google Pixel 8",
     }),
   }));
   await page.routeWebSocket("**/api/v1/events", (socket) => {
@@ -312,7 +357,16 @@ test("pairing error restores focus through a keyboard-only flow", async ({ page 
   await page.keyboard.press("Tab");
   await expect(page.locator(".skip-link")).toBeFocused();
   await page.keyboard.press("Tab");
-  await expect(page.getByRole("link", { name: "DeviceBridge, главная" })).toBeFocused();
+  await expect(page.locator('[data-role="theme-control"]')).toBeFocused();
+  await page.keyboard.press("Tab");
+  const warning = page.locator('[data-role="security-warning"]');
+  await expect(warning).toBeFocused();
+  await page.keyboard.press("Enter");
+  await expect(warning).toHaveAttribute("aria-expanded", "false");
+  await expect(warning).toBeFocused();
+  await page.keyboard.press("Space");
+  await expect(warning).toHaveAttribute("aria-expanded", "true");
+  await expect(warning).toBeFocused();
   await page.keyboard.press("Tab");
   await expect(input).toBeFocused();
   await page.keyboard.type("123456");
@@ -347,6 +401,7 @@ test("file cancel and retry keep keyboard focus on the same transfer", async ({ 
       connected: true,
       activeSessionCount: 1,
       effectiveFileLimitBytes: 1_073_741_824,
+      deviceName: "Google Pixel 8",
     }),
   }));
   const metadata = {
@@ -399,7 +454,11 @@ test("file cancel and retry keep keyboard focus on the same transfer", async ({ 
   const dropZone = page.locator('[data-role="file-drop-zone"]');
   await expect(card).toBeVisible();
 
-  for (let index = 0; index < 5; index += 1) await page.keyboard.press("Tab");
+  await page.locator(".skip-link").focus();
+  for (let index = 0; index < 12; index += 1) {
+    await page.keyboard.press("Tab");
+    if (await dropZone.evaluate((element) => document.activeElement === element)) break;
+  }
   await expect(dropZone).toBeFocused();
   await page.keyboard.press("Tab");
   await expect(card.getByRole("button", { name: "Отменить" })).toBeFocused();

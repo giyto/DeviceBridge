@@ -18,11 +18,13 @@ export function createShellView(
   actions: ShellActions,
 ): ShellView {
   const status = requiredElement<HTMLElement>(documentRef, '[data-role="status"]');
+  const sessionPanel = requiredElement<HTMLElement>(documentRef, '[data-role="session-panel"]');
   const title = requiredElement<HTMLElement>(documentRef, '[data-role="status-title"]');
   const detail = requiredElement<HTMLElement>(documentRef, '[data-role="status-detail"]');
   const versionData = requiredElement<HTMLElement>(documentRef, '[data-role="version-data"]');
   const protocolVersion = requiredElement<HTMLElement>(documentRef, '[data-role="protocol-version"]');
-  const assetVersion = requiredElement<HTMLElement>(documentRef, '[data-role="asset-version"]');
+  const deviceRow = requiredElement<HTMLElement>(documentRef, '[data-role="device-row"]');
+  const deviceName = requiredElement<HTMLElement>(documentRef, '[data-role="device-name"]');
   const retryButton = requiredElement<HTMLButtonElement>(documentRef, '[data-action="retry"]');
   const form = requiredElement<HTMLFormElement>(documentRef, '[data-role="pairing-form"]');
   const codeInput = requiredElement<HTMLInputElement>(documentRef, "#pairing-code");
@@ -76,7 +78,10 @@ export function createShellView(
   const render = (state: SessionUiState): void => {
     status.dataset.state = state.kind;
     status.dataset.viewState = sessionPresentationState(state);
+    sessionPanel.dataset.state = state.kind;
+    sessionPanel.dataset.viewState = sessionPresentationState(state);
     versionData.hidden = true;
+    deviceRow.hidden = true;
     retryButton.hidden = true;
     form.hidden = true;
     disconnectButton.hidden = true;
@@ -90,8 +95,12 @@ export function createShellView(
 
     if ("manifest" in state && state.manifest !== undefined) {
       protocolVersion.textContent = String(state.manifest.protocolVersion);
-      assetVersion.textContent = state.manifest.webAssetVersion;
       versionData.hidden = false;
+    }
+
+    if ("status" in state) {
+      deviceName.textContent = state.status.deviceName;
+      deviceRow.hidden = false;
     }
 
     switch (state.kind) {

@@ -69,6 +69,8 @@ class HistoryViewModel @Inject constructor(
                 updateFilter(filter.value.copy(kinds = filter.value.kinds.toggle(action.kind)))
             is HistoryAction.ToggleStatus ->
                 updateFilter(filter.value.copy(statuses = filter.value.statuses.toggle(action.status)))
+            HistoryAction.ResetFilters -> updateFilter(HistoryFilter())
+
             is HistoryAction.OpenDetails -> mutableUiState.update { state ->
                 state.copy(
                     selectedRecord = state.records.firstOrNull { it.id == action.recordId },

@@ -29,12 +29,14 @@ class DesignTokensTest {
             assertNotEquals(colors.success, colors.warning)
             assertNotEquals(colors.info, colors.success)
             assertNotEquals(colors.successContainer, colors.warningContainer)
+            assertNotEquals(colors.error, colors.success)
+            assertNotEquals(colors.errorContainer, colors.warningContainer)
         }
     }
 
     @Test
     fun componentShapesFollowOneConsistentScale() {
         assertEquals(RoundedCornerShape(8.dp), BridgeShapes.extraSmall)
-        assertEquals(RoundedCornerShape(28.dp), BridgeShapes.extraLarge)
+        assertEquals(RoundedCornerShape(24.dp), BridgeShapes.extraLarge)
     }
 }

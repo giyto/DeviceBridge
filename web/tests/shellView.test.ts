@@ -15,10 +15,11 @@ describe("DeviceBridge shell markup", () => {
   it("uses semantic landmarks and a textual live status", () => {
     createShellView(document, actions());
 
-    expect(document.querySelector("header")).not.toBeNull();
+    expect(document.querySelector("header")).toBeNull();
     expect(document.querySelector("main")).not.toBeNull();
     expect(document.querySelector("footer")).not.toBeNull();
     expect(document.querySelector("h1")?.textContent).toContain("DeviceBridge");
+    expect(document.querySelector('[data-role="connection-area"]')?.contains(document.querySelector("h1"))).toBe(true);
     expect(document.querySelector('[data-role="status"]')).toMatchObject({
       ariaLive: "polite",
       role: "status",
@@ -99,9 +100,8 @@ describe("createShellView", () => {
       "DeviceBridge доступен",
     );
     expect(document.querySelector('[data-role="protocol-version"]')?.textContent).toBe("1");
-    expect(document.querySelector('[data-role="asset-version"]')?.textContent).toBe(
-      "sha256-abcd",
-    );
+    expect(document.body.textContent).not.toContain("sha256-abcd");
+    expect(document.querySelector<HTMLElement>('[data-role="device-row"]')?.hidden).toBe(true);
     expect(document.querySelector<HTMLButtonElement>('[data-action="retry"]')?.hidden).toBe(
       true,
     );
@@ -192,11 +192,16 @@ describe("createShellView", () => {
         connected: true,
         activeSessionCount: 2,
         effectiveFileLimitBytes: 1_073_741_824,
+        deviceName: "Google Pixel 8",
       },
     });
     document.querySelector<HTMLButtonElement>('[data-action="disconnect"]')?.click();
     expect(onDisconnect).toHaveBeenCalledOnce();
     expect(document.body.textContent).not.toContain("session-1");
+    expect(document.querySelector('[data-role="device-name"]')?.textContent).toBe(
+      "Google Pixel 8",
+    );
+    expect(document.querySelector<HTMLElement>('[data-role="device-row"]')?.hidden).toBe(false);
   });
 
   it("shows automatic reconnect progress without offering a competing manual retry", () => {
@@ -211,6 +216,7 @@ describe("createShellView", () => {
         connected: true,
         activeSessionCount: 1,
         effectiveFileLimitBytes: 1_073_741_824,
+        deviceName: "Google Pixel 8",
       },
       attempt: 2,
       nextRetryInMs: 2_000,
@@ -238,6 +244,7 @@ describe("createShellView", () => {
         connected: true,
         activeSessionCount: 1,
         effectiveFileLimitBytes: 1_073_741_824,
+        deviceName: "Google Pixel 8",
       },
       message: "Проверьте сеть и повторите попытку.",
     });
@@ -318,6 +325,7 @@ describe("createShellView", () => {
     };
     const view = createShellView(document, callbacks);
     const status = document.querySelector<HTMLElement>('[data-role="status"]')!;
+    const sessionPanel = document.querySelector<HTMLElement>('[data-role="session-panel"]')!;
     const input = document.querySelector<HTMLInputElement>("#pairing-code")!;
     const remember = document.querySelector<HTMLInputElement>("#remember-browser")!;
     const manifest = { protocolVersion: 1, webAssetVersion: "sha256-abcd" };
@@ -330,6 +338,7 @@ describe("createShellView", () => {
         connected: true,
         activeSessionCount: 1,
         effectiveFileLimitBytes: 1_073_741_824,
+        deviceName: "Google Pixel 8",
       },
     };
 
@@ -345,6 +354,8 @@ describe("createShellView", () => {
       },
     });
     expect(status.dataset.viewState).toBe("ready");
+    expect(sessionPanel.dataset.state).toBe("ready");
+    expect(sessionPanel.dataset.viewState).toBe("ready");
 
     input.value = "123456";
     remember.checked = true;
@@ -362,8 +373,10 @@ describe("createShellView", () => {
 
     view.render({ kind: "offline", message: "Нет связи" });
     expect(status.dataset.viewState).toBe("offline");
+    expect(sessionPanel.dataset.viewState).toBe("offline");
     view.render({ kind: "denied", manifest, message: "Отклонено" });
     expect(status.dataset.viewState).toBe("error");
+    expect(sessionPanel.dataset.viewState).toBe("error");
     expect(callbacks.onRetry).not.toHaveBeenCalled();
     expect(callbacks.onSubmitCode).not.toHaveBeenCalled();
     expect(callbacks.onDisconnect).not.toHaveBeenCalled();

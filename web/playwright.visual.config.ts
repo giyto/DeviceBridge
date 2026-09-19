@@ -29,7 +29,15 @@ export default defineConfig({
   },
   projects: [
     { name: "chrome-360", use: { viewport: { width: 360, height: 800 } } },
+    {
+      name: "chrome-360-light",
+      use: { viewport: { width: 360, height: 800 }, colorScheme: "light" },
+    },
     { name: "chrome-768", use: { viewport: { width: 768, height: 1024 } } },
+    {
+      name: "chrome-768-light",
+      use: { viewport: { width: 768, height: 1024 }, colorScheme: "light" },
+    },
     { name: "chrome-1920", use: { viewport: { width: 1920, height: 1080 } } },
     {
       name: "chrome-1920-light",
@@ -40,6 +48,26 @@ export default defineConfig({
       use: {
         viewport: { width: 960, height: 540 },
         deviceScaleFactor: 2,
+      },
+    },
+    {
+      name: "chrome-1920-zoom-200-light",
+      use: {
+        viewport: { width: 960, height: 540 },
+        deviceScaleFactor: 2,
+        colorScheme: "light",
+      },
+    },
+    {
+      name: "edge-1920",
+      use: { channel: "msedge", viewport: { width: 1920, height: 1080 } },
+    },
+    {
+      name: "edge-1920-light",
+      use: {
+        channel: "msedge",
+        viewport: { width: 1920, height: 1080 },
+        colorScheme: "light",
       },
     },
   ],

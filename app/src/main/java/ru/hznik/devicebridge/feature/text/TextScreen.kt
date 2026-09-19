@@ -26,6 +26,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
@@ -37,6 +38,12 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
+import ru.hznik.devicebridge.core.ui.OperationalItem
+import ru.hznik.devicebridge.core.ui.PrimaryActionButton
+import ru.hznik.devicebridge.core.ui.ScreenHeader
+import ru.hznik.devicebridge.core.ui.SectionHeader
+import ru.hznik.devicebridge.core.ui.StateTone
+import ru.hznik.devicebridge.core.ui.dismissKeyboardOnUnconsumedTap
 import ru.hznik.devicebridge.domain.session.BrowserSessionId
 import ru.hznik.devicebridge.domain.text.TextContentKind
 import ru.hznik.devicebridge.domain.text.TextMessageId
@@ -61,6 +68,8 @@ fun TextScreen(
     Column(
         modifier = modifier
             .fillMaxSize()
+            .testTag("text-screen")
+            .dismissKeyboardOnUnconsumedTap()
             .verticalScroll(rememberScrollState())
             .padding(PaddingValues(horizontal = 20.dp, vertical = 24.dp)),
         verticalArrangement = Arrangement.spacedBy(18.dp),
@@ -76,18 +85,11 @@ fun TextScreen(
             }
         }
 
-        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Text(
-                text = "Текст и ссылки",
-                style = MaterialTheme.typography.displaySmall,
-                fontWeight = FontWeight.Bold,
-            )
-            Text(
-                text = "Передавайте данные напрямую между телефоном и доверенным браузером.",
-                style = MaterialTheme.typography.bodyLarge,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
+        ScreenHeader(
+            eyebrow = "Текущая сессия",
+            title = "Текст и ссылки",
+            supportingText = "Передавайте данные напрямую между телефоном и доверенным браузером.",
+        )
 
         if (uiState.isLoading) {
             StateCard(
@@ -138,10 +140,9 @@ private fun RecipientSection(
     onSelect: (BrowserSessionId) -> Unit,
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        Text(
-            text = "Получатель",
-            style = MaterialTheme.typography.titleLarge,
-            fontWeight = FontWeight.SemiBold,
+        SectionHeader(
+            title = "Получатель",
+            supportingText = "Сообщение получает только выбранный доверенный браузер.",
         )
         when {
             recipients.isEmpty() -> StateCard(
@@ -303,16 +304,13 @@ private fun EditorSection(
                 )
             }
 
-            Button(
+            PrimaryActionButton(
+                label = if (uiState.isSending) "Отправляем…" else "Отправить",
                 onClick = { onAction(TextAction.SendClicked) },
                 enabled = uiState.canSend,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .semantics { contentDescription = "Отправить текст в выбранный браузер" },
-                contentPadding = PaddingValues(vertical = 15.dp),
-            ) {
-                Text(if (uiState.isSending) "Отправляем…" else "Отправить")
-            }
+                loading = uiState.isSending,
+                contentDescription = "Отправить текст в выбранный браузер",
+            )
         }
     }
 }
@@ -377,10 +375,9 @@ private fun TransferFeed(
     onOpenLinkRequested: (String) -> Unit,
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Text(
-            text = "Текущая лента",
-            style = MaterialTheme.typography.titleLarge,
-            fontWeight = FontWeight.SemiBold,
+        SectionHeader(
+            title = "Текущая лента",
+            supportingText = "Сообщения не сохраняются на диске.",
         )
         if (items.isEmpty()) {
             StateCard(
@@ -405,60 +402,35 @@ private fun TransferItemCard(
     onRetry: (TextMessageId) -> Unit,
     onOpenLinkRequested: (String) -> Unit,
 ) {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(22.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceContainer,
-        ),
-    ) {
-        Column(
-            modifier = Modifier.padding(18.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            Text(
-                text = item.participantLabel(),
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.SemiBold,
-            )
-            Text(
-                text = item.direction.label(),
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Text(
-                text = "Время: ${item.timestampEpochMillis.transferTimeLabel()}",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Text(
-                text = item.status.label(),
-                style = MaterialTheme.typography.labelLarge,
-                color = if (item.status == TextTransferStatus.FAILED) {
-                    MaterialTheme.colorScheme.error
-                } else {
-                    MaterialTheme.colorScheme.primary
-                },
-                modifier = Modifier.semantics {
-                    contentDescription = "Статус передачи текста: ${item.status.label()}"
-                    liveRegion = LiveRegionMode.Polite
-                },
-            )
-            HorizontalDivider()
+    OperationalItem(
+        statusLabel = item.status.label(),
+        title = item.participantLabel(),
+        metadata = "${item.direction.label()} · Время: ${item.timestampEpochMillis.transferTimeLabel()}",
+        tone = when (item.status) {
+            TextTransferStatus.PENDING,
+            TextTransferStatus.SENDING -> StateTone.LOADING
+            TextTransferStatus.DELIVERED -> StateTone.SUCCESS
+            TextTransferStatus.FAILED -> StateTone.ERROR
+        },
+        modifier = Modifier.semantics {
+            liveRegion = LiveRegionMode.Polite
+        },
+        content = {
             Text(text = item.content, style = MaterialTheme.typography.bodyLarge)
             Text(
                 text = "Тип: ${item.contentKind.label()}",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+        },
+        actions = {
             if (item.contentKind == TextContentKind.LINK) {
                 OutlinedButton(
                     onClick = { onOpenLinkRequested(item.content) },
                     modifier = Modifier
                         .fillMaxWidth()
                         .semantics {
-                            contentDescription =
-                                "Открыть ссылку от ${item.browserLabel}"
+                            contentDescription = "Открыть ссылку от ${item.browserLabel}"
                         },
                 ) {
                     Text("Открыть ссылку")
@@ -477,10 +449,9 @@ private fun TransferItemCard(
                     Text(if (item.isRetrying) "Повторяем…" else "Повторить")
                 }
             }
-        }
-    }
+        },
+    )
 }
-
 @Composable
 private fun FeedbackCard(
     message: String,

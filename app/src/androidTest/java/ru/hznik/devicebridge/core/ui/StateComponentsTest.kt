@@ -11,6 +11,7 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertIsFocused
+import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.isHiddenFromAccessibility
@@ -18,6 +19,7 @@ import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTouchInput
@@ -159,6 +161,74 @@ class StateComponentsTest {
         val pressedScreenshot = action.captureToImage()
         assertTrue(pressedScreenshot.width > 0)
         action.performTouchInput { up() }
+    }
+    @Test
+    fun graphiteHeadersMetadataAndCancelledOperationKeepTextualSemantics() {
+        composeRule.setContent {
+            DeviceBridgeTheme {
+                androidx.compose.foundation.layout.Column {
+                    ScreenHeader(
+                        eyebrow = "Локальное устройство",
+                        title = "DeviceBridge",
+                        supportingText = "Телефон и компьютер рядом",
+                    )
+                    SectionHeader(
+                        title = "Передачи",
+                        supportingText = "Текущая сессия",
+                    )
+                    MetadataRow(label = "Файл", value = "long-name.zip", monospace = true)
+                    OperationalItem(
+                        statusLabel = "Отменено",
+                        title = "long-name.zip",
+                        metadata = "С телефона · 2 МБ",
+                        tone = StateTone.CANCELLED,
+                    )
+                    DestructiveActionButton(label = "Отозвать доступ", onClick = {})
+                }
+            }
+        }
+
+        composeRule.onNodeWithText("DeviceBridge").assertIsDisplayed()
+        composeRule.onNodeWithText("Передачи").assertIsDisplayed()
+        composeRule.onAllNodesWithText("long-name.zip").assertCountEquals(2)
+        composeRule.onNodeWithContentDescription(
+            "Отменено. long-name.zip. С телефона · 2 МБ",
+        ).assertIsDisplayed()
+        composeRule.onNodeWithContentDescription("Опасное действие: Отозвать доступ")
+            .assertIsDisplayed()
+    }
+
+    @Test
+    fun loadingPrimaryActionIsDisabledAndKeepsItsAccessibleName() {
+        composeRule.setContent {
+            DeviceBridgeTheme {
+                PrimaryActionButton(
+                    label = "Отправляем",
+                    loading = true,
+                    onClick = {},
+                )
+            }
+        }
+
+        composeRule.onNodeWithContentDescription("Основное действие: Отправляем")
+            .assertIsNotEnabled()
+    }
+    @Test
+    fun signalFlowKeepsAStaticAccessibleFallbackWhenMotionIsDisabled() {
+        composeRule.setContent {
+            DeviceBridgeTheme {
+                SignalFlowIndicator(
+                    active = true,
+                    statusLabel = "Связь активна",
+                )
+            }
+        }
+
+        val indicator = composeRule.onNodeWithContentDescription("Связь активна")
+        indicator.assertIsDisplayed()
+        val screenshot = indicator.captureToImage()
+        assertTrue(screenshot.width > 0)
+        assertTrue(screenshot.height > 0)
     }
     @Test
     fun quickActionHidesDecorativeSymbolFromAccessibility() {
