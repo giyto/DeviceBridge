@@ -78,7 +78,7 @@
 - [x] 9.7 Реализовать focus restoration после pairing error, retry, cancel и закрытия details/dialog; проверить Playwright keyboard flow Tab/Shift+Tab/Enter/Space без mouse input.
 - [x] 9.8 Добавить короткие state/item/progress transitions и `prefers-reduced-motion` fallback; проверить Playwright, что reduced motion отключает необязательные transitions, но не скрывает feedback.
 - [x] 9.9 Проверить light/dark, hover/pressed/focused/disabled/loading и long-content states; подтвердить screenshot assertions и отсутствие layout shift, скрывающего primary action.
-- [ ] 9.10 Проверить Chrome и Edge на Windows 10/11: layout, reload/reconnect, trusted reconnect, revoke, text retry, file cancel/retry и accessible status; заполнить manual matrix с ожидаемым и фактическим результатом.
+- [x] 9.10 Проверить Chrome и Edge на Windows 10/11: layout, reload/reconnect, trusted reconnect, revoke, text retry, file cancel/retry и accessible status; заполнить manual matrix с ожидаемым и фактическим результатом.
 
 ## 10. Интеграция, регрессия и документация
 
@@ -87,4 +87,4 @@
 - [x] 10.3 Выполнить `./gradlew.bat :app:connectedDebugAndroidTest` отдельно на API 29 и API 37.1; проверить lifecycle, pairing, text/file, persistence и Compose accessibility regression без skipped blocker tests.
 - [x] 10.4 Провести end-to-end recovery matrix: разные сети/неверный IP, permission revoke, invalid/expired code, approval deny/timeout, session revoke, connection loss, file limit/space/checksum/destination и unsupported protocol; для каждого case подтвердить точную причину, допустимое действие и отсутствие duplicate operation.
 - [x] 10.5 Обновить пользовательские инструкции и техническую документацию по connection troubleshooting, error codes, manual retry, cancellation, accessibility и ограничениям локального HTTP; проверить соответствие ТЗ и отсутствие обещаний функций этапа 10.
-- [ ] 10.6 Выполнить `openspec validate harden-errors-and-accessibility --strict`, сверить все acceptance evidence и отметить checkbox завершённым только после успешной автоматической и ручной проверки.
+- [x] 10.6 Выполнить `openspec validate harden-errors-and-accessibility --strict`, сверить все acceptance evidence и отметить checkbox завершённым только после успешной автоматической и ручной проверки.
