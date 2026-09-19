@@ -173,7 +173,7 @@ class ProtectedSessionRouteTest {
 
             assertEquals(204, response.statusCode())
             assertEquals(
-                FileTransferPhase.CANCELLED,
+                FileTransferPhase.FAILED,
                 server.fileCoordinator.state.value.item(FileTransferId("owned-file"))?.phase,
             )
         }

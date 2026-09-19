@@ -63,7 +63,11 @@ class FileTransferCoordinatorCleanupTest {
 
         coordinator.onSessionDisconnected(generation, session.id)
 
-        assertEquals(FileTransferPhase.CANCELLED, phase(coordinator, "owned"))
+        assertEquals(FileTransferPhase.FAILED, phase(coordinator, "owned"))
+        assertEquals(
+            FileTransferFailure.SessionUnavailable,
+            coordinator.state.value.item(FileTransferId("owned"))?.failure,
+        )
         assertEquals(FileTransferPhase.CONNECTING, phase(coordinator, "foreign"))
         assertNull(
             grants.consume(
@@ -80,7 +84,11 @@ class FileTransferCoordinatorCleanupTest {
             FileTransferId("foreign"),
         )
         coordinator.onSessionRevoked(generation, otherSession.id)
-        assertEquals(FileTransferPhase.CANCELLED, phase(coordinator, "foreign"))
+        assertEquals(FileTransferPhase.FAILED, phase(coordinator, "foreign"))
+        assertEquals(
+            FileTransferFailure.SessionUnavailable,
+            coordinator.state.value.item(FileTransferId("foreign"))?.failure,
+        )
         assertNull(
             grants.consume(
                 revokeGrant.token,
@@ -110,6 +118,81 @@ class FileTransferCoordinatorCleanupTest {
         )
         assertEquals(FileTransferPhase.CONNECTING, phase(coordinator, "next"))
     }
+    @Test
+    fun genericFailureUsesTerminalCleanupBeforePromotingNextItem() = runTest {
+        val coordinator = coordinator()
+        coordinator.activate(generation)
+        coordinator.create(request("batch-terminal-failure", "first", "next"))
+        coordinator.approve(FileTransferId("first"), FileDestinationId("folder"))
+        val resources = RecordingResources()
+        coordinator.attachResources(FileTransferId("first"), resources)
+
+        coordinator.transition(
+            FileTransferId("first"),
+            FileTransferEvent.Failed(FileTransferFailure.ChecksumMismatch),
+        )
+
+        assertEquals(
+            listOf("cancel-job", "close-streams", "cleanup-partial"),
+            resources.events,
+        )
+        assertEquals(FileTransferPhase.FAILED, phase(coordinator, "first"))
+        assertEquals(FileTransferPhase.CONNECTING, phase(coordinator, "next"))
+    }
+
+    @Test
+    fun successfulTerminalizationClosesStreamsWithoutDeletingCommittedOutput() = runTest {
+        val coordinator = coordinator()
+        coordinator.activate(generation)
+        coordinator.create(request("batch-terminal-success", "first", "next"))
+        coordinator.approve(FileTransferId("first"), FileDestinationId("folder"))
+        val resources = RecordingResources()
+        coordinator.attachResources(FileTransferId("first"), resources)
+        coordinator.transition(
+            FileTransferId("first"),
+            FileTransferEvent.Progressed(1, 1),
+        )
+        coordinator.transition(FileTransferId("first"), FileTransferEvent.Verifying)
+
+        coordinator.transition(FileTransferId("first"), FileTransferEvent.Completed)
+
+        assertEquals(listOf("close-streams"), resources.events)
+        assertEquals(FileTransferPhase.COMPLETED, phase(coordinator, "first"))
+        assertEquals(FileTransferPhase.CONNECTING, phase(coordinator, "next"))
+    }
+    @Test
+    fun retryRejectsChangedAndroidSourceWithoutCreatingDuplicateQueueItem() = runTest {
+        val coordinator = coordinator(
+            retrySourceValidator = FileRetrySourceValidator {
+                FileRetrySourceValidation.CHANGED
+            },
+        )
+        coordinator.activate(generation)
+        coordinator.create(
+            request(
+                "retry-source",
+                "source-file",
+                direction = FileTransferDirection.ANDROID_TO_BROWSER,
+            ),
+        )
+        coordinator.transition(
+            FileTransferId("source-file"),
+            FileTransferEvent.Failed(FileTransferFailure.StreamFailed),
+        )
+
+        val result = coordinator.retry(FileTransferId("source-file"))
+
+        assertEquals(
+            ru.hznik.devicebridge.domain.file.FileTransferOperationResult.Rejected(
+                FileTransferFailure.SourceUnavailable,
+            ),
+            result,
+        )
+        assertEquals(1, coordinator.state.value.items.size)
+        assertEquals(FileTransferPhase.FAILED, phase(coordinator, "source-file"))
+    }
+
+
     @Test
     fun serverStopCleansEveryResourceInvalidatesGrantsAndClearsGeneration() = runTest {
         val grants = grantRegistry()
@@ -204,10 +287,12 @@ class FileTransferCoordinatorCleanupTest {
     private fun coordinator(
         grants: DownloadGrantRegistry = grantRegistry(),
         wifiLock: FileTransferWifiLock = NoOpFileTransferWifiLock,
+        retrySourceValidator: FileRetrySourceValidator = FileRetrySourceValidator.alwaysValid(),
     ) = FileTransferCoordinator(
         browserSessionState = { sessions },
         downloadGrantRegistry = grants,
         wifiLock = wifiLock,
+        retrySourceValidator = retrySourceValidator,
     )
 
     private fun grantRegistry() = DownloadGrantRegistry(

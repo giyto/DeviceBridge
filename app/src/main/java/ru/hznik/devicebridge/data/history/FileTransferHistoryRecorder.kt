@@ -93,5 +93,9 @@ private fun FileTransferFailure.toSafeHistoryReason(): String = when (this) {
     FileTransferFailure.StreamFailed -> "stream_failed"
     FileTransferFailure.SessionUnavailable -> "session_unavailable"
     FileTransferFailure.StorageUnavailable -> "storage_unavailable"
+    FileTransferFailure.InsufficientSpace -> "insufficient_space"
     FileTransferFailure.CapacityReached -> "capacity_reached"
+    FileTransferFailure.FileLimitExceeded -> "file_limit_exceeded"
+    FileTransferFailure.SourceUnavailable -> "source_unavailable"
+    FileTransferFailure.ProtocolMismatch -> "protocol_mismatch"
 }

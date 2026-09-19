@@ -72,7 +72,10 @@ class SecondaryScreensTest {
                         )
                     },
                     settingsContent = {
-                        SettingsScreen(SettingsUiState(isLoading = false), onAction = {})
+                        SettingsScreen(
+                            SettingsUiState(loadState = ru.hznik.devicebridge.feature.settings.SettingsLoadState.CONTENT),
+                            onAction = {},
+                        )
                     },
                 )
             }

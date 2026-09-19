@@ -2,6 +2,10 @@ import type {
   FileTransferUiItem,
   FileTransferUiState,
 } from "./fileTransferController";
+import {
+  filePresentationState,
+  transferItemPresentationState,
+} from "./uiPresentationState";
 
 export interface FileTransferActions {
   readonly onSelect: (files: readonly File[]) => void;
@@ -35,6 +39,18 @@ export function createFileTransferView(
   const announcer = required<HTMLElement>(documentRef, '[data-role="file-announcer"]');
   const knownStatuses = new Map<string, string>();
   const transferCards = new Map<string, HTMLLIElement>();
+  let pendingActionFocus: Readonly<{ transferId: string; source: "cancel" | "retry" }> | undefined;
+  const focusAwareActions: FileTransferActions = {
+    ...actions,
+    onCancel: (transferId) => {
+      pendingActionFocus = { transferId, source: "cancel" };
+      actions.onCancel(transferId);
+    },
+    onRetry: (transferId) => {
+      pendingActionFocus = { transferId, source: "retry" };
+      actions.onRetry(transferId);
+    },
+  };
 
   const select = (files: FileList | readonly File[] | null): void => {
     if (files === null) return;
@@ -68,6 +84,7 @@ export function createFileTransferView(
   dropZone.addEventListener("keydown", onDropKey);
 
   const render = (state: FileTransferUiState): void => {
+    section.dataset.viewState = filePresentationState(state);
     if (state.kind === "inactive") {
       section.hidden = true;
       selection.replaceChildren();
@@ -81,6 +98,7 @@ export function createFileTransferView(
       empty.hidden = false;
       knownStatuses.clear();
       transferCards.clear();
+      pendingActionFocus = undefined;
       return;
     }
 
@@ -116,6 +134,7 @@ export function createFileTransferView(
     clearDraft.hidden = state.selection.length === 0;
     clearDraft.disabled = state.preparing || state.selection.length === 0;
     confirm.disabled =
+      !state.connectionAvailable ||
       state.preparing ||
       state.selection.length === 0 ||
       state.selection.every((item) => item.error !== undefined);
@@ -126,7 +145,10 @@ export function createFileTransferView(
     error.textContent = state.error ?? "";
     count.textContent = String(state.transfers.length);
     empty.hidden = state.transfers.length > 0;
-    reconcileTransferCards(documentRef, list, state.transfers, actions, transferCards);
+    reconcileTransferCards(documentRef, list, state.transfers, focusAwareActions, transferCards, state.connectionAvailable);
+    restoreTransferActionFocus(transferCards, pendingActionFocus, (restored) => {
+      if (restored) pendingActionFocus = undefined;
+    });
     announceTerminalChanges(state.transfers, knownStatuses, announcer);
   };
 
@@ -148,6 +170,7 @@ function createTransferCard(
   documentRef: Document,
   item: FileTransferUiItem,
   actions: FileTransferActions,
+  connectionAvailable: boolean,
 ): HTMLLIElement {
   const card = documentRef.createElement("li");
   card.className = "file-card";
@@ -155,15 +178,21 @@ function createTransferCard(
 
   const heading = documentRef.createElement("div");
   heading.className = "file-card__heading";
+  const identity = documentRef.createElement("div");
+  identity.className = "file-card__identity";
+  const type = documentRef.createElement("span");
+  type.className = "file-card__type";
+  type.setAttribute("aria-hidden", "true");
   const name = documentRef.createElement("strong");
+  identity.append(type, name);
   const status = documentRef.createElement("span");
   status.className = "file-card__status";
-  heading.append(name, status);
+  heading.append(identity, status);
 
   const details = documentRef.createElement("p");
   details.className = "file-card__details";
   card.append(heading, details);
-  updateTransferCard(documentRef, card, item, actions);
+  updateTransferCard(documentRef, card, item, actions, connectionAvailable);
   return card;
 }
 
@@ -172,13 +201,21 @@ function updateTransferCard(
   card: HTMLLIElement,
   item: FileTransferUiItem,
   actions: FileTransferActions,
+  connectionAvailable: boolean,
 ): void {
   card.dataset.status = item.status;
+  card.dataset.viewState = transferItemPresentationState(item.status);
+  const type = card.querySelector<HTMLElement>(".file-card__type")!;
   const name = card.querySelector<HTMLElement>(".file-card__heading strong")!;
   const status = card.querySelector<HTMLElement>(".file-card__status")!;
   const details = card.querySelector<HTMLElement>(".file-card__details")!;
+  type.textContent = fileTypeLabel(item.metadata.mimeType, item.metadata.displayName);
   name.textContent = item.metadata.displayName;
   status.textContent = statusLabel(item.status);
+  card.setAttribute(
+    "aria-label",
+    `${directionLabel(item.metadata.direction)}. ${item.metadata.displayName}. ${statusLabel(item.status)}.`,
+  );
   details.textContent =
     directionLabel(item.metadata.direction) + " · " +
     formatBytes(item.metadata.sizeBytes) + " · " +
@@ -187,20 +224,29 @@ function updateTransferCard(
   if (item.status === "TRANSFERRING" || item.status === "VERIFYING") {
     const progress = card.querySelector<HTMLProgressElement>("progress") ??
       documentRef.createElement("progress");
-    progress.max = Math.max(1, item.metadata.sizeBytes);
-    progress.value = item.bytesTransferred;
-    progress.setAttribute(
-      "aria-label",
-      "Прогресс " + item.metadata.displayName + ": " + progressPercent(item) + "%",
-    );
     const progressText = card.querySelector<HTMLElement>(".file-card__progress") ??
       documentRef.createElement("p");
     progressText.className = "file-card__progress";
-    progressText.textContent =
-      progressPercent(item) + "% · " +
-      formatBytes(item.bytesTransferred) + " из " +
-      formatBytes(item.metadata.sizeBytes) + " · " +
-      formatBytes(item.speedBytesPerSecond) + "/с";
+    if (item.status === "VERIFYING") {
+      progress.removeAttribute("value");
+      progress.setAttribute(
+        "aria-label",
+        "Проверяется целостность файла " + item.metadata.displayName,
+      );
+      progressText.textContent = "Проверяется целостность файла";
+    } else {
+      progress.max = Math.max(1, item.metadata.sizeBytes);
+      progress.value = item.bytesTransferred;
+      progress.setAttribute(
+        "aria-label",
+        "Прогресс " + item.metadata.displayName + ": " + progressPercent(item) + "%",
+      );
+      progressText.textContent =
+        progressPercent(item) + "% · " +
+        formatBytes(item.bytesTransferred) + " из " +
+        formatBytes(item.metadata.sizeBytes) + " · " +
+        formatBytes(item.speedBytesPerSecond) + "/с";
+    }
     if (!progress.isConnected) details.after(progress, progressText);
   } else {
     card.querySelector("progress")?.remove();
@@ -231,6 +277,8 @@ function updateTransferCard(
     if (actionsRow === null) {
       actionsRow = documentRef.createElement("div");
       actionsRow.className = "file-card__actions";
+      actionsRow.setAttribute("role", "group");
+      actionsRow.setAttribute("aria-label", "Действия с файлом");
       card.append(actionsRow);
     }
   }
@@ -272,6 +320,9 @@ function updateTransferCard(
       true,
     ),
   );
+  actionsRow?.querySelectorAll<HTMLButtonElement>("button").forEach((button) => {
+    button.disabled = !connectionAvailable;
+  });
   if (actionsRow !== null && actionsRow.childElementCount === 0) {
     actionsRow.remove();
   }
@@ -300,6 +351,7 @@ function reconcileTransferCards(
   items: readonly FileTransferUiItem[],
   actions: FileTransferActions,
   cards: Map<string, HTMLLIElement>,
+  connectionAvailable: boolean,
 ): void {
   const activeIds = new Set(items.map((item) => item.id));
   for (const [id, card] of cards) {
@@ -311,16 +363,31 @@ function reconcileTransferCards(
   items.forEach((item, index) => {
     let card = cards.get(item.id);
     if (card === undefined) {
-      card = createTransferCard(documentRef, item, actions);
+      card = createTransferCard(documentRef, item, actions, connectionAvailable);
       cards.set(item.id, card);
     } else {
-      updateTransferCard(documentRef, card, item, actions);
+      updateTransferCard(documentRef, card, item, actions, connectionAvailable);
     }
     const currentAtIndex = list.children.item(index);
     if (currentAtIndex !== card) list.insertBefore(card, currentAtIndex);
   });
 }
 
+function restoreTransferActionFocus(
+  cards: ReadonlyMap<string, HTMLLIElement>,
+  intent: Readonly<{ transferId: string; source: "cancel" | "retry" }> | undefined,
+  complete: (restored: boolean) => void,
+): void {
+  if (intent === undefined) return;
+  const card = cards.get(intent.transferId);
+  const preferredAction = intent.source === "cancel" ? "retry-file" : "cancel-file";
+  const target = card?.querySelector<HTMLButtonElement>(
+    `[data-action="${preferredAction}"]:not(:disabled)`,
+  );
+  if (target === null || target === undefined) return;
+  target.focus();
+  complete(true);
+}
 function actionButton(
   documentRef: Document,
   label: string,
@@ -377,6 +444,21 @@ function statusLabel(status: FileTransferUiItem["status"]): string {
   }
 }
 
+function fileTypeLabel(mimeType: string, displayName: string): string {
+  const normalizedMime = mimeType.toLowerCase();
+  const extension = displayName.toLowerCase().split(".").at(-1) ?? "";
+  if (normalizedMime.startsWith("image/")) return "IMG";
+  if (normalizedMime.startsWith("video/")) return "VID";
+  if (normalizedMime.startsWith("audio/")) return "AUD";
+  if (normalizedMime.startsWith("text/")) return "TXT";
+  if (normalizedMime === "application/pdf" || extension === "pdf") return "PDF";
+  if (
+    normalizedMime.includes("zip") ||
+    normalizedMime.includes("compressed") ||
+    ["zip", "7z", "rar", "tar", "gz"].includes(extension)
+  ) return "ZIP";
+  return "FILE";
+}
 function directionLabel(direction: FileTransferUiItem["metadata"]["direction"]): string {
   return direction === "ANDROID_TO_BROWSER" ? "С телефона" : "На телефон";
 }

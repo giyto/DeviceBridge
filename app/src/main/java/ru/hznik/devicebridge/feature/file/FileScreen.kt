@@ -1,6 +1,7 @@
 package ru.hznik.devicebridge.feature.file
 
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -21,11 +22,13 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import kotlin.math.roundToInt
 import ru.hznik.devicebridge.domain.file.FileTransferDirection
 import ru.hznik.devicebridge.domain.file.FileTransferId
 import ru.hznik.devicebridge.domain.file.FileTransferPhase
@@ -99,8 +102,16 @@ fun FileScreen(
                     Card(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clickable { onAction(FileAction.RecipientSelected(recipient.id)) }
-                            .semantics { contentDescription = "Выбрать браузер ${recipient.browserLabel}" },
+                            .selectable(
+                                selected = recipient.selected,
+                                role = Role.RadioButton,
+                                onClick = {
+                                    onAction(FileAction.RecipientSelected(recipient.id))
+                                },
+                            )
+                            .semantics {
+                                contentDescription = "Выбрать браузер ${recipient.browserLabel}"
+                            },
                         colors = CardDefaults.cardColors(
                             containerColor = if (recipient.selected) {
                                 MaterialTheme.colorScheme.primaryContainer
@@ -157,16 +168,49 @@ private fun TransferCard(
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
     ) {
         Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Text(item.displayName, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-            Text(
-                "${item.direction.label()} · ${item.phase.label()} · ${formatBytes(item.sizeBytes)}",
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            if (item.phase in ACTIVE_PHASES) {
-                LinearProgressIndicator(progress = { item.progress }, modifier = Modifier.fillMaxWidth())
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    Text("${(item.progress * 100).roundToInt()}%")
-                    Text("${formatBytes(item.speedBytesPerSecond)}/с")
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                FileTypeBadge(item.mimeType)
+                Column(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    Text(
+                        text = item.displayName,
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    Text(
+                        text = "${item.direction.label()} · ${item.phase.label()}",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.semantics {
+                            contentDescription =
+                                "Этап передачи ${item.displayName}: ${item.phase.label()}"
+                            liveRegion = LiveRegionMode.Polite
+                        },
+                    )
+                    Text(
+                        text = "${formatBytes(item.sizeBytes)} · ${item.mimeType}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+            if (item.hasActiveProgress) {
+                if (item.hasDeterminateProgress) {
+                    LinearProgressIndicator(
+                        progress = { item.progress },
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                        Text("${item.progressPercent}%")
+                        Text("${formatBytes(item.speedBytesPerSecond)}/с")
+                    }
+                } else {
+                    LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                    Text(item.phase.label(), color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
             item.failureMessage?.let { message ->
@@ -211,7 +255,9 @@ private fun TransferCard(
             if (item.canRetry) {
                 OutlinedButton(
                     onClick = { onAction(FileAction.Retry(item.id)) },
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier.fillMaxWidth().semantics {
+                        contentDescription = "Повторить передачу ${item.displayName}"
+                    },
                 ) { Text("Повторить") }
             }
             if (item.canOpen) {
@@ -223,6 +269,26 @@ private fun TransferCard(
                 ) { Text("Открыть файл") }
             }
         }
+    }
+}
+
+@Composable
+private fun FileTypeBadge(mimeType: String) {
+    val label = mimeType.fileTypeLabel()
+    Card(
+        shape = RoundedCornerShape(12.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.secondaryContainer,
+        ),
+    ) {
+        Text(
+            text = label,
+            modifier = Modifier
+                .padding(horizontal = 10.dp, vertical = 8.dp)
+                .semantics { contentDescription = "Тип файла $label" },
+            style = MaterialTheme.typography.labelLarge,
+            fontWeight = FontWeight.Bold,
+        )
     }
 }
 
@@ -279,16 +345,32 @@ private fun FileMetadataRow(
 @Composable
 private fun FeedbackCard(message: String, error: Boolean, onDismiss: () -> Unit) {
     Card(
-        modifier = Modifier.fillMaxWidth().clickable(onClick = onDismiss),
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(
+                onClickLabel = "Закрыть сообщение",
+                role = Role.Button,
+                onClick = onDismiss,
+            )
+            .semantics {
+                contentDescription = "${message.trim()} Закрыть сообщение"
+            },
         colors = CardDefaults.cardColors(
             containerColor = if (error) MaterialTheme.colorScheme.errorContainer else MaterialTheme.colorScheme.primaryContainer,
         ),
     ) { Text(message, Modifier.padding(16.dp), fontWeight = FontWeight.Medium) }
 }
 
-private val ACTIVE_PHASES = setOf(FileTransferPhase.CONNECTING, FileTransferPhase.TRANSFERRING, FileTransferPhase.VERIFYING)
-
 private fun FileTransferDirection.label() = if (this == FileTransferDirection.ANDROID_TO_BROWSER) "На компьютер" else "На телефон"
+private fun String.fileTypeLabel(): String = when {
+    equals("application/pdf", ignoreCase = true) -> "PDF"
+    startsWith("image/", ignoreCase = true) -> "IMG"
+    startsWith("video/", ignoreCase = true) -> "VIDEO"
+    startsWith("audio/", ignoreCase = true) -> "AUDIO"
+    startsWith("text/", ignoreCase = true) -> "TXT"
+    else -> "FILE"
+}
+
 private fun FileTransferPhase.label(): String = when (this) {
     FileTransferPhase.QUEUED -> "В очереди"
     FileTransferPhase.CONNECTING -> "Ожидает подтверждения"

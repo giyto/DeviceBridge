@@ -6,6 +6,7 @@ import { BrowserTrustedCredentialStore } from "./browserTrustedCredentialStore";
 import { createShellView } from "./shellView";
 import { TextApiClient } from "./textApiClient";
 import { TextTransferController } from "./textTransferController";
+import { BrowserTextDraftStore } from "./browserTextDraftStore";
 import { createTextTransferView } from "./textTransferView";
 import { WebManifestClient } from "./webManifestClient";
 import { createBrowserLabel } from "./browserIdentity";
@@ -45,6 +46,7 @@ textController = new TextTransferController(
   createProtocolMessageId,
   () => Date.now(),
   () => controller.handleTextUnauthorized(),
+  new BrowserTextDraftStore(),
 );
 fileController = new FileTransferController(
   new FileApiClient(),
@@ -63,6 +65,7 @@ controller = new SessionController(
   new BrowserSessionTokenStore(),
   new SessionEventSocketClient(),
   (state) => view.render(state),
+  (effect) => view.consume(effect),
   createBrowserLabel(navigator.userAgent, navigator.platform),
   textController,
   fileController,

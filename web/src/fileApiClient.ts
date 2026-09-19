@@ -18,6 +18,9 @@ export type FileApiErrorCode =
   | "SESSION_UNAVAILABLE"
   | "NOT_APPROVED"
   | "CHECKSUM_MISMATCH"
+  | "DESTINATION_UNAVAILABLE"
+  | "INSUFFICIENT_SPACE"
+  | "SOURCE_UNAVAILABLE"
   | "CANCELLED"
   | "STREAM_FAILED"
   | "UNAUTHORIZED";
@@ -308,7 +311,7 @@ function requireSafeNonNegativeInteger(value: unknown): number { if (typeof valu
 function requireFileSize(value: unknown): number { const result = requireSafeNonNegativeInteger(value); if (result > HARD_MAX_FILE_BYTES) invalid(); return result; }
 function isDirection(value: unknown): value is FileDirection { return value === "ANDROID_TO_BROWSER" || value === "BROWSER_TO_ANDROID"; }
 function isTransferStatus(value: unknown): value is FileTransferStatus { return typeof value === "string" && ["QUEUED", "CONNECTING", "TRANSFERRING", "VERIFYING", "COMPLETED", "CANCELLED", "FAILED"].includes(value); }
-function isFileApiErrorCode(value: unknown): value is FileApiErrorCode { return typeof value === "string" && ["INVALID_PAYLOAD", "UNSUPPORTED_VERSION", "FILE_TOO_LARGE", "MESSAGE_CONFLICT", "SESSION_UNAVAILABLE", "NOT_APPROVED", "CHECKSUM_MISMATCH", "CANCELLED", "STREAM_FAILED", "UNAUTHORIZED"].includes(value); }
+function isFileApiErrorCode(value: unknown): value is FileApiErrorCode { return typeof value === "string" && ["INVALID_PAYLOAD", "UNSUPPORTED_VERSION", "FILE_TOO_LARGE", "MESSAGE_CONFLICT", "SESSION_UNAVAILABLE", "NOT_APPROVED", "CHECKSUM_MISMATCH", "DESTINATION_UNAVAILABLE", "INSUFFICIENT_SPACE", "SOURCE_UNAVAILABLE", "CANCELLED", "STREAM_FAILED", "UNAUTHORIZED"].includes(value); }
 function hasControl(value: string): boolean { return [...value].some((character) => { const code = character.codePointAt(0); return code !== undefined && (code <= 0x1f || code === 0x7f); }); }
 function isRecord(value: unknown): value is Record<string, unknown> { return typeof value === "object" && value !== null && !Array.isArray(value); }
 function requireJsonResponse(response: Response): void { if (!(response.headers.get("Content-Type") ?? "").toLowerCase().startsWith("application/json")) throw new Error("DeviceBridge returned a non-JSON file response"); }
@@ -318,6 +321,9 @@ function fileErrorMessage(code: FileApiErrorCode): string {
     case "UNAUTHORIZED": return "Сессия браузера завершена.";
     case "FILE_TOO_LARGE": return "Файл превышает лимит 1 ГиБ.";
     case "CHECKSUM_MISMATCH": return "Контрольная сумма файла не совпала.";
+    case "DESTINATION_UNAVAILABLE": return "Папка назначения недоступна.";
+    case "INSUFFICIENT_SPACE": return "На устройстве недостаточно свободного места.";
+    case "SOURCE_UNAVAILABLE": return "Исходный файл недоступен или изменился.";
     case "NOT_APPROVED": return "Передача ещё не подтверждена на телефоне.";
     case "CANCELLED": return "Передача отменена.";
     case "SESSION_UNAVAILABLE": return "Телефон или сессия сейчас недоступны.";

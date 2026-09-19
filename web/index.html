@@ -37,8 +37,10 @@
         </p>
       </section>
 
-      <section
-        class="status-card"
+      <div class="shell-layout">
+        <div class="shell-layout__connection">
+          <section
+            class="status-card"
         data-role="status"
         data-state="checking"
         role="status"
@@ -79,9 +81,11 @@
             публичном Wi-Fi или чужой сети.
           </p>
         </div>
-      </aside>
+          </aside>
+        </div>
 
-      <section class="stage-card" aria-labelledby="stage-title" data-role="session-panel">
+        <div class="shell-layout__workspace">
+          <section class="stage-card" aria-labelledby="stage-title" data-role="session-panel">
         <p class="stage-card__step">Безопасное подключение</p>
         <h2 id="stage-title" data-role="session-title">Подготовка подключения…</h2>
         <p data-role="session-detail">
@@ -130,7 +134,7 @@
           <div class="text-transfer__heading">
             <div>
               <p class="stage-card__step">Текущая сессия</p>
-              <h2 id="text-transfer-title">Текст между телефоном и браузером</h2>
+              <h3 id="text-transfer-title">Текст между телефоном и браузером</h3>
             </div>
             <span class="text-transfer__privacy">Без истории на диске</span>
           </div>
@@ -156,7 +160,7 @@
 
           <div class="text-feed-panel">
             <div class="text-feed-panel__heading">
-              <h3>Сообщения этой сессии</h3>
+              <h4>Сообщения этой сессии</h4>
               <span data-role="text-feed-count">0</span>
             </div>
             <p class="text-feed__empty" data-role="text-feed-empty">
@@ -166,12 +170,13 @@
               class="text-feed"
               data-role="text-feed"
               aria-label="Сообщения текущей сессии"
-              aria-live="polite"
             ></ol>
           </div>
+          <p class="visually-hidden" data-role="text-announcer" aria-live="polite"></p>
+        </section>
 
-          <section
-            class="file-transfer"
+        <section
+          class="file-transfer"
             data-role="file-transfer"
             aria-labelledby="file-transfer-title"
             hidden
@@ -179,12 +184,12 @@
             <div class="file-transfer__heading">
               <div>
                 <p class="stage-card__step">Потоковая передача</p>
-                <h2 id="file-transfer-title">Файлы между телефоном и браузером</h2>
+                <h3 id="file-transfer-title">Файлы между телефоном и браузером</h3>
               </div>
               <span class="text-transfer__privacy">До 1 ГиБ на файл</span>
             </div>
 
-            <label class="file-drop-zone" data-role="file-drop-zone" for="file-input" tabindex="0">
+            <label class="file-drop-zone" data-role="file-drop-zone" for="file-input" role="button" aria-controls="file-input" tabindex="0">
               <strong>Выберите файлы или перетащите их сюда</strong>
               <span>Передача начнётся только после подтверждения.</span>
             </label>
@@ -209,7 +214,7 @@
 
             <div class="file-transfer-panel">
               <div class="text-feed-panel__heading">
-                <h3>Передачи этой сессии</h3>
+                <h4>Передачи этой сессии</h4>
                 <span data-role="file-transfer-count">0</span>
               </div>
               <p data-role="file-transfer-empty">
@@ -222,9 +227,10 @@
               ></ol>
             </div>
             <p class="visually-hidden" data-role="file-announcer" aria-live="polite"></p>
-          </section>
         </section>
       </section>
+        </div>
+      </div>
     </main>
 
     <footer class="site-footer">

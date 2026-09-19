@@ -15,7 +15,11 @@
     "pretest": "vite build",
     "test": "vitest run",
     "test:file-transfer-gate": "playwright test --config playwright.file-transfer.config.ts",
+    "test:compatibility": "playwright test --config playwright.compatibility.config.ts",
+    "test:visual": "playwright test --config playwright.visual.config.ts",
     "dev:file-transfer-gate": "vite --host 127.0.0.1 --port 4174 --strictPort",
+    "dev:compatibility": "vite --host 127.0.0.1 --port 4176 --strictPort",
+    "dev:visual": "vite --host 127.0.0.1 --port 4175 --strictPort",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit"
   },

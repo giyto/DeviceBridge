@@ -1,8 +1,10 @@
 package ru.hznik.devicebridge.feature.file
 
+import kotlinx.coroutines.async
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.test.StandardTestDispatcher
@@ -10,6 +12,7 @@ import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
+import kotlinx.coroutines.withTimeoutOrNull
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -93,7 +96,7 @@ class FileViewModelTest {
         val transferId = FileTransferId("incoming")
 
         viewModel.onAction(FileAction.ApproveIncoming(transferId))
-        assertEquals(FileEffect.ChooseDestination(transferId), viewModel.effects.value)
+        assertEquals(FileEffect.ChooseDestination(transferId), viewModel.effects.first())
         viewModel.onAction(FileAction.DestinationCancelled(transferId))
         runCurrent()
         assertTrue(viewModel.uiState.value.errorMessage!!.contains("папк", ignoreCase = true))
@@ -121,12 +124,55 @@ class FileViewModelTest {
                 transferId,
                 "content://provider/tree/saved",
             ),
-            viewModel.effects.value,
+            viewModel.effects.first(),
         )
 
         viewModel.onAction(FileAction.ChangeIncomingDestination(transferId))
-        assertEquals(FileEffect.ChooseDestination(transferId), viewModel.effects.value)
+        assertEquals(FileEffect.ChooseDestination(transferId), viewModel.effects.first())
     }
+
+    @Test
+    fun revokedSavedDestinationCancelAndReplacementContinueSameTransferOnce() =
+        runTest(dispatcher) {
+            val files = FakeFiles()
+            val settings = FakeSettings(
+                DeviceSettings.defaults().copy(
+                    destinationTree = DestinationTree("content://provider/tree/revoked"),
+                ),
+            )
+            val viewModel = viewModel(FakeSessions(active(first)), files, settings)
+            val transferId = FileTransferId("incoming-revoked")
+            runCurrent()
+
+            viewModel.onAction(FileAction.ApproveIncoming(transferId))
+            assertEquals(
+                FileEffect.UseDefaultDestination(
+                    transferId,
+                    "content://provider/tree/revoked",
+                ),
+                viewModel.effects.first(),
+            )
+
+            viewModel.onAction(FileAction.DestinationUnavailable(transferId))
+            viewModel.onAction(FileAction.ChangeIncomingDestination(transferId))
+            assertEquals(FileEffect.ChooseDestination(transferId), viewModel.effects.first())
+
+            viewModel.onAction(FileAction.DestinationCancelled(transferId))
+            assertTrue(files.approved.isEmpty())
+            viewModel.onAction(FileAction.ChangeIncomingDestination(transferId))
+            viewModel.onAction(
+                FileAction.DestinationSelected(
+                    transferId,
+                    FileDestinationId("tree://replacement"),
+                ),
+            )
+            runCurrent()
+
+            assertEquals(
+                listOf(transferId to FileDestinationId("tree://replacement")),
+                files.approved,
+            )
+        }
 
     @Test
     fun selectionLimitTracksLatestRepositorySetting() = runTest(dispatcher) {
@@ -236,6 +282,23 @@ class FileViewModelTest {
         assertEquals(2, lease.promoted.size)
         assertEquals(1, lease.committed.size)
         assertTrue(viewModel.uiState.value.selection.isEmpty())
+    }
+
+    @Test
+    fun filePickerEffectIsDeliveredOnceWithoutReplay() = runTest(dispatcher) {
+        val viewModel = viewModel(FakeSessions(active(first)), FakeFiles())
+        runCurrent()
+        val firstEffect = async { viewModel.effects.first() }
+        runCurrent()
+
+        viewModel.onAction(FileAction.PickFiles)
+
+        assertEquals(FileEffect.ChooseFiles, firstEffect.await())
+        assertNull(
+            withTimeoutOrNull(100) {
+                viewModel.effects.first()
+            },
+        )
     }
 
     private fun viewModel(

@@ -8,6 +8,7 @@ import javax.inject.Inject
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onStart
@@ -41,6 +42,7 @@ class HistoryViewModel @Inject constructor(
     }
 
     private val filter = MutableStateFlow(savedStateHandle.restoreHistoryFilter())
+    private val reloadRevision = MutableStateFlow(0)
     private val mutableUiState = MutableStateFlow(
         HistoryUiState(filter = filter.value),
     )
@@ -48,7 +50,7 @@ class HistoryViewModel @Inject constructor(
 
     init {
         viewModelScope.launch {
-            filter
+            combine(filter, reloadRevision) { currentFilter, _ -> currentFilter }
                 .flatMapLatest { currentFilter ->
                     observeHistory(currentFilter)
                         .map<List<HistoryRecord>, LoadResult>(LoadResult::Loaded)
@@ -86,6 +88,8 @@ class HistoryViewModel @Inject constructor(
             HistoryAction.ConfirmClear -> clearAllRecords()
             HistoryAction.DismissError ->
                 mutableUiState.update { it.copy(errorMessage = null) }
+            HistoryAction.RetryLoad ->
+                reloadRevision.update(Int::inc)
         }
     }
 

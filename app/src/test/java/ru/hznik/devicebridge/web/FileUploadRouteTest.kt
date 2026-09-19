@@ -1,14 +1,18 @@
 package ru.hznik.devicebridge.web
 
 import java.io.ByteArrayOutputStream
+import java.io.IOException
+import java.io.OutputStream
 import java.util.concurrent.atomic.AtomicLong
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import ru.hznik.devicebridge.data.file.FileUploadTarget
 import ru.hznik.devicebridge.data.file.FileUploadTargetFactory
 import ru.hznik.devicebridge.domain.file.FileDestinationId
 import ru.hznik.devicebridge.domain.file.FileTransferId
+import ru.hznik.devicebridge.domain.file.FileTransferFailure
 import ru.hznik.devicebridge.domain.file.FileTransferPhase
 
 class FileUploadRouteTest {
@@ -103,6 +107,49 @@ class FileUploadRouteTest {
         }
     }
 
+    @Test
+    fun inaccessibleDestinationReturnsDistinctFailureAndReleasesQueueSlot() {
+        withSessionRouteServer(uploadTargetFactory = FileUploadTargetFactory { _, _ ->
+            error("destination provider unavailable")
+        }) { server ->
+            val payload = "hello".encodeToByteArray()
+            val paired = offerAndApprove(server, payload)
+
+            val response = server.requestBytes(
+                "POST", "/api/v1/files/upload-1", payload,
+                server.sameOriginBinaryHeaders(mapOf("Authorization" to "Bearer ${paired.token}")),
+            )
+
+            assertEquals(503, response.statusCode())
+            assertTrue(response.body().contains("DESTINATION_UNAVAILABLE"))
+            assertEquals(
+                FileTransferFailure.StorageUnavailable,
+                server.fileCoordinator.state.value.item(FileTransferId("upload-1"))?.failure,
+            )
+        }
+    }
+
+    @Test
+    fun noSpaceDuringWriteReturnsDistinctFailureAndAbortsPartialOutput() {
+        val target = NoSpaceTarget()
+        withSessionRouteServer(uploadTargetFactory = FileUploadTargetFactory { _, _ -> target }) { server ->
+            val payload = "hello".encodeToByteArray()
+            val paired = offerAndApprove(server, payload)
+
+            val response = server.requestBytes(
+                "POST", "/api/v1/files/upload-1", payload,
+                server.sameOriginBinaryHeaders(mapOf("Authorization" to "Bearer ${paired.token}")),
+            )
+
+            assertEquals(400, response.statusCode())
+            assertTrue(response.body().contains("INSUFFICIENT_SPACE"))
+            assertEquals(
+                FileTransferFailure.InsufficientSpace,
+                server.fileCoordinator.state.value.item(FileTransferId("upload-1"))?.failure,
+            )
+        }
+    }
+
     private fun offerAndApprove(
         server: SessionRouteTestServer,
         payload: ByteArray,
@@ -140,6 +187,18 @@ class FileUploadRouteTest {
         override suspend fun abort() { aborts += 1 }
         override suspend fun close() = Unit
     }
+
+    private class NoSpaceTarget : FileUploadTarget {
+        override fun outputStream(): OutputStream = object : OutputStream() {
+            override fun write(value: Int) {
+                throw IOException("ENOSPC: no space left on device")
+            }
+        }
+        override suspend fun commit() = Unit
+        override suspend fun abort() = Unit
+        override suspend fun close() = Unit
+    }
+
 
     private fun sha256(bytes: ByteArray): String =
         java.security.MessageDigest.getInstance("SHA-256")

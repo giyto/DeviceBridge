@@ -86,6 +86,45 @@ class BrowserSessionCoordinatorDecisionTest {
     }
 
     @Test
+    fun recoveryObservesTheOriginalRequestAndReturnsTheSameApprovedSession() = runTest {
+        val fixture = Fixture(this)
+        val challenge = fixture.challenge("Chrome")
+        val response = async {
+            fixture.coordinator.confirmAndAwait(
+                fixture.handle,
+                challenge.challengeId,
+                "123456",
+                "Chrome",
+                "192.168.1.2",
+            )
+        }
+        runCurrent()
+
+        assertEquals(
+            SessionConfirmationRecoveryResult.Pending,
+            fixture.coordinator.recoverConfirmation(
+                fixture.handle,
+                challenge.challengeId,
+                "Chrome",
+                "192.168.1.2",
+            ),
+        )
+        fixture.coordinator.approve(fixture.coordinator.state.value.pendingRequests.single().id)
+
+        val original = response.await() as SessionConfirmationResult.Approved
+        val recovered = fixture.coordinator.recoverConfirmation(
+            fixture.handle,
+            challenge.challengeId,
+            "Chrome",
+            "192.168.1.2",
+        ) as SessionConfirmationRecoveryResult.Approved
+
+        assertEquals(original.sessionId, recovered.confirmation.sessionId)
+        assertEquals(original.token, recovered.confirmation.token)
+        assertEquals(1, fixture.coordinator.state.value.sessions.size)
+    }
+
+    @Test
     fun unansweredConfirmationTimesOutAndRemovesPendingRequest() = runTest {
         val fixture = Fixture(this)
         val challenge = fixture.challenge("Firefox")

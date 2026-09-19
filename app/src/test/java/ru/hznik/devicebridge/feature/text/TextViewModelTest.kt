@@ -1,5 +1,6 @@
 package ru.hznik.devicebridge.feature.text
 
+import androidx.lifecycle.SavedStateHandle
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -133,6 +134,7 @@ class TextViewModelTest {
     @Test
     fun successfulSendUsesSelectedSessionClearsDraftAndShowsFeed() = runTest(dispatcher) {
         val sessions = FakeBrowserSessions(browserState(firstSession))
+        val savedState = SavedStateHandle()
         val delivered = outgoingItem(
             id = "outgoing-1",
             session = firstSession,
@@ -142,7 +144,7 @@ class TextViewModelTest {
         val transfers = FakeTextTransfers(
             sendResult = TextTransferResult.Accepted(delivered),
         )
-        val viewModel = createViewModel(sessions, transfers)
+        val viewModel = createViewModel(sessions, transfers, savedState)
         viewModel.onAction(TextAction.DraftChanged("hello"))
         runCurrent()
 
@@ -155,6 +157,10 @@ class TextViewModelTest {
         assertEquals("", viewModel.uiState.value.draft)
         assertEquals("Текст доставлен.", viewModel.uiState.value.successMessage)
         assertEquals(TextTransferStatus.DELIVERED, viewModel.uiState.value.items.single().status)
+
+        val recreated = createViewModel(sessions, transfers, savedState)
+        runCurrent()
+        assertEquals("", recreated.uiState.value.draft)
     }
 
     @Test
@@ -240,14 +246,73 @@ class TextViewModelTest {
         assertEquals("Повторная отправка выполнена.", viewModel.uiState.value.successMessage)
     }
 
+    @Test
+    fun protocolFailureDoesNotOfferOrExecuteUnchangedRetry() = runTest(dispatcher) {
+        val failed = outgoingItem(
+            id = "protocol-failure",
+            session = firstSession,
+            content = "retry",
+            status = TextTransferStatus.FAILED,
+            failureReason = TextTransferFailureReason.PROTOCOL_ERROR,
+        )
+        val transfers = FakeTextTransfers(initial = TextTransferState.of(listOf(failed)))
+        val viewModel = createViewModel(
+            FakeBrowserSessions(browserState(firstSession)),
+            transfers,
+        )
+        runCurrent()
+
+        assertFalse(viewModel.uiState.value.items.single().canRetry)
+        viewModel.onAction(TextAction.RetryClicked(TextMessageId("protocol-failure")))
+        runCurrent()
+        assertTrue(transfers.retried.isEmpty())
+    }
+    @Test
+    fun draftSurvivesRecreationOnlyInsideTheCurrentServerGeneration() = runTest(dispatcher) {
+        val savedState = SavedStateHandle()
+        val sessions = FakeBrowserSessions(browserState(firstSession))
+        val first = createViewModel(sessions, FakeTextTransfers(), savedState)
+        runCurrent()
+
+        first.onAction(TextAction.DraftChanged("Черновик между recreation"))
+        runCurrent()
+        val recreated = createViewModel(sessions, FakeTextTransfers(), savedState)
+        runCurrent()
+        assertEquals("Черновик между recreation", recreated.uiState.value.draft)
+
+        recreated.onAction(TextAction.DraftChanged(""))
+        runCurrent()
+        val afterDiscard = createViewModel(sessions, FakeTextTransfers(), savedState)
+        runCurrent()
+        assertEquals("", afterDiscard.uiState.value.draft)
+
+        recreated.onAction(TextAction.DraftChanged("Черновик старого generation"))
+        runCurrent()
+        sessions.mutableState.value = BrowserSessionState.active(
+            generationId = ServerGenerationId(2),
+            pairingCode = PairingCodeState("654321", 60_000),
+        )
+        runCurrent()
+        assertEquals("", recreated.uiState.value.draft)
+        assertEquals("", afterDiscard.uiState.value.draft)
+
+        recreated.onAction(TextAction.DraftChanged("Очистить при остановке"))
+        runCurrent()
+        sessions.mutableState.value = BrowserSessionState.inactive()
+        runCurrent()
+        assertEquals("", recreated.uiState.value.draft)
+        assertEquals("", afterDiscard.uiState.value.draft)
+    }
     private fun createViewModel(
         sessions: FakeBrowserSessions,
         transfers: FakeTextTransfers,
+        savedStateHandle: SavedStateHandle = SavedStateHandle(),
     ) = TextViewModel(
         observeBrowserSessions = ObserveBrowserSessionsUseCase(sessions),
         observeTextTransfers = ObserveTextTransfersUseCase(transfers),
         sendText = SendTextToBrowserUseCase(transfers),
         retryText = RetryTextTransferUseCase(transfers),
+        savedStateHandle = savedStateHandle,
     )
 
     private class FakeBrowserSessions(

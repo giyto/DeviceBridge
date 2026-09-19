@@ -3,6 +3,7 @@ import {
   SessionApiError,
   type SessionChallenge,
   type SessionConfirmation,
+  type SessionConfirmationRecovery,
   type SessionStatus,
 } from "./sessionApiClient";
 import { ManifestCompatibilityError, type WebManifest } from "./webManifestClient";
@@ -13,6 +14,7 @@ import type {
   FileSnapshotEvent,
 } from "./fileApiClient";
 import type {
+  SessionEventLossReason,
   TextErrorEvent,
   TextReceivedEvent,
   TextSnapshotEvent,
@@ -23,13 +25,31 @@ export type SessionUiState =
   | Readonly<{ kind: "ready"; manifest: WebManifest; challenge: SessionChallenge }>
   | Readonly<{ kind: "submitting"; manifest: WebManifest }>
   | Readonly<{ kind: "awaiting"; manifest: WebManifest }>
+  | Readonly<{ kind: "uncertain"; manifest: WebManifest; message: string; checking: boolean }>
   | Readonly<{ kind: "connected"; manifest: WebManifest; status: SessionStatus }>
+  | Readonly<{
+      kind: "reconnecting";
+      manifest: WebManifest;
+      status: SessionStatus;
+      attempt: number;
+      nextRetryInMs: number;
+    }>
+  | Readonly<{
+      kind: "needsUserAction";
+      manifest: WebManifest;
+      status: SessionStatus;
+      message: string;
+    }>
   | Readonly<{ kind: "blocked"; manifest: WebManifest; message: string; retryAfterSeconds?: number }>
   | Readonly<{ kind: "expired"; manifest: WebManifest; message: string }>
   | Readonly<{ kind: "denied"; manifest: WebManifest; message: string }>
   | Readonly<{ kind: "sessionLost"; manifest?: WebManifest; message: string }>
   | Readonly<{ kind: "offline"; message: string; nextRetryInMs?: number }>;
 
+export type SessionUiEffect = Readonly<{
+  id: string;
+  kind: "clearPairingForm";
+}>;
 export interface ManifestLoader {
   load(signal?: AbortSignal): Promise<WebManifest>;
 }
@@ -46,6 +66,11 @@ export interface SessionApi {
     clientLabel: string,
     signal?: AbortSignal,
   ): Promise<SessionConfirmation>;
+  recoverConfirmation(
+    challengeId: string,
+    clientLabel: string,
+    signal?: AbortSignal,
+  ): Promise<SessionConfirmationRecovery>;
   exchangeTrusted(
     trustedCredential: string,
     signal?: AbortSignal,
@@ -68,7 +93,9 @@ export interface TrustedCredentialStore {
 
 export interface SessionEventChannel {
   connect(token: string, callbacks: {
-    readonly onSessionLost: () => void;
+    readonly onSessionLost: (reason: SessionEventLossReason) => void;
+    readonly onAuthenticated?: () => void;
+    readonly onReconnecting?: (attempt: number, delayMs: number) => void;
     readonly onTextReceived?: (event: TextReceivedEvent) => void;
     readonly onTextSnapshot?: (event: TextSnapshotEvent) => void;
     readonly onTextError?: (event: TextErrorEvent) => void;
@@ -81,8 +108,11 @@ export interface SessionEventChannel {
 }
 
 export interface TextSessionLifecycle {
-  activate(token: string): void;
+  activate(token: string, sessionScopeId: string): void;
   deactivate(): void;
+  suspendSession(): void;
+  dispose(): void;
+  setConnectionAvailable(available: boolean): void;
   receive(event: TextReceivedEvent): void;
   applySnapshot(event: TextSnapshotEvent): void;
   receiveError(event: TextErrorEvent): void;
@@ -91,6 +121,7 @@ export interface TextSessionLifecycle {
 export interface FileSessionLifecycle {
   activate(token: string, effectiveFileLimitBytes: number): void;
   deactivate(): void;
+  setConnectionAvailable(available: boolean): void;
   receiveOffer(event: FileOfferEvent): void;
   receiveProgress(event: FileProgressEvent): void;
   applySnapshot(event: FileSnapshotEvent): void;
@@ -111,6 +142,9 @@ const browserScheduler: ControllerScheduler = {
 const noTextSession: TextSessionLifecycle = {
   activate: () => undefined,
   deactivate: () => undefined,
+  suspendSession: () => undefined,
+  dispose: () => undefined,
+  setConnectionAvailable: () => undefined,
   receive: () => undefined,
   applySnapshot: () => undefined,
   receiveError: () => undefined,
@@ -118,6 +152,7 @@ const noTextSession: TextSessionLifecycle = {
 const noFileSession: FileSessionLifecycle = {
   activate: () => undefined,
   deactivate: () => undefined,
+  setConnectionAvailable: () => undefined,
   receiveOffer: () => undefined,
   receiveProgress: () => undefined,
   applySnapshot: () => undefined,
@@ -139,6 +174,10 @@ export class SessionController {
   private busy = false;
   private challengeRememberRequested = false;
   private trustedExchangeAttempted = false;
+  private pairingRecovery?: Readonly<{
+    manifest: WebManifest;
+    challengeId: string;
+  }>;
 
   constructor(
     private readonly manifestLoader: ManifestLoader,
@@ -146,6 +185,7 @@ export class SessionController {
     private readonly tokenStore: SessionTokenStore,
     private readonly events: SessionEventChannel,
     private readonly onStateChange: (state: SessionUiState) => void,
+    private readonly onEffect: (effect: SessionUiEffect) => void,
     private readonly clientLabel: string,
     private readonly textSession: TextSessionLifecycle = noTextSession,
     private readonly fileSession: FileSessionLifecycle = noFileSession,
@@ -158,6 +198,12 @@ export class SessionController {
   }
 
   retry(): void {
+    if (this.currentState.kind === "uncertain" && this.pairingRecovery !== undefined) {
+      if (this.busy) return;
+      this.busy = true;
+      void this.recoverPairingConfirmation(this.generation, this.pairingRecovery);
+      return;
+    }
     this.beginNewCycle();
   }
 
@@ -201,7 +247,7 @@ export class SessionController {
     this.generation += 1;
     this.cancelPending();
     this.events.disconnect();
-    this.textSession.deactivate();
+    this.textSession.dispose();
     this.fileSession.deactivate();
   }
 
@@ -218,7 +264,7 @@ export class SessionController {
     const manifest = this.currentState.manifest;
     this.generation += 1;
     this.cancelPending();
-    this.clearSession();
+    this.clearSession(true);
     this.busy = false;
     this.emit({
       kind: "sessionLost",
@@ -231,11 +277,12 @@ export class SessionController {
     this.generation += 1;
     this.cancelPending();
     this.events.disconnect();
-    this.textSession.deactivate();
+    this.textSession.suspendSession();
     this.fileSession.deactivate();
     this.busy = false;
     this.challengeRememberRequested = false;
     this.trustedExchangeAttempted = false;
+    this.pairingRecovery = undefined;
     void this.boot(this.generation, 0);
   }
 
@@ -265,7 +312,7 @@ export class SessionController {
           return;
         } catch (error: unknown) {
           if (!isUnauthorized(error)) throw error;
-          this.clearSession();
+          this.clearSession(true);
         }
       }
       const trusted = this.trustedCredentialStore.read();
@@ -355,6 +402,10 @@ export class SessionController {
         activeChallengeId = challenge.challengeId;
       }
       this.emit({ kind: "awaiting", manifest });
+      this.pairingRecovery = {
+        manifest,
+        challengeId: activeChallengeId,
+      };
       const confirmation = await this.api.confirm(
         activeChallengeId,
         code,
@@ -362,43 +413,171 @@ export class SessionController {
         controller.signal,
       );
       if (!this.isCurrent(generation)) return;
-      if (
-        confirmation.trustedCredential !== undefined &&
-        confirmation.trustedCredentialExpiresAtEpochMillis !== undefined
-      ) {
-        try {
-          this.trustedCredentialStore.save({
-            credential: confirmation.trustedCredential,
-            expiresAtEpochMillis: confirmation.trustedCredentialExpiresAtEpochMillis,
-          });
-        } catch {
-          this.trustedCredentialStore.clear();
-        }
-      }
-      this.tokenStore.save(confirmation.token);
-      this.activeToken = confirmation.token;
-      const status = await this.api.status(confirmation.token, controller.signal);
-      if (!this.isCurrent(generation)) return;
-      this.connect(manifest, confirmation.token, status);
+      await this.acceptConfirmation(generation, manifest, confirmation, controller);
     } catch (error: unknown) {
       if (!this.isCurrent(generation) || isAbortError(error)) return;
-      if (isUnauthorized(error)) this.clearSession();
-      this.emitError(manifest, error);
+      if (error instanceof SessionApiError) {
+        this.pairingRecovery = undefined;
+        this.emitError(manifest, error);
+      } else {
+        this.emit({
+          kind: "uncertain",
+          manifest,
+          message: "Ответ о подключении не получен. Проверьте исходный запрос.",
+          checking: false,
+        });
+      }
     } finally {
       this.busy = false;
       if (this.abortController === controller) this.abortController = undefined;
     }
   }
 
+  private async recoverPairingConfirmation(
+    generation: number,
+    recovery: Readonly<{ manifest: WebManifest; challengeId: string }>,
+  ): Promise<void> {
+    const controller = new AbortController();
+    this.abortController = controller;
+    this.emit({
+      kind: "uncertain",
+      manifest: recovery.manifest,
+      message: "Проверяем результат исходного запроса…",
+      checking: true,
+    });
+    try {
+      const result = await this.api.recoverConfirmation(
+        recovery.challengeId,
+        this.clientLabel,
+        controller.signal,
+      );
+      if (!this.isCurrent(generation)) return;
+      switch (result.state) {
+        case "PENDING":
+          this.emit({
+            kind: "uncertain",
+            manifest: recovery.manifest,
+            message: "Запрос всё ещё ожидает решения на телефоне.",
+            checking: false,
+          });
+          break;
+        case "DENIED":
+          this.pairingRecovery = undefined;
+          this.emit({
+            kind: "denied",
+            manifest: recovery.manifest,
+            message: "Подключение отклонено на телефоне.",
+          });
+          break;
+        case "EXPIRED":
+          this.pairingRecovery = undefined;
+          this.emit({
+            kind: "expired",
+            manifest: recovery.manifest,
+            message: "Код или запрос истёк.",
+          });
+          break;
+        case "APPROVED":
+          await this.acceptConfirmation(
+            generation,
+            recovery.manifest,
+            result,
+            controller,
+          );
+          break;
+      }
+    } catch (error: unknown) {
+      if (!this.isCurrent(generation) || isAbortError(error)) return;
+      if (error instanceof SessionApiError) {
+        this.pairingRecovery = undefined;
+        this.emitError(recovery.manifest, error);
+      } else {
+        this.emit({
+          kind: "uncertain",
+          manifest: recovery.manifest,
+          message: "Результат пока недоступен. Проверьте сеть и повторите проверку.",
+          checking: false,
+        });
+      }
+    } finally {
+      this.busy = false;
+      if (this.abortController === controller) this.abortController = undefined;
+    }
+  }
+
+  private async acceptConfirmation(
+    generation: number,
+    manifest: WebManifest,
+    confirmation: SessionConfirmation,
+    controller: AbortController,
+  ): Promise<void> {
+    if (
+      confirmation.trustedCredential !== undefined &&
+      confirmation.trustedCredentialExpiresAtEpochMillis !== undefined
+    ) {
+      try {
+        this.trustedCredentialStore.save({
+          credential: confirmation.trustedCredential,
+          expiresAtEpochMillis: confirmation.trustedCredentialExpiresAtEpochMillis,
+        });
+      } catch {
+        this.trustedCredentialStore.clear();
+      }
+    }
+    this.tokenStore.save(confirmation.token);
+    this.activeToken = confirmation.token;
+    const status = await this.api.status(confirmation.token, controller.signal);
+    if (!this.isCurrent(generation)) return;
+    this.pairingRecovery = undefined;
+    this.connect(manifest, confirmation.token, status);
+  }
+
   private connect(manifest: WebManifest, token: string, status: SessionStatus): void {
     this.activeToken = token;
-    this.textSession.activate(token);
+    this.textSession.activate(token, status.sessionId);
     this.fileSession.activate(token, status.effectiveFileLimitBytes);
+    this.textSession.setConnectionAvailable(true);
+    this.fileSession.setConnectionAvailable(true);
+    this.onEffect({
+      id: `clear-pairing-form:${status.sessionId}`,
+      kind: "clearPairingForm",
+    });
     this.emit({ kind: "connected", manifest, status });
     const generation = this.generation;
+    let recovering = false;
     this.events.connect(token, {
-      onSessionLost: () => {
+      onReconnecting: (attempt, delayMs) => {
         if (!this.isCurrent(generation)) return;
+        recovering = true;
+        this.textSession.setConnectionAvailable(false);
+        this.fileSession.setConnectionAvailable(false);
+        this.emit({
+          kind: "reconnecting",
+          manifest,
+          status,
+          attempt,
+          nextRetryInMs: delayMs,
+        });
+      },
+      onAuthenticated: () => {
+        if (!this.isCurrent(generation) || !recovering) return;
+        recovering = false;
+        void this.revalidateSessionAfterEventReconnect(generation, manifest, token, status);
+      },
+      onSessionLost: (reason) => {
+        if (!this.isCurrent(generation)) return;
+        this.textSession.setConnectionAvailable(false);
+        this.fileSession.setConnectionAvailable(false);
+        if (reason === "reconnect_exhausted") {
+          recovering = false;
+          this.emit({
+            kind: "needsUserAction",
+            manifest,
+            status,
+            message: "Автоматически восстановить связь не удалось. Проверьте сеть и повторите попытку.",
+          });
+          return;
+        }
         void this.revalidateSessionAfterEventLoss(generation, manifest, token);
       },
       onTextReceived: (event) => {
@@ -425,6 +604,45 @@ export class SessionController {
     });
   }
 
+  private async revalidateSessionAfterEventReconnect(
+    generation: number,
+    manifest: WebManifest,
+    token: string,
+    previousStatus: SessionStatus,
+  ): Promise<void> {
+    const controller = new AbortController();
+    this.abortController = controller;
+    try {
+      const status = await this.api.status(token, controller.signal);
+      if (!this.isCurrent(generation)) return;
+      this.activeToken = token;
+      this.textSession.activate(token, status.sessionId);
+      this.fileSession.activate(token, status.effectiveFileLimitBytes);
+      this.textSession.setConnectionAvailable(true);
+      this.fileSession.setConnectionAvailable(true);
+      this.emit({ kind: "connected", manifest, status });
+    } catch (error: unknown) {
+      if (!this.isCurrent(generation) || isAbortError(error)) return;
+      if (isUnauthorized(error)) {
+        this.clearSession(true);
+        this.emit({
+          kind: "sessionLost",
+          manifest,
+          message: "Сессия завершена на телефоне. Подключитесь снова.",
+        });
+        return;
+      }
+      this.emit({
+        kind: "needsUserAction",
+        manifest,
+        status: previousStatus,
+        message: "Соединение восстановлено, но проверить сессию не удалось. Повторите попытку.",
+      });
+    } finally {
+      if (this.abortController === controller) this.abortController = undefined;
+    }
+  }
+
   private async revalidateSessionAfterEventLoss(
     generation: number,
     manifest: WebManifest,
@@ -439,7 +657,7 @@ export class SessionController {
     } catch (error: unknown) {
       if (!this.isCurrent(generation) || isAbortError(error)) return;
       if (isUnauthorized(error)) {
-        this.clearSession();
+        this.clearSession(true);
         this.emit({
           kind: "sessionLost",
           manifest,
@@ -476,6 +694,9 @@ export class SessionController {
         break;
       case "UNAUTHORIZED":
       case "SESSION_CLOSED":
+        this.clearSession(true);
+        this.emit({ kind: "sessionLost", manifest, message: error.message });
+        break;
       case "UNSUPPORTED_VERSION":
         this.clearSession();
         this.emit({ kind: "sessionLost", manifest, message: error.message });
@@ -505,11 +726,15 @@ export class SessionController {
     }, nextRetryInMs);
   }
 
-  private clearSession(): void {
+  private clearSession(preserveTextDraft = false): void {
     this.activeToken = undefined;
     this.tokenStore.clear();
     this.events.disconnect();
-    this.textSession.deactivate();
+    if (preserveTextDraft) {
+      this.textSession.suspendSession();
+    } else {
+      this.textSession.deactivate();
+    }
     this.fileSession.deactivate();
   }
 

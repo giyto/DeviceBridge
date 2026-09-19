@@ -1,5 +1,6 @@
 package ru.hznik.devicebridge.feature.text
 
+import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -34,6 +35,7 @@ class TextViewModel @Inject constructor(
     observeTextTransfers: ObserveTextTransfersUseCase,
     private val sendText: SendTextToBrowserUseCase,
     private val retryText: RetryTextTransferUseCase,
+    private val savedStateHandle: SavedStateHandle,
 ) : ViewModel() {
     private data class LocalState(
         val draft: String = "",
@@ -49,6 +51,7 @@ class TextViewModel @Inject constructor(
     private val transfers = observeTextTransfers()
     private val localState = MutableStateFlow(
         LocalState(
+            draft = restoreDraft(browserSessions.value.generationId?.value),
             selectedSessionId = browserSessions.value.sessions.singleOrNull()?.id,
         ),
     )
@@ -65,6 +68,7 @@ class TextViewModel @Inject constructor(
     init {
         viewModelScope.launch {
             browserSessions.collectLatest { sessionState ->
+                reconcileDraftGeneration(sessionState.generationId?.value)
                 reconcileRecipient(sessionState.sessions)
             }
         }
@@ -77,22 +81,28 @@ class TextViewModel @Inject constructor(
 
     fun onAction(action: TextAction) {
         when (action) {
-            is TextAction.DraftChanged -> localState.update {
-                it.copy(
-                    draft = action.value,
-                    errorMessage = null,
-                    successMessage = null,
-                )
+            is TextAction.DraftChanged -> {
+                persistDraft(action.value)
+                localState.update {
+                    it.copy(
+                        draft = action.value,
+                        errorMessage = null,
+                        successMessage = null,
+                    )
+                }
             }
-            is TextAction.SharedDraftReceived -> localState.update {
-                it.copy(
-                    draft = action.value,
-                    selectedSessionId = null,
-                    recipientWasLost = true,
-                    isSending = false,
-                    errorMessage = null,
-                    successMessage = null,
-                )
+            is TextAction.SharedDraftReceived -> {
+                persistDraft(action.value)
+                localState.update {
+                    it.copy(
+                        draft = action.value,
+                        selectedSessionId = null,
+                        recipientWasLost = true,
+                        isSending = false,
+                        errorMessage = null,
+                        successMessage = null,
+                    )
+                }
             }
             is TextAction.RecipientSelected -> selectRecipient(action.sessionId)
             TextAction.SendClicked -> sendDraft()
@@ -103,6 +113,38 @@ class TextViewModel @Inject constructor(
         }
     }
 
+    private fun restoreDraft(activeGenerationId: Long?): String {
+        val savedGenerationId = savedStateHandle.get<Long>(DRAFT_GENERATION_KEY)
+        if (activeGenerationId == null || savedGenerationId != activeGenerationId) {
+            clearSavedDraft()
+            return ""
+        }
+        return savedStateHandle.get<String>(DRAFT_KEY).orEmpty()
+    }
+
+    private fun persistDraft(value: String) {
+        val generationId = browserSessions.value.generationId?.value
+        if (generationId == null || value.isEmpty()) {
+            clearSavedDraft()
+            return
+        }
+        savedStateHandle[DRAFT_GENERATION_KEY] = generationId
+        savedStateHandle[DRAFT_KEY] = value
+    }
+
+    private fun reconcileDraftGeneration(activeGenerationId: Long?) {
+        val savedGenerationId = savedStateHandle.get<Long>(DRAFT_GENERATION_KEY)
+        if (activeGenerationId != null && savedGenerationId == activeGenerationId) return
+        clearSavedDraft()
+        if (localState.value.draft.isNotEmpty()) {
+            localState.update { it.copy(draft = "", isSending = false) }
+        }
+    }
+
+    private fun clearSavedDraft() {
+        savedStateHandle.remove<String>(DRAFT_KEY)
+        savedStateHandle.remove<Long>(DRAFT_GENERATION_KEY)
+    }
     private fun reconcileRecipient(sessions: List<BrowserSession>) {
         localState.update { local ->
             val selected = local.selectedSessionId
@@ -164,12 +206,16 @@ class TextViewModel @Inject constructor(
                     )
                 }
             }
+            persistDraft(localState.value.draft)
         }
     }
 
     private fun retry(messageId: TextMessageId) {
         val item = transfers.value.items.firstOrNull { it.id == messageId } ?: return
-        if (item.status != TextTransferStatus.FAILED) return
+        if (
+            item.status != TextTransferStatus.FAILED ||
+            !item.failureReason.isRetryable()
+        ) return
         val sessionAvailable = browserSessions.value.sessions.any { it.id == item.sessionId }
         if (!sessionAvailable) {
             localState.update {
@@ -305,7 +351,10 @@ class TextViewModel @Inject constructor(
         direction = direction,
         status = status,
         timestampEpochMillis = createdAtEpochMillis,
-        canRetry = status == TextTransferStatus.FAILED && sessionAvailable && !isRetrying,
+        canRetry = status == TextTransferStatus.FAILED &&
+            failureReason.isRetryable() &&
+            sessionAvailable &&
+            !isRetrying,
         isRetrying = isRetrying,
     )
 
@@ -331,7 +380,19 @@ class TextViewModel @Inject constructor(
         -> "Не удалось доставить текст. Повторите отправку."
     }
 
+    private fun TextTransferFailureReason?.isRetryable(): Boolean = when (this) {
+        TextTransferFailureReason.CONNECTION_LOST,
+        TextTransferFailureReason.SESSION_CLOSED,
+        TextTransferFailureReason.UNKNOWN,
+        null,
+        -> true
+        TextTransferFailureReason.PROTOCOL_ERROR -> false
+    }
+
+
     private companion object {
+        const val DRAFT_KEY = "text_draft"
+        const val DRAFT_GENERATION_KEY = "text_draft_generation"
         const val RECIPIENT_DISCONNECTED_MESSAGE =
             "Выбранный браузер отключён. Выберите получателя."
     }

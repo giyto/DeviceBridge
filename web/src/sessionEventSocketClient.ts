@@ -1,5 +1,6 @@
 import { SESSION_PROTOCOL_VERSION } from "./sessionApiClient";
 import { createProtocolMessageId } from "./protocolMessageId";
+import { BoundedReconnectPolicy } from "./reconnectPolicy";
 import type {
   TextApiErrorCode,
   TextContentKind,
@@ -30,8 +31,10 @@ export interface SocketScheduler {
   clearTimeout(handle: unknown): void;
 }
 
+export type SessionEventLossReason = "authorization" | "reconnect_exhausted";
+
 export interface SessionEventCallbacks {
-  readonly onSessionLost: () => void;
+  readonly onSessionLost: (reason: SessionEventLossReason) => void;
   readonly onAuthenticated?: () => void;
   readonly onReconnecting?: (attempt: number, delayMs: number) => void;
   readonly onTextReceived?: (event: TextReceivedEvent) => void;
@@ -79,7 +82,6 @@ export interface TextErrorEvent {
 
 type SocketFactory = (url: string) => SocketLike;
 
-const RECONNECT_DELAYS_MS = [1_000, 2_000, 4_000] as const;
 const MAX_DEDUPLICATED_TEXT_IDS = 100;
 
 const browserScheduler: SocketScheduler = {
@@ -99,6 +101,7 @@ export class SessionEventSocketClient {
     private readonly scheduler: SocketScheduler = browserScheduler,
     private readonly createMessageId: () => string = createProtocolMessageId,
     private readonly now: () => number = () => Date.now(),
+    private readonly reconnectPolicy: BoundedReconnectPolicy = new BoundedReconnectPolicy(),
   ) {}
 
   connect(token: string, callbacks: SessionEventCallbacks): void {
@@ -129,6 +132,7 @@ export class SessionEventSocketClient {
     const socket = this.socketFactory(eventsUrl(this.origin));
     this.socket = socket;
     let authenticated = false;
+    let nextRetryIndex = retryIndex;
     socket.onopen = () => {
       if (generation !== this.generation) return;
       socket.send(JSON.stringify({
@@ -147,6 +151,7 @@ export class SessionEventSocketClient {
         value.type === "session.authenticated"
       ) {
         authenticated = true;
+        nextRetryIndex = 0;
         callbacks.onAuthenticated?.();
         return;
       }
@@ -199,20 +204,21 @@ export class SessionEventSocketClient {
     socket.onerror = () => undefined;
     socket.onclose = (event) => {
       if (generation !== this.generation) return;
-      if (this.socket === socket) this.socket = undefined;
+      if (this.socket !== socket) return;
+      this.socket = undefined;
       if (event.code === 1008) {
-        callbacks.onSessionLost();
+        callbacks.onSessionLost("authorization");
         return;
       }
-      const delay = RECONNECT_DELAYS_MS[retryIndex];
+      const delay = this.reconnectPolicy.delayForAttempt(nextRetryIndex);
       if (delay === undefined) {
-        callbacks.onSessionLost();
+        callbacks.onSessionLost("reconnect_exhausted");
         return;
       }
-      callbacks.onReconnecting?.(retryIndex + 1, delay);
+      callbacks.onReconnecting?.(nextRetryIndex + 1, delay);
       this.retryHandle = this.scheduler.setTimeout(() => {
         this.retryHandle = undefined;
-        this.open(generation, token, callbacks, retryIndex + 1);
+        this.open(generation, token, callbacks, nextRetryIndex + 1);
       }, delay);
     };
   }

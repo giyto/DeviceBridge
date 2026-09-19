@@ -141,6 +141,8 @@ class HiltGraphContractTest {
         val path = Path.of(relativePath)
         assertTrue("Expected source file: $relativePath", Files.exists(path))
         return Files.readString(path)
+            .replace("\r\n", "\n")
+            .replace('\r', '\n')
     }
 
     private fun String.countOccurrences(value: String): Int =

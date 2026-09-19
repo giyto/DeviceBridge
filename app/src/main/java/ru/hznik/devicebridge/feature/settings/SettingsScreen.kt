@@ -68,7 +68,7 @@ fun SettingsScreen(
             }
         }
 
-        if (uiState.isLoading) {
+        if (uiState.loadState == SettingsLoadState.LOADING) {
             item {
                 Column(
                     modifier = Modifier.fillMaxWidth().padding(vertical = 32.dp),
@@ -79,6 +79,23 @@ fun SettingsScreen(
                             contentDescription = "Загрузка настроек"
                         },
                     )
+                }
+            }
+        } else if (uiState.loadState == SettingsLoadState.ERROR) {
+            item {
+                SettingsCard(title = "Настройки временно недоступны") {
+                    Text(
+                        text = uiState.loadErrorMessage ?: "Повторите попытку позже.",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Button(
+                        onClick = { onAction(SettingsAction.RetryLoad) },
+                        modifier = Modifier.semantics {
+                            contentDescription = "Повторить загрузку настроек"
+                        },
+                    ) {
+                        Text("Повторить")
+                    }
                 }
             }
         } else {
@@ -141,10 +158,15 @@ fun SettingsScreen(
                             fontWeight = FontWeight.SemiBold,
                         )
                         Text(
-                            text = if (uiState.settings.destinationTree == null) {
-                                "Папка не выбрана. Перед приёмом файла приложение спросит её снова."
-                            } else {
-                                "Папка выбрана и будет предложена для следующих входящих файлов."
+                            text = when (uiState.destinationAvailability) {
+                                DestinationAvailability.NONE ->
+                                    "Папка не выбрана. Перед приёмом файла приложение спросит её снова."
+                                DestinationAvailability.CHECKING ->
+                                    "Проверяем доступ к сохранённой папке…"
+                                DestinationAvailability.AVAILABLE ->
+                                    "Папка доступна и будет предложена для следующих входящих файлов."
+                                DestinationAvailability.UNAVAILABLE ->
+                                    "Сохранённая папка недоступна. Выберите папку снова."
                             },
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             style = MaterialTheme.typography.bodyMedium,
@@ -166,7 +188,13 @@ fun SettingsScreen(
                                             "Выбрать папку для входящих файлов"
                                     },
                             ) {
-                                Text(if (uiState.settings.destinationTree == null) "Выбрать" else "Изменить")
+                                Text(
+                                    when (uiState.destinationAvailability) {
+                                        DestinationAvailability.NONE -> "Выбрать"
+                                        DestinationAvailability.UNAVAILABLE -> "Выбрать снова"
+                                        else -> "Изменить"
+                                    },
+                                )
                             }
                             if (uiState.settings.destinationTree != null) {
                                 OutlinedButton(

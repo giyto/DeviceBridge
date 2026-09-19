@@ -6,6 +6,9 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.test.assertIsEnabled
+import androidx.compose.ui.test.assertTextContains
+import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertTextEquals
 import androidx.compose.ui.test.junit4.createComposeRule
@@ -15,6 +18,7 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextReplacement
 import androidx.compose.ui.test.hasScrollAction
+import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performScrollToIndex
 import androidx.compose.ui.unit.Density
 import org.junit.Assert.assertEquals
@@ -36,7 +40,7 @@ class SettingsScreenTest {
                 settings = DeviceSettings.defaults().copy(
                     destinationTree = DestinationTree("content://documents/tree/devicebridge"),
                 ),
-                isLoading = false,
+                loadState = SettingsLoadState.CONTENT,
             ),
         )
         composeRule.setContent {
@@ -62,6 +66,7 @@ class SettingsScreenTest {
         composeRule.onNodeWithTag("settings-list").performScrollToIndex(3)
         composeRule.onNodeWithText("Папка для входящих файлов").assertIsDisplayed()
         composeRule.onNodeWithContentDescription("Выбрать папку для входящих файлов")
+            .performScrollTo()
             .performClick()
         composeRule.onNodeWithTag("settings-list").performScrollToIndex(4)
         composeRule.onNodeWithText("Доверенные браузеры").assertIsDisplayed()
@@ -81,7 +86,7 @@ class SettingsScreenTest {
         var state by mutableStateOf(
             SettingsUiState(
                 settings = DeviceSettings.defaults(),
-                isLoading = false,
+                loadState = SettingsLoadState.CONTENT,
             ),
         )
         composeRule.setContent {
@@ -122,7 +127,7 @@ class SettingsScreenTest {
                 MaterialTheme {
                     SettingsScreen(
                         uiState = SettingsUiState(
-                            isLoading = false,
+                            loadState = SettingsLoadState.CONTENT,
                             retentionState = SettingsFieldState(
                                 errorMessage = "Введите число от 1 до 365.",
                             ),
@@ -146,7 +151,7 @@ class SettingsScreenTest {
             MaterialTheme {
                 SettingsScreen(
                     uiState = SettingsUiState(
-                        isLoading = false,
+                        loadState = SettingsLoadState.CONTENT,
                         trustedBrowsers = listOf(
                             TrustedBrowserUiState(
                                 id = browserId,
@@ -169,4 +174,88 @@ class SettingsScreenTest {
 
         assertEquals(listOf(SettingsAction.RevokeTrustedBrowser(browserId)), actions)
     }
+
+    @Test
+    fun readFailureShowsRetryInsteadOfDefaultSettings() {
+        val actions = mutableListOf<SettingsAction>()
+        composeRule.setContent {
+            MaterialTheme {
+                SettingsScreen(
+                    uiState = SettingsUiState(
+                        loadState = SettingsLoadState.ERROR,
+                        loadErrorMessage = "Хранилище недоступно.",
+                    ),
+                    onAction = actions::add,
+                )
+            }
+        }
+
+        composeRule.onNodeWithText("Хранилище недоступно.").assertIsDisplayed()
+        composeRule.onNodeWithText("Имя телефона").assertDoesNotExist()
+        composeRule.onNodeWithContentDescription("Повторить загрузку настроек")
+            .performClick()
+
+        assertEquals(listOf(SettingsAction.RetryLoad), actions)
+    }
+
+    @Test
+    fun revokedDestinationShowsChooseAgainAction() {
+        val actions = mutableListOf<SettingsAction>()
+        composeRule.setContent {
+            MaterialTheme {
+                SettingsScreen(
+                    uiState = SettingsUiState(
+                        settings = DeviceSettings.defaults().copy(
+                            destinationTree = DestinationTree(
+                                "content://documents/tree/revoked",
+                            ),
+                        ),
+                        loadState = SettingsLoadState.CONTENT,
+                        destinationAvailability = DestinationAvailability.UNAVAILABLE,
+                        destinationState = SettingsFieldState(
+                            errorMessage = "Сохранённая папка недоступна.",
+                        ),
+                    ),
+                    onAction = actions::add,
+                )
+            }
+        }
+        composeRule.onNodeWithTag("settings-list").performScrollToIndex(3)
+
+        composeRule.onNodeWithText("Выбрать снова").assertIsDisplayed()
+        composeRule.onNodeWithContentDescription("Выбрать папку для входящих файлов")
+            .performScrollTo()
+            .performClick()
+
+        assertEquals(listOf(SettingsAction.ChooseDestination), actions)
+    }
+    @Test
+    fun failedSaveKeepsDraftAndShowsInlineRetryableFeedback() {
+        composeRule.setContent {
+            MaterialTheme {
+                SettingsScreen(
+                    uiState = SettingsUiState(
+                        settings = DeviceSettings.defaults(),
+                        loadState = SettingsLoadState.CONTENT,
+                        deviceNameInput = "Черновик Pixel",
+                        deviceNameState = SettingsFieldState(
+                            errorMessage = "Не удалось сохранить имя. Повторите попытку.",
+                            isDirty = true,
+                        ),
+                    ),
+                    onAction = {},
+                )
+            }
+        }
+
+        composeRule.onNodeWithContentDescription("Поле имени телефона")
+            .assertTextContains("Черновик Pixel")
+        composeRule.onNodeWithText("Не удалось сохранить имя. Повторите попытку.")
+            .assertIsDisplayed()
+        composeRule.onNodeWithContentDescription("Сохранить имя телефона")
+            .assertTextEquals("Сохранить")
+            .assertIsEnabled()
+        composeRule.onNodeWithTag("settings-list").captureToImage()
+    }
+
 }

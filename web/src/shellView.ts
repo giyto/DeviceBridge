@@ -1,4 +1,5 @@
-import type { SessionUiState } from "./sessionController";
+import type { SessionUiEffect, SessionUiState } from "./sessionController";
+import { sessionPresentationState } from "./uiPresentationState";
 
 export interface ShellActions {
   readonly onRetry: () => void;
@@ -8,6 +9,7 @@ export interface ShellActions {
 
 export interface ShellView {
   render(state: SessionUiState): void;
+  consume(effect: SessionUiEffect): void;
   dispose(): void;
 }
 
@@ -32,8 +34,14 @@ export function createShellView(
   );
   const sessionTitle = requiredElement<HTMLElement>(documentRef, '[data-role="session-title"]');
   const sessionDetail = requiredElement<HTMLElement>(documentRef, '[data-role="session-detail"]');
+  const consumedEffectIds = new Set<string>();
+  let previousKind: SessionUiState["kind"] = "checking";
+  let restoreAfterRetry = false;
 
-  const onRetry = (): void => actions.onRetry();
+  const onRetry = (): void => {
+    restoreAfterRetry = true;
+    actions.onRetry();
+  };
   const onDisconnect = (): void => actions.onDisconnect();
   const onInput = (): void => {
     codeInput.value = codeInput.value.replace(/\D/g, "").slice(0, 6);
@@ -54,8 +62,20 @@ export function createShellView(
   codeInput.addEventListener("input", onInput);
   form.addEventListener("submit", onSubmit);
 
+  const consume = (effect: SessionUiEffect): void => {
+    if (consumedEffectIds.has(effect.id)) return;
+    consumedEffectIds.add(effect.id);
+    switch (effect.kind) {
+      case "clearPairingForm":
+        codeInput.value = "";
+        codeInput.setCustomValidity("");
+        rememberBrowser.checked = false;
+        break;
+    }
+  };
   const render = (state: SessionUiState): void => {
     status.dataset.state = state.kind;
+    status.dataset.viewState = sessionPresentationState(state);
     versionData.hidden = true;
     retryButton.hidden = true;
     form.hidden = true;
@@ -63,6 +83,10 @@ export function createShellView(
     codeInput.disabled = false;
     rememberBrowser.disabled = false;
     pairButton.disabled = false;
+    pairButton.textContent = "Подключить браузер";
+    pairButton.removeAttribute("aria-busy");
+    retryButton.disabled = false;
+    retryButton.textContent = "Проверить снова";
 
     if ("manifest" in state && state.manifest !== undefined) {
       protocolVersion.textContent = String(state.manifest.protocolVersion);
@@ -94,6 +118,8 @@ export function createShellView(
         codeInput.disabled = true;
         rememberBrowser.disabled = true;
         pairButton.disabled = true;
+        pairButton.textContent = "Проверяем код…";
+        pairButton.setAttribute("aria-busy", "true");
         break;
       case "awaiting":
         title.textContent = "Ожидаем подтверждение";
@@ -104,6 +130,20 @@ export function createShellView(
         codeInput.disabled = true;
         rememberBrowser.disabled = true;
         pairButton.disabled = true;
+        pairButton.textContent = "Ожидаем подтверждение…";
+        pairButton.setAttribute("aria-busy", "true");
+        break;
+      case "uncertain":
+        title.textContent = "Результат подключения неизвестен";
+        detail.textContent = state.message;
+        sessionTitle.textContent = state.checking
+          ? "Проверяем исходный запрос…"
+          : "Проверьте исходный запрос";
+        sessionDetail.textContent =
+          "Код не отправляется повторно. DeviceBridge проверит уже созданный запрос.";
+        retryButton.textContent = "Проверить результат";
+        retryButton.hidden = state.checking;
+        retryButton.disabled = state.checking;
         break;
       case "connected":
         title.textContent = "Безопасное подключение активно";
@@ -112,8 +152,23 @@ export function createShellView(
         sessionDetail.textContent =
           `Активных браузеров: ${state.status.activeSessionCount}.`;
         disconnectButton.hidden = false;
-        codeInput.value = "";
-        rememberBrowser.checked = false;
+        break;
+      case "reconnecting":
+        title.textContent = "Восстанавливаем подключение…";
+        detail.textContent =
+          `Попытка ${state.attempt}. Следующая проверка через ${state.nextRetryInMs / 1_000} сек.`;
+        sessionTitle.textContent = "Связь с телефоном прервана";
+        sessionDetail.textContent =
+          "DeviceBridge повторяет подключение автоматически. Данные и черновики сохранены.";
+        break;
+      case "needsUserAction":
+        title.textContent = "Нужно проверить подключение";
+        detail.textContent = state.message;
+        sessionTitle.textContent = "Автоматические попытки завершены";
+        sessionDetail.textContent =
+          "Проверьте, что телефон и компьютер находятся в одной сети, затем повторите проверку.";
+        retryButton.textContent = "Проверить подключение";
+        retryButton.hidden = false;
         break;
       case "blocked":
         title.textContent = "Попытки временно заблокированы";
@@ -144,7 +199,6 @@ export function createShellView(
         sessionTitle.textContent = "Подключитесь снова";
         sessionDetail.textContent = "Создайте новый запрос и подтвердите его на телефоне.";
         retryButton.hidden = false;
-        codeInput.value = "";
         break;
       case "offline":
         title.textContent = "DeviceBridge недоступен";
@@ -156,17 +210,39 @@ export function createShellView(
         retryButton.hidden = false;
         break;
     }
+
+    const pairingFailed =
+      (previousKind === "submitting" || previousKind === "awaiting") &&
+      state.kind === "ready";
+    previousKind = state.kind;
+    if (pairingFailed && !form.hidden && !codeInput.disabled) {
+      codeInput.focus();
+    } else if (restoreAfterRetry) {
+      const target = !retryButton.hidden && !retryButton.disabled
+        ? retryButton
+        : !form.hidden && !codeInput.disabled
+          ? codeInput
+          : !disconnectButton.hidden && !disconnectButton.disabled
+            ? disconnectButton
+            : undefined;
+      if (target !== undefined) {
+        target.focus();
+        restoreAfterRetry = false;
+      }
+    }
   };
 
   render({ kind: "checking" });
 
   return {
     render,
+    consume,
     dispose: () => {
       retryButton.removeEventListener("click", onRetry);
       disconnectButton.removeEventListener("click", onDisconnect);
       codeInput.removeEventListener("input", onInput);
       form.removeEventListener("submit", onSubmit);
+      consumedEffectIds.clear();
     },
   };
 }
