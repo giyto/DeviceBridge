@@ -85,6 +85,7 @@ data class SessionStatusResponse(
     val connected: Boolean,
     val activeSessionCount: Int,
     val effectiveFileLimitBytes: Long,
+    val deviceName: String,
 )
 
 @Serializable

@@ -29,6 +29,12 @@ import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import ru.hznik.devicebridge.core.ui.OperationalItem
+import ru.hznik.devicebridge.core.ui.PrimaryActionButton
+import ru.hznik.devicebridge.core.ui.ScreenHeader
+import ru.hznik.devicebridge.core.ui.SecondaryActionButton
+import ru.hznik.devicebridge.core.ui.SectionHeader
+import ru.hznik.devicebridge.core.ui.StateTone
 import ru.hznik.devicebridge.domain.file.FileTransferDirection
 import ru.hznik.devicebridge.domain.file.FileTransferId
 import ru.hznik.devicebridge.domain.file.FileTransferPhase
@@ -51,25 +57,21 @@ fun FileScreen(
             onClick = onBack,
             modifier = Modifier.semantics { contentDescription = "Вернуться на главный экран" },
         ) { Text("← Назад") }
-        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Text("Файлы", style = MaterialTheme.typography.displaySmall, fontWeight = FontWeight.Bold)
-            Text(
-                "Потоковая передача внутри локальной сети с проверкой SHA-256.",
-                style = MaterialTheme.typography.bodyLarge,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
+        ScreenHeader(
+            eyebrow = "Текущая сессия",
+            title = "Файлы",
+            supportingText = "Потоковая передача внутри локальной сети с проверкой SHA-256.",
+        )
 
         uiState.errorMessage?.let { FeedbackCard(it, true) { onAction(FileAction.DismissFeedback) } }
         uiState.successMessage?.let { FeedbackCard(it, false) { onAction(FileAction.DismissFeedback) } }
 
-        Button(
+        SecondaryActionButton(
+            label = "Добавить файлы",
             onClick = { onAction(FileAction.PickFiles) },
             enabled = !uiState.isSubmitting,
-            modifier = Modifier.fillMaxWidth().semantics {
-                contentDescription = "Добавить файлы в черновик"
-            },
-        ) { Text("Добавить файлы") }
+            contentDescription = "Добавить файлы в черновик",
+        )
 
         if (uiState.selection.isNotEmpty()) {
             SectionCard(
@@ -129,13 +131,13 @@ fun FileScreen(
             }
         }
 
-        Button(
+        PrimaryActionButton(
+            label = if (uiState.isSubmitting) "Добавляем…" else "Подтвердить отправку",
             onClick = { onAction(FileAction.ConfirmSend) },
             enabled = uiState.canConfirmSend,
-            modifier = Modifier.fillMaxWidth().semantics {
-                contentDescription = "Подтвердить отправку файлов"
-            },
-        ) { Text(if (uiState.isSubmitting) "Добавляем…" else "Подтвердить отправку") }
+            loading = uiState.isSubmitting,
+            contentDescription = "Подтвердить отправку файлов",
+        )
         if (uiState.recipientSelectionRequired) {
             Text("Выберите браузер-получатель.", color = MaterialTheme.colorScheme.error)
         }
@@ -148,7 +150,10 @@ fun FileScreen(
                 )
             }
         } else {
-            Text("Передачи", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
+            SectionHeader(
+                title = "Передачи",
+                supportingText = "Очередь, прогресс и доступные действия текущей сессии.",
+            )
             uiState.transfers.forEach { item ->
                 TransferCard(item, uiState.hasDefaultDestination, onAction)
             }
@@ -162,49 +167,35 @@ private fun TransferCard(
     hasDefaultDestination: Boolean,
     onAction: (FileAction) -> Unit,
 ) {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(22.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
-    ) {
-        Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                FileTypeBadge(item.mimeType)
-                Column(
-                    modifier = Modifier.weight(1f),
-                    verticalArrangement = Arrangement.spacedBy(4.dp),
-                ) {
-                    Text(
-                        text = item.displayName,
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.SemiBold,
-                    )
-                    Text(
-                        text = "${item.direction.label()} · ${item.phase.label()}",
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.semantics {
-                            contentDescription =
-                                "Этап передачи ${item.displayName}: ${item.phase.label()}"
-                            liveRegion = LiveRegionMode.Polite
-                        },
-                    )
-                    Text(
-                        text = "${formatBytes(item.sizeBytes)} · ${item.mimeType}",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-            }
+    OperationalItem(
+        statusLabel = item.phase.label(),
+        title = item.displayName,
+        metadata = "${item.direction.label()} · ${formatBytes(item.sizeBytes)} · ${item.mimeType}",
+        tone = when (item.phase) {
+            FileTransferPhase.QUEUED,
+            FileTransferPhase.CONNECTING,
+            FileTransferPhase.TRANSFERRING,
+            FileTransferPhase.VERIFYING -> StateTone.LOADING
+            FileTransferPhase.COMPLETED -> StateTone.SUCCESS
+            FileTransferPhase.CANCELLED -> StateTone.CANCELLED
+            FileTransferPhase.FAILED -> StateTone.ERROR
+        },
+        modifier = Modifier.semantics {
+            contentDescription = "Этап передачи ${item.displayName}: ${item.phase.label()}"
+            liveRegion = LiveRegionMode.Polite
+        },
+        content = {
+            FileTypeBadge(item.mimeType)
             if (item.hasActiveProgress) {
                 if (item.hasDeterminateProgress) {
                     LinearProgressIndicator(
                         progress = { item.progress },
                         modifier = Modifier.fillMaxWidth(),
                     )
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                    ) {
                         Text("${item.progressPercent}%")
                         Text("${formatBytes(item.speedBytesPerSecond)}/с")
                     }
@@ -220,6 +211,8 @@ private fun TransferCard(
                     style = MaterialTheme.typography.bodyMedium,
                 )
             }
+        },
+        actions = {
             if (item.awaitsApproval) {
                 Button(
                     onClick = { onAction(FileAction.ApproveIncoming(item.id)) },
@@ -235,13 +228,9 @@ private fun TransferCard(
                 }
                 if (hasDefaultDestination) {
                     OutlinedButton(
-                        onClick = {
-                            onAction(FileAction.ChangeIncomingDestination(item.id))
-                        },
+                        onClick = { onAction(FileAction.ChangeIncomingDestination(item.id)) },
                         modifier = Modifier.fillMaxWidth(),
-                    ) {
-                        Text("Выбрать другую папку")
-                    }
+                    ) { Text("Выбрать другую папку") }
                 }
             }
             if (item.canCancel) {
@@ -268,10 +257,9 @@ private fun TransferCard(
                     },
                 ) { Text("Открыть файл") }
             }
-        }
-    }
+        },
+    )
 }
-
 @Composable
 private fun FileTypeBadge(mimeType: String) {
     val label = mimeType.fileTypeLabel()
@@ -298,24 +286,20 @@ private fun SectionCard(
     trailing: (@Composable () -> Unit)? = null,
     content: @Composable () -> Unit,
 ) {
-    Card(
+    Column(
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(22.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
-        Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-            ) {
-                Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-                trailing?.invoke()
-            }
-            content()
-        }
+        SectionHeader(
+            title = title,
+            trailing = { trailing?.invoke() },
+        )
+        content()
+        androidx.compose.material3.HorizontalDivider(
+            color = MaterialTheme.colorScheme.outlineVariant,
+        )
     }
 }
-
 @Composable
 private fun FileMetadataRow(
     name: String,

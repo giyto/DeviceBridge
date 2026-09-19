@@ -9,36 +9,95 @@
       content="Локальный браузерный интерфейс DeviceBridge для связи с Android-устройством."
     />
     <title>DeviceBridge — локальная связь</title>
+    <script data-role="theme-bootstrap">
+      (() => {
+        const key = "devicebridge.theme.v1";
+        const allowed = ["light", "dark"];
+        let preference = "dark";
+        try {
+          const raw = localStorage.getItem(key);
+          if (raw !== null) {
+            const record = JSON.parse(raw);
+            const keys = record && typeof record === "object"
+              ? Object.keys(record).sort().join(",")
+              : "";
+            if (
+              keys === "preference,version" &&
+              record.version === 1 &&
+              allowed.includes(record.preference)
+            ) {
+              preference = record.preference;
+            } else if (
+              keys === "preference,version" &&
+              record.version === 1 &&
+              record.preference === "system"
+            ) {
+              preference = "dark";
+              localStorage.setItem(
+                key,
+                JSON.stringify({ version: 1, preference }),
+              );
+            }
+          }
+        } catch {
+          preference = "dark";
+        }
+        document.documentElement.dataset.theme = preference;
+        document.documentElement.dataset.themePreference = preference;
+        document.documentElement.style.colorScheme = preference;
+        document.querySelector('meta[name="color-scheme"]')?.setAttribute(
+          "content",
+          preference,
+        );
+      })();
+    </script>
     <link rel="stylesheet" href="/src/styles.css" />
   </head>
   <body>
     <a class="skip-link" href="#main-content">Перейти к содержимому</a>
 
-    <header class="site-header">
-      <div class="container header-row">
-        <a class="brand" href="/" aria-label="DeviceBridge, главная">
-          <span class="brand-mark" aria-hidden="true">DB</span>
-          <span>DeviceBridge</span>
-        </a>
-        <span class="local-badge">
-          <span class="local-badge__dot" aria-hidden="true"></span>
-          Только локально
-        </span>
-      </div>
-    </header>
 
     <main id="main-content" class="container shell">
-      <section class="hero" aria-labelledby="page-title">
-        <p class="eyebrow">Телефон и компьютер — рядом</p>
-        <h1 id="page-title">DeviceBridge</h1>
-        <p class="hero__lead">
-          Интерфейс загружен прямо с вашего Android-устройства. Интернет и отдельная
-          программа для компьютера не нужны.
-        </p>
-      </section>
-
       <div class="shell-layout">
-        <div class="shell-layout__connection">
+        <div
+          class="shell-layout__connection"
+          data-role="connection-area"
+          tabindex="-1"
+        >
+          <div class="connection-heading">
+            <section class="hero" aria-labelledby="page-title">
+              <h1 id="page-title">DeviceBridge</h1>
+              <p class="hero__lead">
+                Интерфейс загружен прямо с вашего Android-устройства. Интернет и отдельная
+                программа для компьютера не нужны.
+              </p>
+            </section>
+            <div class="theme-control-panel">
+              <button
+                class="theme-control"
+                data-role="theme-control"
+                type="button"
+                aria-label="Включить светлую тему"
+              >
+                <svg
+                  data-theme-icon="sun"
+                  viewBox="0 0 24 24"
+                  aria-hidden="true"
+                  hidden
+                >
+                  <circle cx="12" cy="12" r="4"></circle>
+                  <path d="M12 2v2M12 20v2M4.93 4.93l1.42 1.42M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.42-1.42M17.66 6.34l1.41-1.41"></path>
+                </svg>
+                <svg
+                  data-theme-icon="moon"
+                  viewBox="0 0 24 24"
+                  aria-hidden="true"
+                >
+                  <path d="M20.5 14.2A8.5 8.5 0 0 1 9.8 3.5 8.5 8.5 0 1 0 20.5 14.2Z"></path>
+                </svg>
+              </button>
+            </div>
+          </div>
           <section
             class="status-card"
         data-role="status"
@@ -60,9 +119,9 @@
               <dt>Протокол</dt>
               <dd data-role="protocol-version">—</dd>
             </div>
-            <div>
-              <dt>Web assets</dt>
-              <dd data-role="asset-version">—</dd>
+            <div data-role="device-row" hidden>
+              <dt>Android-устройство</dt>
+              <dd data-role="device-name">—</dd>
             </div>
           </dl>
 
@@ -71,17 +130,40 @@
           </button>
         </div>
       </section>
-
-      <aside class="security-note" data-role="security-warning" role="note">
-        <span class="security-note__icon" aria-hidden="true">!</span>
-        <div>
-          <h2>Используйте только в доверенной сети</h2>
-          <p>
-            Локальный HTTP не шифрует трафик. Не передавайте чувствительные данные в
-            публичном Wi-Fi или чужой сети.
-          </p>
-        </div>
-          </aside>
+          <button
+            class="security-note"
+            data-role="security-warning"
+            data-state="expanded"
+            type="button"
+            aria-expanded="true"
+            aria-controls="security-warning-detail"
+            aria-label="Используйте только в доверенной сети. Свернуть предупреждение"
+          >
+            <span class="security-note__icon" aria-hidden="true">!</span>
+            <span class="security-note__body">
+              <span class="security-note__title">Используйте только в доверенной сети</span>
+              <span
+                id="security-warning-detail"
+                class="security-note__detail"
+                data-role="security-warning-detail"
+              >
+                Локальный HTTP не шифрует трафик. Не передавайте чувствительные данные в
+                публичном Wi-Fi или чужой сети.
+              </span>
+            </span>
+            <svg
+              class="security-note__chevron"
+              viewBox="0 0 24 24"
+              aria-hidden="true"
+            >
+              <path d="m6 9 6 6 6-6"></path>
+            </svg>
+          </button>
+          <p
+            class="visually-hidden"
+            data-role="preference-announcer"
+            aria-live="polite"
+          ></p>
         </div>
 
         <div class="shell-layout__workspace">

@@ -12,10 +12,11 @@ beforeEach(() => {
 
 describe("web accessibility structure", () => {
   it("uses stable landmarks, a valid heading hierarchy and sibling workspaces", () => {
-    expect(document.querySelectorAll("header")).toHaveLength(1);
+    expect(document.querySelectorAll("header")).toHaveLength(0);
     expect(document.querySelectorAll("main")).toHaveLength(1);
     expect(document.querySelectorAll("footer")).toHaveLength(1);
     expect(document.querySelectorAll("h1")).toHaveLength(1);
+    expect(document.querySelector('[data-role="connection-area"]')?.contains(document.querySelector("h1"))).toBe(true);
 
     const session = document.querySelector<HTMLElement>('[data-role="session-panel"]')!;
     const text = document.querySelector<HTMLElement>('[data-role="text-transfer"]')!;

@@ -28,7 +28,13 @@ internal object SettingsPreferenceKeys {
 
 class DataStoreSettingsRepository(
     private val dataStore: DataStore<Preferences>,
+    defaultDeviceName: String = SettingsDefaults.DEFAULT_DEVICE_NAME,
 ) : SettingsRepository {
+    private val initialDeviceName = defaultDeviceName.trim().takeIf { candidate ->
+        candidate.isNotBlank() &&
+            candidate.codePointCount(0, candidate.length) <= 40 &&
+            candidate.none(Char::isISOControl)
+    } ?: SettingsDefaults.DEFAULT_DEVICE_NAME
     override val settings: Flow<DeviceSettings> = dataStore.data
         .catch { failure ->
             if (failure is IOException) {
@@ -91,13 +97,16 @@ class DataStoreSettingsRepository(
     }
 
     private fun mapSettings(preferences: Preferences): DeviceSettings {
-        val defaults = DeviceSettings.defaults()
+        val defaults = DeviceSettings.defaults().copy(deviceName = initialDeviceName)
         val deviceName = preferences[SettingsPreferenceKeys.deviceName]
             ?.trim()
             ?.takeIf { candidate ->
                 candidate.isNotBlank() &&
                     candidate.codePointCount(0, candidate.length) <= 40 &&
                     candidate.none(Char::isISOControl)
+            }
+            ?.takeUnless { candidate ->
+                candidate == SettingsDefaults.DEFAULT_DEVICE_NAME
             }
             ?: defaults.deviceName
         val retentionDays = preferences[SettingsPreferenceKeys.retentionDays]

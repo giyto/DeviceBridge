@@ -9,11 +9,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Button
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
@@ -25,7 +22,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
@@ -33,7 +29,11 @@ import androidx.compose.ui.unit.dp
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
-
+import ru.hznik.devicebridge.core.ui.DestructiveActionButton
+import ru.hznik.devicebridge.core.ui.PrimaryActionButton
+import ru.hznik.devicebridge.core.ui.ScreenHeader
+import ru.hznik.devicebridge.core.ui.SectionHeader
+import ru.hznik.devicebridge.core.ui.dismissKeyboardOnUnconsumedTap
 @Composable
 fun SettingsScreen(
     uiState: SettingsUiState,
@@ -44,28 +44,19 @@ fun SettingsScreen(
         modifier = modifier
             .fillMaxSize()
             .testTag("settings-list")
+            .dismissKeyboardOnUnconsumedTap()
             .imePadding()
             .padding(horizontal = 20.dp),
         contentPadding = PaddingValues(vertical = 28.dp),
         verticalArrangement = Arrangement.spacedBy(18.dp),
     ) {
         item {
-            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text(
-                    text = "Настройки",
-                    modifier = Modifier.semantics {
-                        heading()
-                        contentDescription = "Заголовок экрана Настройки"
-                    },
-                    style = MaterialTheme.typography.headlineLarge,
-                    fontWeight = FontWeight.Bold,
-                )
-                Text(
-                    text = "Все параметры хранятся только на этом телефоне.",
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    style = MaterialTheme.typography.bodyMedium,
-                )
-            }
+            ScreenHeader(
+                title = "Настройки",
+                modifier = Modifier.semantics {
+                    contentDescription = "Заголовок экрана Настройки"
+                },
+            )
         }
 
         if (uiState.loadState == SettingsLoadState.LOADING) {
@@ -249,45 +240,35 @@ fun SettingsScreen(
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     style = MaterialTheme.typography.bodySmall,
                                 )
-                                OutlinedButton(
+                                DestructiveActionButton(
+                                    label = if (browser.id in uiState.revokingTrustedBrowserIds) {
+                                        "Отзыв доступа…"
+                                    } else {
+                                        "Отозвать доступ"
+                                    },
                                     onClick = {
                                         onAction(SettingsAction.RevokeTrustedBrowser(browser.id))
                                     },
                                     enabled =
                                         browser.id !in uiState.revokingTrustedBrowserIds &&
                                             !uiState.revokeAllTrustedBrowsersPending,
-                                    modifier = Modifier.fillMaxWidth().semantics {
-                                        contentDescription =
-                                            "Отозвать доступ ${browser.browserLabel}"
-                                    },
-                                ) {
-                                    Text(
-                                        if (browser.id in uiState.revokingTrustedBrowserIds) {
-                                            "Отзыв доступа…"
-                                        } else {
-                                            "Отозвать доступ"
-                                        },
-                                    )
-                                }
+                                    contentDescription =
+                                        "Отозвать доступ ${browser.browserLabel}",
+                                )
                             }
                         }
                         uiState.trustedBrowsersError?.let { FieldError(it) }
-                        OutlinedButton(
+                        DestructiveActionButton(
+                            label = if (uiState.revokeAllTrustedBrowsersPending) {
+                                "Отзыв доступа…"
+                            } else {
+                                "Отозвать доступ всех"
+                            },
                             onClick = { onAction(SettingsAction.RevokeAllTrustedBrowsers) },
                             enabled = !uiState.revokeAllTrustedBrowsersPending &&
                                 uiState.revokingTrustedBrowserIds.isEmpty(),
-                            modifier = Modifier.fillMaxWidth().semantics {
-                                contentDescription = "Отозвать доступ всех доверенных браузеров"
-                            },
-                        ) {
-                            Text(
-                                if (uiState.revokeAllTrustedBrowsersPending) {
-                                    "Отзыв доступа…"
-                                } else {
-                                    "Отозвать доступ всех"
-                                },
-                            )
-                        }
+                            contentDescription = "Отозвать доступ всех доверенных браузеров",
+                        )
                     }
                 }
             }
@@ -300,24 +281,13 @@ private fun SettingsCard(
     title: String,
     content: @Composable () -> Unit,
 ) {
-    Card(
+    Column(
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(24.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceContainer,
-        ),
+        verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
-        Column(
-            modifier = Modifier.padding(20.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp),
-        ) {
-            Text(
-                text = title,
-                style = MaterialTheme.typography.labelLarge,
-                color = MaterialTheme.colorScheme.primary,
-            )
-            content()
-        }
+        SectionHeader(title = title)
+        content()
+        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
     }
 }
 
@@ -353,21 +323,17 @@ private fun SettingsTextField(
             },
             keyboardOptions = keyboardOptions,
         )
-        Button(
+        PrimaryActionButton(
+            label = when {
+                fieldState.isSaving -> "Сохранение…"
+                isSaved -> "Сохранено"
+                else -> "Сохранить"
+            },
             onClick = onSave,
             enabled = !fieldState.isSaving,
-            modifier = Modifier.fillMaxWidth().semantics {
-                contentDescription = saveDescription
-            },
-        ) {
-            Text(
-                when {
-                    fieldState.isSaving -> "Сохранение…"
-                    isSaved -> "Сохранено"
-                    else -> "Сохранить"
-                },
-            )
-        }
+            loading = fieldState.isSaving,
+            contentDescription = saveDescription,
+        )
     }
 }
 

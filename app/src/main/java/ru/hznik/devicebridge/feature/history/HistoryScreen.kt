@@ -1,28 +1,43 @@
 package ru.hznik.devicebridge.feature.history
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
+
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.selection.toggleable
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.FilterChip
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
@@ -36,21 +51,26 @@ import androidx.compose.ui.unit.dp
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
+import ru.hznik.devicebridge.core.ui.ScreenHeader
 import ru.hznik.devicebridge.domain.history.HistoryDirection
 import ru.hznik.devicebridge.domain.history.HistoryKind
 import ru.hznik.devicebridge.domain.history.HistoryRecord
 import ru.hznik.devicebridge.domain.history.HistoryStatus
+import ru.hznik.devicebridge.ui.theme.bridgeStatusColors
 
 private val historyDateFormatter = DateTimeFormatter
     .ofPattern("dd.MM.yyyy HH:mm")
     .withZone(ZoneId.systemDefault())
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun HistoryScreen(
     uiState: HistoryUiState,
     onAction: (HistoryAction) -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    var filterSheetVisible by rememberSaveable { mutableStateOf(false) }
+
     LazyColumn(
         modifier = modifier
             .fillMaxSize()
@@ -63,23 +83,16 @@ fun HistoryScreen(
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
         item {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text(
-                    text = "История передач",
-                    modifier = Modifier.semantics { heading() },
-                    style = MaterialTheme.typography.headlineLarge,
-                    fontWeight = FontWeight.Bold,
-                )
-                Text(
-                    text = "Только локальные результаты. Файлы и полный текст здесь не хранятся.",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
+            ScreenHeader(
+                title = "История передач",
+            )
         }
 
         item {
-            HistoryFilters(uiState, onAction)
+            HistoryFilterTrigger(
+                filter = uiState.filter,
+                onClick = { filterSheetVisible = true },
+            )
         }
 
         if (uiState.records.isNotEmpty()) {
@@ -174,6 +187,17 @@ fun HistoryScreen(
             }
     }
 
+    if (filterSheetVisible) {
+        HistoryFilterSheet(
+            filter = uiState.filter,
+            disabled = uiState.isMutating,
+            onToggleDirection = { onAction(HistoryAction.ToggleDirection(it)) },
+            onToggleKind = { onAction(HistoryAction.ToggleKind(it)) },
+            onToggleStatus = { onAction(HistoryAction.ToggleStatus(it)) },
+            onReset = { onAction(HistoryAction.ResetFilters) },
+            onDismiss = { filterSheetVisible = false },
+        )
+    }
     uiState.selectedRecord?.let { record ->
         HistoryDetailsDialog(
             record = record,
@@ -202,54 +226,131 @@ fun HistoryScreen(
 }
 
 @Composable
-private fun HistoryFilters(
-    uiState: HistoryUiState,
-    onAction: (HistoryAction) -> Unit,
+private fun HistoryFilterTrigger(
+    filter: ru.hznik.devicebridge.domain.history.HistoryFilter,
+    onClick: () -> Unit,
 ) {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(24.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceContainer,
-        ),
+    val activeCount = filter.activeCount()
+    OutlinedButton(
+        onClick = onClick,
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag("history-filter-trigger")
+            .semantics {
+                contentDescription = "Открыть фильтры истории. Активно: " + activeCount
+            },
+        shape = RoundedCornerShape(20.dp),
+        contentPadding = PaddingValues(horizontal = 18.dp, vertical = 15.dp),
     ) {
         Column(
-            modifier = Modifier.padding(vertical = 18.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
+            modifier = Modifier.weight(1f),
+            horizontalAlignment = Alignment.Start,
+            verticalArrangement = Arrangement.spacedBy(2.dp),
         ) {
             Text(
                 text = "Фильтры",
-                modifier = Modifier.padding(horizontal = 18.dp),
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.SemiBold,
             )
-            FilterRow(
+            Text(
+                text = if (activeCount == 0) {
+                    "Показаны все записи"
+                } else {
+                    "Выбрано условий: " + activeCount
+                },
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        Surface(
+            color = MaterialTheme.colorScheme.primaryContainer,
+            contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+            shape = RoundedCornerShape(999.dp),
+        ) {
+            Text(
+                text = activeCount.toString(),
+                modifier = Modifier.padding(horizontal = 11.dp, vertical = 5.dp),
+                style = MaterialTheme.typography.labelLarge,
+                fontWeight = FontWeight.Bold,
+            )
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun HistoryFilterSheet(
+    filter: ru.hznik.devicebridge.domain.history.HistoryFilter,
+    disabled: Boolean,
+    onToggleDirection: (HistoryDirection) -> Unit,
+    onToggleKind: (HistoryKind) -> Unit,
+    onToggleStatus: (HistoryStatus) -> Unit,
+    onReset: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    ModalBottomSheet(onDismissRequest = onDismiss) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .testTag("history-filter-sheet")
+                .verticalScroll(rememberScrollState())
+                .padding(start = 20.dp, end = 20.dp, bottom = 28.dp),
+            verticalArrangement = Arrangement.spacedBy(18.dp),
+        ) {
+            Text(
+                text = "Фильтры истории",
+                style = MaterialTheme.typography.headlineSmall,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.semantics { heading() },
+            )
+            FilterGroup(
+                title = "Направление",
                 entries = listOf(
                     FilterEntry("На компьютер", HistoryDirection.ANDROID_TO_BROWSER),
                     FilterEntry("На телефон", HistoryDirection.BROWSER_TO_ANDROID),
                 ),
-                selected = uiState.filter.directions,
-                onToggle = { onAction(HistoryAction.ToggleDirection(it)) },
+                selected = filter.directions,
+                disabled = disabled,
+                onToggle = onToggleDirection,
             )
-            FilterRow(
+            FilterGroup(
+                title = "Тип данных",
                 entries = listOf(
                     FilterEntry("Тексты", HistoryKind.TEXT),
                     FilterEntry("Ссылки", HistoryKind.LINK),
                     FilterEntry("Файлы", HistoryKind.FILE),
                 ),
-                selected = uiState.filter.kinds,
-                onToggle = { onAction(HistoryAction.ToggleKind(it)) },
+                selected = filter.kinds,
+                disabled = disabled,
+                onToggle = onToggleKind,
             )
-            FilterRow(
+            FilterGroup(
+                title = "Результат",
                 entries = listOf(
                     FilterEntry("Доставлено", HistoryStatus.DELIVERED),
                     FilterEntry("Завершено", HistoryStatus.COMPLETED),
                     FilterEntry("Отменено", HistoryStatus.CANCELLED),
                     FilterEntry("Ошибка", HistoryStatus.FAILED),
                 ),
-                selected = uiState.filter.statuses,
-                onToggle = { onAction(HistoryAction.ToggleStatus(it)) },
+                selected = filter.statuses,
+                disabled = disabled,
+                onToggle = onToggleStatus,
             )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp, Alignment.End),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                TextButton(
+                    onClick = onReset,
+                    enabled = !disabled && filter.isActive(),
+                ) {
+                    Text("Сбросить")
+                }
+                Button(onClick = onDismiss) {
+                    Text("Готово")
+                }
+            }
         }
     }
 }
@@ -260,40 +361,66 @@ private data class FilterEntry<T>(
 )
 
 @Composable
-private fun <T> FilterRow(
+private fun <T> FilterGroup(
+    title: String,
     entries: List<FilterEntry<T>>,
     selected: Set<T>,
+    disabled: Boolean,
     onToggle: (T) -> Unit,
 ) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .horizontalScroll(rememberScrollState())
-            .padding(horizontal = 18.dp),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Text(
+            text = title,
+            style = MaterialTheme.typography.titleSmall,
+            fontWeight = FontWeight.SemiBold,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
         entries.forEach { entry ->
-            FilterChip(
-                selected = entry.value in selected,
-                onClick = { onToggle(entry.value) },
-                label = { Text(entry.label) },
-                modifier = Modifier.semantics {
-                    contentDescription = "Фильтр " + entry.label
-                },
-            )
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("history-filter-option-" + entry.label)
+                    .toggleable(
+                        value = entry.value in selected,
+                        enabled = !disabled,
+                        role = Role.Checkbox,
+                        onValueChange = { onToggle(entry.value) },
+                    )
+                    .padding(vertical = 6.dp),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Checkbox(
+                    checked = entry.value in selected,
+                    onCheckedChange = null,
+                    enabled = !disabled,
+                )
+                Text(
+                    text = entry.label,
+                    style = MaterialTheme.typography.bodyLarge,
+                )
+            }
         }
     }
 }
-
 @Composable
 private fun HistoryRecordCard(
     record: HistoryRecord,
     disabled: Boolean,
     onAction: (HistoryAction) -> Unit,
 ) {
+    val statusColors = MaterialTheme.bridgeStatusColors
+    val statusColor = when (record.status) {
+        HistoryStatus.DELIVERED,
+        HistoryStatus.COMPLETED -> statusColors.success
+        HistoryStatus.CANCELLED,
+        HistoryStatus.FAILED -> statusColors.error
+    }
+
     Card(
         modifier = Modifier
             .fillMaxWidth()
+            .testTag("history-record-card-" + record.id.value)
             .clickable(
                 enabled = !disabled,
                 role = Role.Button,
@@ -309,53 +436,87 @@ private fun HistoryRecordCard(
     ) {
         Column(
             modifier = Modifier.padding(18.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
             ) {
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(9.dp)
+                            .background(statusColor, CircleShape),
+                    )
+                    Text(
+                        text = record.status.label(),
+                        style = MaterialTheme.typography.labelLarge,
+                        fontWeight = FontWeight.SemiBold,
+                        color = statusColor,
+                    )
+                }
                 Text(
                     text = record.kind.label(),
                     style = MaterialTheme.typography.labelLarge,
                     color = MaterialTheme.colorScheme.primary,
                 )
-                Text(
-                    text = record.status.label(),
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
             }
             Text(
                 text = record.primaryLabel(),
-                style = MaterialTheme.typography.titleMedium,
+                style = MaterialTheme.typography.titleLarge,
                 fontWeight = FontWeight.SemiBold,
-                maxLines = 2,
+                maxLines = 3,
                 overflow = TextOverflow.Ellipsis,
             )
-            Text(
-                text = record.direction.label() + " · " + record.browserLabel,
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Text(
-                text = historyDateFormatter.format(
-                    Instant.ofEpochMilli(record.timestampEpochMillis),
-                ),
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            TextButton(
-                onClick = { onAction(HistoryAction.RequestDelete(record.id)) },
-                enabled = !disabled,
-                modifier = Modifier.align(Alignment.End),
+            record.file?.let { file ->
+                Text(
+                    text = file.sizeBytes.toReadableBytes(),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalAlignment = Alignment.Bottom,
             ) {
-                Text("Удалить")
+                Column(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(3.dp),
+                ) {
+                    Text(
+                        text = record.direction.label(),
+                        style = MaterialTheme.typography.labelLarge,
+                    )
+                    Text(
+                        text = record.browserLabel,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Text(
+                        text = historyDateFormatter.format(
+                            Instant.ofEpochMilli(record.timestampEpochMillis),
+                        ),
+                        modifier = Modifier.testTag("history-record-time-" + record.id.value),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                TextButton(
+                    onClick = { onAction(HistoryAction.RequestDelete(record.id)) },
+                    enabled = !disabled,
+                ) {
+                    Text("Удалить")
+                }
             }
         }
     }
 }
-
 @Composable
 private fun HistoryMessageCard(
     title: String,
@@ -472,6 +633,8 @@ private fun ConfirmationDialog(
     )
 }
 
+private fun ru.hznik.devicebridge.domain.history.HistoryFilter.activeCount(): Int =
+    directions.size + kinds.size + statuses.size
 private fun ru.hznik.devicebridge.domain.history.HistoryFilter.isActive(): Boolean =
     directions.isNotEmpty() || kinds.isNotEmpty() || statuses.isNotEmpty()
 

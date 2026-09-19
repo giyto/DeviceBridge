@@ -41,7 +41,14 @@ import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
 import ru.hznik.devicebridge.core.ui.ConnectionStatusCard
 import ru.hznik.devicebridge.core.ui.QuickActionCard
+import ru.hznik.devicebridge.core.ui.MetadataRow
+import ru.hznik.devicebridge.core.ui.OperationalItem
+import ru.hznik.devicebridge.core.ui.ScreenHeader
+import ru.hznik.devicebridge.core.ui.SectionHeader
+import ru.hznik.devicebridge.core.ui.SignalFlowIndicator
+import ru.hznik.devicebridge.core.ui.StateTone
 import ru.hznik.devicebridge.domain.error.RecoveryAction
+import ru.hznik.devicebridge.ui.theme.BridgeSpacing
 import ru.hznik.devicebridge.ui.theme.DeviceBridgeTheme
 
 @Composable
@@ -71,24 +78,25 @@ fun HomeScreen(
             .padding(PaddingValues(horizontal = 20.dp, vertical = 24.dp)),
         verticalArrangement = Arrangement.spacedBy(18.dp),
     ) {
-        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Text(
-                text = "DeviceBridge",
-                style = MaterialTheme.typography.displaySmall,
-                fontWeight = FontWeight.Bold,
-            )
-            Text(
-                text = "Телефон и компьютер — рядом, без облака и внешнего сервера.",
-                style = MaterialTheme.typography.bodyLarge,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
+        ScreenHeader(
+            title = "DeviceBridge",
+        )
 
         ConnectionStatusCard(
             statusLabel = statusContent.title,
             supportingText = statusContent.description,
             statusColor = statusContent.color,
             statusContainerColor = statusContent.containerColor,
+        )
+
+        SignalFlowIndicator(
+            active = uiState.status == HomeServerStatus.Starting ||
+                (uiState.status == HomeServerStatus.Running && hasConnectedBrowser),
+            statusLabel = if (hasConnectedBrowser) {
+                "Локальная связь с браузером активна"
+            } else {
+                "Ожидание локального подключения"
+            },
         )
 
         if (connectionGuideExpanded) {
@@ -192,10 +200,9 @@ fun HomeScreen(
         LifecycleButton(uiState = uiState, onAction = onAction)
 
         Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Text(
-                text = "Быстрые действия",
-                style = MaterialTheme.typography.titleLarge,
-                fontWeight = FontWeight.SemiBold,
+            SectionHeader(
+                title = "Быстрые действия",
+                supportingText = "Продолжайте в уже подтверждённом браузере.",
             )
             QuickActionCard(
                 symbol = "Aa",
@@ -283,35 +290,21 @@ private fun ConnectionGuideCard(
 
 @Composable
 private fun ActiveFileTransfersSection(items: List<HomeFileTransferUiState>) {
-    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Text(
-            text = "Активные передачи",
-            style = MaterialTheme.typography.titleLarge,
-            fontWeight = FontWeight.SemiBold,
+    Column(verticalArrangement = Arrangement.spacedBy(BridgeSpacing.small)) {
+        SectionHeader(
+            title = "Активные передачи",
+            supportingText = "Текущий прогресс без скрытых фоновых операций.",
         )
         items.forEach { item ->
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(22.dp),
-                colors = CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.surfaceContainer,
-                ),
-            ) {
-                Column(
-                    modifier = Modifier.padding(18.dp),
-                    verticalArrangement = Arrangement.spacedBy(6.dp),
-                ) {
-                    Text(item.displayName, fontWeight = FontWeight.SemiBold)
-                    Text(
-                        text = "${item.direction.homeLabel()} · ${item.progressPercent}%",
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-            }
+            OperationalItem(
+                statusLabel = "Передаётся",
+                title = item.displayName,
+                metadata = "${item.direction.homeLabel()} · ${item.progressPercent}%",
+                tone = StateTone.LOADING,
+            )
         }
     }
 }
-
 private fun ru.hznik.devicebridge.domain.file.FileTransferDirection.homeLabel(): String =
     if (this == ru.hznik.devicebridge.domain.file.FileTransferDirection.BROWSER_TO_ANDROID) {
         "На телефон"
@@ -578,50 +571,27 @@ private fun ServerDetailsCard(
     uptimeSeconds: Long,
     onCopy: () -> Unit,
 ) {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(24.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceContainer,
-        ),
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 4.dp),
+        verticalArrangement = Arrangement.spacedBy(BridgeSpacing.small),
     ) {
-        Column(
-            modifier = Modifier.padding(20.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
-        ) {
-            Text(
-                text = "Адрес сервера",
-                style = MaterialTheme.typography.labelLarge,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Text(
-                text = address,
-                style = MaterialTheme.typography.bodyLarge,
-                fontWeight = FontWeight.SemiBold,
-            )
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-            ) {
-                Column {
-                    Text(
-                        text = "Время работы",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    Text(formatUptime(uptimeSeconds))
-                }
-                TextButton(
-                    onClick = onCopy,
-                    modifier = Modifier.semantics {
-                        contentDescription = "Скопировать адрес DeviceBridge"
-                    },
-                ) { Text("Копировать") }
-            }
-        }
+        SectionHeader(
+            title = "Локальный сервер",
+            supportingText = "Доступен только в текущей сети.",
+        )
+        MetadataRow(label = "Адрес", value = address, monospace = true)
+        MetadataRow(label = "Время работы", value = formatUptime(uptimeSeconds))
+        TextButton(
+            onClick = onCopy,
+            modifier = Modifier.semantics {
+                contentDescription = "Скопировать адрес DeviceBridge"
+            },
+        ) { Text("Копировать адрес") }
+        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
     }
 }
-
 @Composable
 private fun MessageCard(
     title: String,

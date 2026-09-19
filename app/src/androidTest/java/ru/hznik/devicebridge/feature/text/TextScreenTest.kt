@@ -1,24 +1,34 @@
 package ru.hznik.devicebridge.feature.text
 
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsFocused
+import androidx.compose.ui.test.assertIsNotFocused
+import androidx.compose.ui.test.assertTextContains
+import androidx.compose.ui.test.click
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performTextReplacement
+import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.Density
+import androidx.compose.ui.geometry.Offset
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import org.junit.Assert.assertEquals
 import org.junit.Rule
@@ -136,6 +146,7 @@ class TextScreenTest {
 
         assertEquals(listOf(TextAction.RetryClicked(messageId)), actions)
     }
+
     @Test
     fun feedExposesParticipantDirectionTimeStatusAndLongUrlAction() {
         val longUrl = "https://example.com/" + "very-long-segment/".repeat(18) + "?source=devicebridge"
@@ -163,12 +174,13 @@ class TextScreenTest {
         composeRule.onNodeWithText("Отправитель: Firefox")
             .performScrollTo()
             .assertIsDisplayed()
-        composeRule.onNodeWithText("На телефон").performScrollTo().assertIsDisplayed()
+        composeRule.onNodeWithText("На телефон", substring = true)
+            .performScrollTo().assertIsDisplayed()
         composeRule.onNodeWithText("Время:", substring = true)
             .performScrollTo()
             .assertIsDisplayed()
         composeRule.onNodeWithText("Доставлено").performScrollTo().assertIsDisplayed()
-        composeRule.onNodeWithContentDescription("Статус передачи текста: Доставлено")
+        composeRule.onNodeWithContentDescription("Доставлено", substring = true)
             .assert(
                 SemanticsMatcher.expectValue(
                     SemanticsProperties.LiveRegion,
@@ -183,7 +195,6 @@ class TextScreenTest {
 
         assertEquals(listOf(longUrl), openRequests)
     }
-
 
     @Test
     fun editorReceivesKeyboardFocusAndLargeFontLayoutRemainsScrollable() {
@@ -220,6 +231,33 @@ class TextScreenTest {
             .assertIsFocused()
         composeRule.onNodeWithText("Отправить").performScrollTo().assertIsDisplayed()
         composeRule.onNodeWithText("Текущая лента").performScrollTo().assertIsDisplayed()
+    }
+
+    @Test
+    fun tappingBlankAreaClearsEditorFocusAndKeepsDraft() {
+        var state by mutableStateOf(TextUiState(draft = "Черновик"))
+        composeRule.setContent {
+            DeviceBridgeTheme {
+                TextScreen(
+                    uiState = state,
+                    onAction = { action ->
+                        if (action is TextAction.DraftChanged) {
+                            state = state.copy(draft = action.value)
+                        }
+                    },
+                )
+            }
+        }
+
+        val editor = composeRule.onNodeWithContentDescription("Текст для отправки")
+        editor.performClick()
+        editor.performTextReplacement("Текст остаётся")
+        editor.assertIsFocused()
+
+        composeRule.onNodeWithTag("text-screen")
+            .performTouchInput { click(Offset(4f, 4f)) }
+
+        editor.assertIsNotFocused().assertTextContains("Текст остаётся")
     }
 
     @Test

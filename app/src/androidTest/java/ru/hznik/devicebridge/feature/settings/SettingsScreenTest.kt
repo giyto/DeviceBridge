@@ -6,8 +6,12 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.test.assertIsEnabled
+import androidx.compose.ui.test.assertIsFocused
+import androidx.compose.ui.test.assertIsNotFocused
 import androidx.compose.ui.test.assertTextContains
+import androidx.compose.ui.test.click
 import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertTextEquals
@@ -17,6 +21,7 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextReplacement
+import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.hasScrollAction
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performScrollToIndex
@@ -229,6 +234,7 @@ class SettingsScreenTest {
 
         assertEquals(listOf(SettingsAction.ChooseDestination), actions)
     }
+
     @Test
     fun failedSaveKeepsDraftAndShowsInlineRetryableFeedback() {
         composeRule.setContent {
@@ -258,4 +264,56 @@ class SettingsScreenTest {
         composeRule.onNodeWithTag("settings-list").captureToImage()
     }
 
+    @Test
+    fun tappingBlankAreaClearsSettingsFocusAndKeepsInput() {
+        var state by mutableStateOf(
+            SettingsUiState(
+                settings = DeviceSettings.defaults(),
+                loadState = SettingsLoadState.CONTENT,
+            ),
+        )
+        composeRule.setContent {
+            MaterialTheme {
+                SettingsScreen(
+                    uiState = state,
+                    onAction = { action ->
+                        if (action is SettingsAction.DeviceNameChanged) {
+                            state = state.copy(deviceNameInput = action.value)
+                        }
+                    },
+                )
+            }
+        }
+
+        val field = composeRule.onNodeWithContentDescription("Поле имени телефона")
+        field.performClick()
+        field.performTextReplacement("Pixel сохранён")
+        field.assertIsFocused()
+
+        composeRule.onNodeWithTag("settings-list")
+            .performTouchInput { click(Offset(4f, 4f)) }
+
+        field.assertIsNotFocused().assertTextContains("Pixel сохранён")
+    }
+
+    @Test
+    fun decorativeSettingsCopyIsOmittedButPrimaryHeadingRemains() {
+        composeRule.setContent {
+            MaterialTheme {
+                SettingsScreen(
+                    uiState = SettingsUiState(
+                        settings = DeviceSettings.defaults(),
+                        loadState = SettingsLoadState.CONTENT,
+                    ),
+                    onAction = {},
+                )
+            }
+        }
+
+        composeRule.onNodeWithText("Настройки").assertIsDisplayed()
+        composeRule.onNodeWithText("Локальные параметры").assertDoesNotExist()
+        composeRule.onNodeWithText(
+            "Все параметры хранятся только на этом телефоне.",
+        ).assertDoesNotExist()
+    }
 }

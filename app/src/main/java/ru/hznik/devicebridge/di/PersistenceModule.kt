@@ -1,6 +1,7 @@
 package ru.hznik.devicebridge.di
 
 import android.content.Context
+import android.os.Build
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.PreferenceDataStoreFactory
 import androidx.datastore.preferences.core.Preferences
@@ -13,6 +14,7 @@ import dagger.hilt.InstallIn
 import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.components.SingletonComponent
 import java.time.Clock
+import javax.inject.Qualifier
 import javax.inject.Singleton
 import kotlinx.coroutines.CoroutineScope
 import ru.hznik.devicebridge.data.persistence.datastore.DataStoreSettingsRepository
@@ -27,6 +29,7 @@ import ru.hznik.devicebridge.data.text.TextTerminalHistoryRecorder
 import ru.hznik.devicebridge.domain.repository.HistoryRepository
 import ru.hznik.devicebridge.domain.repository.SettingsRepository
 import ru.hznik.devicebridge.domain.repository.TrustedBrowserRepository
+import ru.hznik.devicebridge.domain.settings.androidDeviceName
 import ru.hznik.devicebridge.data.trust.AndroidKeystoreTrustedHmacKeyProvider
 import ru.hznik.devicebridge.data.trust.HmacSha256TrustedCredentialVerifier
 import ru.hznik.devicebridge.data.trust.RoomTrustedBrowserRepository
@@ -45,6 +48,10 @@ import ru.hznik.devicebridge.domain.usecase.UpdateRetentionDaysUseCase
 
 private const val DATABASE_NAME = "devicebridge.db"
 private const val SETTINGS_FILE_NAME = "devicebridge_settings"
+
+@Qualifier
+@Retention(AnnotationRetention.BINARY)
+annotation class PhysicalDeviceName
 
 @Module
 @InstallIn(SingletonComponent::class)
@@ -78,10 +85,19 @@ object PersistenceModule {
     )
 
     @Provides
+    @PhysicalDeviceName
+    fun providePhysicalDeviceName(): String =
+        androidDeviceName(Build.MANUFACTURER, Build.MODEL)
+
+    @Provides
     @Singleton
     fun provideSettingsRepository(
         dataStore: DataStore<Preferences>,
-    ): SettingsRepository = DataStoreSettingsRepository(dataStore)
+        @PhysicalDeviceName defaultDeviceName: String,
+    ): SettingsRepository = DataStoreSettingsRepository(
+        dataStore = dataStore,
+        defaultDeviceName = defaultDeviceName,
+    )
 
     @Provides
     @Singleton

@@ -79,6 +79,25 @@ class HistoryViewModelTest {
         assertEquals(listOf("FILE"), savedState.get<List<String>>("history_filter_kinds"))
     }
 
+
+    @Test
+    fun resetFiltersClearsAllSelectionsAndSavedState() = runTest(dispatcher) {
+        val repository = FakeHistoryRepository()
+        val savedState = SavedStateHandle()
+        val viewModel = viewModel(repository, savedState)
+        runCurrent()
+
+        viewModel.onAction(HistoryAction.ToggleKind(HistoryKind.FILE))
+        viewModel.onAction(HistoryAction.ToggleDirection(HistoryDirection.BROWSER_TO_ANDROID))
+        viewModel.onAction(HistoryAction.ToggleStatus(HistoryStatus.COMPLETED))
+        viewModel.onAction(HistoryAction.ResetFilters)
+        runCurrent()
+
+        assertEquals(HistoryFilter(), repository.lastFilter)
+        assertEquals(emptyList<String>(), savedState.get<List<String>>("history_filter_kinds"))
+        assertEquals(emptyList<String>(), savedState.get<List<String>>("history_filter_directions"))
+        assertEquals(emptyList<String>(), savedState.get<List<String>>("history_filter_statuses"))
+    }
     @Test
     fun repositoryFailureBecomesRecoverableErrorState() = runTest(dispatcher) {
         val repository = FakeHistoryRepository(failReads = true)

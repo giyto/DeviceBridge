@@ -40,6 +40,7 @@ internal class SessionRouteTestServer(
     enableFileEvents: Boolean = false,
     effectiveFileLimitBytes: Long = ru.hznik.devicebridge.domain.file.HARD_MAX_FILE_BYTES,
     effectiveFileLimitProvider: (() -> Long)? = null,
+    deviceNameProvider: () -> String = { "Test Android" },
 ) : AutoCloseable {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val clock = FixedClock(1_000)
@@ -104,6 +105,7 @@ internal class SessionRouteTestServer(
                 effectiveFileLimitBytes = {
                     effectiveFileLimitProvider?.invoke() ?: effectiveFileLimitBytes
                 },
+                deviceName = deviceNameProvider,
             )
             installTextRoutes(
                 sessionCoordinator = coordinator,
@@ -123,7 +125,7 @@ internal class SessionRouteTestServer(
                 effectiveFileLimitBytes = {
                     effectiveFileLimitProvider?.invoke() ?: effectiveFileLimitBytes
                 },
-            )
+           )
         },
     ).also { it.start(wait = false) }
     private val client = HttpClient.newHttpClient()

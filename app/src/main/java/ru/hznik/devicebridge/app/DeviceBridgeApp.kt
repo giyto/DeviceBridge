@@ -17,8 +17,10 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.NavigationRail
 import androidx.compose.material3.NavigationRailItem
+import androidx.compose.material3.NavigationRailItemDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -166,7 +168,11 @@ fun DeviceBridgeApp(
             modifier = Modifier.fillMaxSize(),
             bottomBar = {
                 if (!useNavigationRail && showTopLevelNavigation) {
-                    NavigationBar(modifier = Modifier.testTag("top_level_navigation_bar")) {
+                    NavigationBar(
+                        modifier = Modifier.testTag("top_level_navigation_bar"),
+                        containerColor = MaterialTheme.colorScheme.surface,
+                        tonalElevation = 0.dp,
+                    ) {
                     TopLevelDestination.entries.forEach { destination ->
                         NavigationBarItem(
                             selected = currentRoute == destination.route,
@@ -186,6 +192,13 @@ fun DeviceBridgeApp(
                                 )
                             },
                             label = { Text(destination.label) },
+                            colors = NavigationBarItemDefaults.colors(
+                                selectedIconColor = MaterialTheme.colorScheme.primary,
+                                selectedTextColor = MaterialTheme.colorScheme.onSurface,
+                                indicatorColor = MaterialTheme.colorScheme.primaryContainer,
+                                unselectedIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                                unselectedTextColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                            ),
                             modifier = Modifier.semantics {
                                 contentDescription = "Раздел ${destination.label}"
                             },
@@ -203,6 +216,7 @@ fun DeviceBridgeApp(
             if (useNavigationRail && showTopLevelNavigation) {
                 NavigationRail(
                     modifier = Modifier.testTag("top_level_navigation_rail"),
+                    containerColor = MaterialTheme.colorScheme.surface,
                 ) {
                     TopLevelDestination.entries.forEach { destination ->
                         NavigationRailItem(
@@ -223,6 +237,13 @@ fun DeviceBridgeApp(
                                 )
                             },
                             label = { Text(destination.label) },
+                            colors = NavigationRailItemDefaults.colors(
+                                selectedIconColor = MaterialTheme.colorScheme.primary,
+                                selectedTextColor = MaterialTheme.colorScheme.onSurface,
+                                indicatorColor = MaterialTheme.colorScheme.primaryContainer,
+                                unselectedIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                                unselectedTextColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                            ),
                             modifier = Modifier.semantics {
                                 contentDescription = "Раздел ${destination.label}"
                             },

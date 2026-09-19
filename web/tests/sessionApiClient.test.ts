@@ -24,6 +24,7 @@ describe("SessionApiClient", () => {
         connected: true,
         activeSessionCount: 1,
         effectiveFileLimitBytes: 536_870_912,
+        deviceName: "Google Pixel 8",
       }))
       .mockResolvedValueOnce(new Response(null, { status: 204 }));
     const client = new SessionApiClient(fetcher);
@@ -45,6 +46,7 @@ describe("SessionApiClient", () => {
     const closeHeaders = new Headers(fetcher.mock.calls[3]?.[1]?.headers);
     expect(closeHeaders.get("Authorization")).toBe("Bearer secret-token");
     expect(status.effectiveFileLimitBytes).toBe(536_870_912);
+    expect(status.deviceName).toBe("Google Pixel 8");
   });
 
   it("returns typed server errors without putting credentials in messages", async () => {

@@ -29,6 +29,7 @@ sealed interface HistoryAction {
     data class ToggleDirection(val direction: HistoryDirection) : HistoryAction
     data class ToggleKind(val kind: HistoryKind) : HistoryAction
     data class ToggleStatus(val status: HistoryStatus) : HistoryAction
+    data object ResetFilters : HistoryAction
     data class OpenDetails(val recordId: HistoryRecordId) : HistoryAction
     data object CloseDetails : HistoryAction
     data class RequestDelete(val recordId: HistoryRecordId) : HistoryAction

@@ -10,6 +10,7 @@ const STATUS = {
   connected: true,
   activeSessionCount: 1,
   effectiveFileLimitBytes: 1_073_741_824,
+  deviceName: "Google Pixel 8",
 };
 
 test("layout, reload, trusted reconnect and revoke preserve accessible session state", async ({
