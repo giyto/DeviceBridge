@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { readFileSync, readdirSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -14,6 +15,18 @@ describe("Vite Android asset output", () => {
     for (const asset of assets) {
       expect(html).toContain(`/assets/${asset}`);
     }
+  });
+
+  it("keeps the synchronous theme bootstrap covered by the release CSP hash", () => {
+    const html = readFileSync(resolve(outputRoot, "index.html"), "utf8");
+    const bootstrap = html.match(
+      /<script data-role="theme-bootstrap">([\s\S]*?)<\/script>/,
+    )?.[1];
+
+    expect(bootstrap).toBeDefined();
+    expect(createHash("sha256").update(bootstrap ?? "").digest("base64")).toBe(
+      "F5EhQ4Xw10HZb4yMlvyeV6RnFM6rJV0SIN4Hvm5VCkc=",
+    );
   });
 
   it("emits an exact, deterministic public web manifest", () => {

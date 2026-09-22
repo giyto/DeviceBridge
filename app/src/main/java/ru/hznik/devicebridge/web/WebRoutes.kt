@@ -117,5 +117,7 @@ private fun ApplicationCall.addWebSecurityHeaders() {
 private const val NO_STORE = "no-store"
 private const val IMMUTABLE_ASSET_CACHE = "public, max-age=31536000, immutable"
 private const val CONTENT_SECURITY_POLICY =
-    "default-src 'self'; connect-src 'self'; object-src 'none'; " +
+    "default-src 'self'; " +
+        "script-src 'self' 'sha256-F5EhQ4Xw10HZb4yMlvyeV6RnFM6rJV0SIN4Hvm5VCkc='; " +
+        "connect-src 'self'; object-src 'none'; " +
         "base-uri 'none'; frame-ancestors 'none'"

@@ -12,6 +12,9 @@ describe("pre-render theme bootstrap", () => {
     expect(bootstrapStart).toBeGreaterThan(0);
     expect(bootstrapStart).toBeLessThan(stylesheetStart);
     expect(bootstrapStart).toBeLessThan(moduleStart);
+    expect(html).not.toMatch(/data-role="theme-bootstrap"[^>]+src=/);
+    expect(html).toContain('rel="icon"');
+    expect(html).toContain('href="/src/favicon.svg"');
     expect(html).toContain("devicebridge.theme.v1");
     expect(html).toContain('const allowed = ["light", "dark"]');
     expect(html).toContain('record.preference === "system"');
