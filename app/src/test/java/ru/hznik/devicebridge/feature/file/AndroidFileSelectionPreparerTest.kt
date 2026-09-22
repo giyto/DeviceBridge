@@ -1,6 +1,7 @@
 package ru.hznik.devicebridge.feature.file
 
 import java.io.ByteArrayInputStream
+import java.io.File
 import java.nio.file.Files
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertArrayEquals
@@ -32,6 +33,29 @@ class AndroidFileSelectionPreparerTest {
             val staged = fixture.registry.draftStagedFile(item.id)!!
             assertNull(fixture.registry.draftSourceUri(item.id))
             assertTrue(staged.canonicalPath.startsWith(fixture.directory.canonicalPath))
+            assertArrayEquals(fixture.bytes, staged.readBytes())
+        } finally {
+            fixture.close()
+        }
+    }
+
+    @Test
+    fun temporaryShareIsStagedWhenStagingDirectoryDoesNotExistYet() = runTest {
+        val fixture = Fixture(
+            bytes = "first share after install".encodeToByteArray(),
+            stageDirectoryExists = false,
+            realUsableSpace = true,
+        )
+        try {
+            assertFalse(fixture.directory.exists())
+
+            val result = fixture.preparer().prepare(
+                uris = listOf(fixture.uri),
+                stageTemporarySources = true,
+            )
+
+            assertEquals(0, result.rejectedCount)
+            val staged = fixture.registry.draftStagedFile(result.items.single().id)!!
             assertArrayEquals(fixture.bytes, staged.readBytes())
         } finally {
             fixture.close()
@@ -164,9 +188,12 @@ class AndroidFileSelectionPreparerTest {
         private val declaredSize: Long = bytes.size.toLong(),
         private val availableBytes: Long = Long.MAX_VALUE,
         private val openAllowed: Boolean = true,
+        stageDirectoryExists: Boolean = true,
+        private val realUsableSpace: Boolean = false,
     ) {
         val uri = "content://fixture/shared"
-        val directory = Files.createTempDirectory("devicebridge-selection-stage").toFile()
+        private val root = Files.createTempDirectory("devicebridge-selection-stage").toFile()
+        val directory = if (stageDirectoryExists) root else root.resolve("file-sources")
         val registry = FileSourceRegistry()
         var wasOpened = false
             private set
@@ -182,12 +209,12 @@ class AndroidFileSelectionPreparerTest {
                 wasOpened = true
                 if (openAllowed) ByteArrayInputStream(bytes) else null
             },
-            availableBytes = { availableBytes },
+            availableBytes = if (realUsableSpace) File::getUsableSpace else { _ -> availableBytes },
         )
 
         fun close() {
             registry.clear()
-            directory.deleteRecursively()
+            root.deleteRecursively()
         }
     }
 }

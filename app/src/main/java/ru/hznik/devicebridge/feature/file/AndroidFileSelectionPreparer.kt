@@ -64,7 +64,11 @@ class AndroidFileSelectionPreparer internal constructor(
                 return@forEach
             }
 
-            if (stageTemporarySources && availableBytes(stagingDirectory) < source.sizeBytes) {
+            // Usable space of a missing directory is reported as 0, so create it before measuring.
+            if (
+                stageTemporarySources &&
+                (!ensureStagingDirectory() || availableBytes(stagingDirectory) < source.sizeBytes)
+            ) {
                 rejected += 1
                 return@forEach
             }
@@ -81,9 +85,6 @@ class AndroidFileSelectionPreparer internal constructor(
             val result = runCatching {
                 input.use { stream ->
                     if (stageTemporarySources) {
-                        check(stagingDirectory.exists() || stagingDirectory.mkdirs()) {
-                            "Unable to create private staging directory"
-                        }
                         File.createTempFile(STAGING_PREFIX, STAGING_SUFFIX, stagingDirectory)
                             .also { stagedFile = it }
                             .outputStream()
@@ -122,6 +123,9 @@ class AndroidFileSelectionPreparer internal constructor(
         }
         FileSelectionPreparation(prepared, rejected)
     }
+
+    private fun ensureStagingDirectory(): Boolean =
+        stagingDirectory.isDirectory || stagingDirectory.mkdirs()
 
     private data object DiscardOutputStream : OutputStream() {
         override fun write(value: Int) = Unit

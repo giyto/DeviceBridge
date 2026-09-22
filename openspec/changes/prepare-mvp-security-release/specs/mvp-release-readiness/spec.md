@@ -86,7 +86,7 @@ Repository, release APK, web bundle, generated manifests и verification reports
 
 ### Requirement: MVP release matrix закрывается до публикации
 
-Release candidate MUST пройти заявленные unit, integration, UI и web gates, установку и smoke flows на Android API 29 и API 37.1, а также browser acceptance в актуальных Chrome и Edge на Windows 10 и Windows 11. Матрица MUST включать server lifecycle, pairing/approval/revoke, trusted reconnect, text/link transfer, один и несколько файлов в обе стороны, cancel/retry, файл не менее 500 МБ с SHA-256 и отсутствие внешнего runtime-трафика. Непроверенная обязательная ячейка MUST оставаться видимым release blocker, а не считаться успешной по умолчанию.
+Release candidate MUST пройти заявленные unit, integration, UI и web gates, установку и smoke flows на Android API 29 и API 37.1, а также browser acceptance в актуальных Chrome и Edge на Windows 11. Матрица MUST включать server lifecycle, pairing/approval/revoke, trusted reconnect, text/link transfer, один и несколько файлов в обе стороны, cancel/retry, файл не менее 500 МБ с SHA-256 и отсутствие внешнего runtime-трафика. Непроверенная обязательная ячейка MUST оставаться видимым release blocker, а не считаться успешной по умолчанию.
 
 #### Scenario: Все обязательные проверки успешны
 
@@ -96,6 +96,6 @@ Release candidate MUST пройти заявленные unit, integration, UI �
 
 #### Scenario: Обязательная среда недоступна
 
-- **WHEN** API 29, API 37.1, Chrome/Edge либо Windows 10/11 не были фактически проверены для текущего release candidate
+- **WHEN** API 29, API 37.1, Chrome/Edge либо Windows 11 не были фактически проверены для текущего release candidate
 - **THEN** соответствующая ячейка остаётся `NOT RUN` или `BLOCKED`, но не `PASS`
 - **AND** публичная готовность MVP не подтверждается до выполнения либо явного изменения ТЗ
