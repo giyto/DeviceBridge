@@ -99,7 +99,8 @@ describe("createShellView", () => {
     expect(document.querySelector('[data-role="status-title"]')?.textContent).toBe(
       "DeviceBridge доступен",
     );
-    expect(document.querySelector('[data-role="protocol-version"]')?.textContent).toBe("1");
+    expect(document.querySelector('[data-role="protocol-version"]')).toBeNull();
+    expect(document.querySelector<HTMLElement>('[data-role="version-data"]')?.hidden).toBe(true);
     expect(document.body.textContent).not.toContain("sha256-abcd");
     expect(document.querySelector<HTMLElement>('[data-role="device-row"]')?.hidden).toBe(true);
     expect(document.querySelector<HTMLButtonElement>('[data-action="retry"]')?.hidden).toBe(
@@ -202,6 +203,15 @@ describe("createShellView", () => {
       "Google Pixel 8",
     );
     expect(document.querySelector<HTMLElement>('[data-role="device-row"]')?.hidden).toBe(false);
+    expect(document.querySelector('[data-role="session-count"]')?.textContent).toBe("2");
+    expect(document.querySelector<HTMLElement>('[data-role="session-count-row"]')?.hidden)
+      .toBe(false);
+    expect(document.querySelector<HTMLElement>('[data-role="session-heading"]')?.hidden)
+      .toBe(true);
+    expect(
+      document.querySelector('[data-role="status"]')
+        ?.contains(document.querySelector('[data-action="disconnect"]')),
+    ).toBe(true);
   });
 
   it("shows automatic reconnect progress without offering a competing manual retry", () => {

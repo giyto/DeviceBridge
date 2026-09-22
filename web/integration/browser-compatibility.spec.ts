@@ -292,7 +292,9 @@ async function installAuthenticatedSocket(
 }
 
 async function expectConnected(page: Page): Promise<void> {
-  await expect(page.getByRole("heading", { name: "Браузер подключён" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Безопасное подключение активно" }))
+    .toBeVisible();
+  await expect(page.getByRole("button", { name: "Отключить этот браузер" })).toBeVisible();
   await expect(page.locator('[data-role="status"]')).toHaveAttribute(
     "data-state",
     "connected",

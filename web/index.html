@@ -67,37 +67,39 @@
         >
           <div class="connection-heading">
             <section class="hero" aria-labelledby="page-title">
-              <h1 id="page-title">DeviceBridge</h1>
+              <div class="hero__title-row">
+                <h1 id="page-title">DeviceBridge</h1>
+                <div class="theme-control-panel">
+                  <button
+                    class="theme-control"
+                    data-role="theme-control"
+                    type="button"
+                    aria-label="Включить светлую тему"
+                  >
+                    <svg
+                      data-theme-icon="sun"
+                      viewBox="0 0 24 24"
+                      aria-hidden="true"
+                      hidden
+                    >
+                      <circle cx="12" cy="12" r="4"></circle>
+                      <path d="M12 2v2M12 20v2M4.93 4.93l1.42 1.42M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.42-1.42M17.66 6.34l1.41-1.41"></path>
+                    </svg>
+                    <svg
+                      data-theme-icon="moon"
+                      viewBox="0 0 24 24"
+                      aria-hidden="true"
+                    >
+                      <path d="M20.5 14.2A8.5 8.5 0 0 1 9.8 3.5 8.5 8.5 0 1 0 20.5 14.2Z"></path>
+                    </svg>
+                  </button>
+                </div>
+              </div>
               <p class="hero__lead">
                 Интерфейс загружен прямо с вашего Android-устройства. Интернет и отдельная
                 программа для компьютера не нужны.
               </p>
             </section>
-            <div class="theme-control-panel">
-              <button
-                class="theme-control"
-                data-role="theme-control"
-                type="button"
-                aria-label="Включить светлую тему"
-              >
-                <svg
-                  data-theme-icon="sun"
-                  viewBox="0 0 24 24"
-                  aria-hidden="true"
-                  hidden
-                >
-                  <circle cx="12" cy="12" r="4"></circle>
-                  <path d="M12 2v2M12 20v2M4.93 4.93l1.42 1.42M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.42-1.42M17.66 6.34l1.41-1.41"></path>
-                </svg>
-                <svg
-                  data-theme-icon="moon"
-                  viewBox="0 0 24 24"
-                  aria-hidden="true"
-                >
-                  <path d="M20.5 14.2A8.5 8.5 0 0 1 9.8 3.5 8.5 8.5 0 1 0 20.5 14.2Z"></path>
-                </svg>
-              </button>
-            </div>
           </div>
           <section
             class="status-card"
@@ -107,27 +109,30 @@
         aria-live="polite"
         aria-atomic="true"
       >
-        <div class="status-card__icon" aria-hidden="true">
-          <span class="status-card__pulse"></span>
-        </div>
         <div class="status-card__content">
           <p class="status-card__label">Состояние локальной связи</p>
-          <h2 data-role="status-title">Проверяем DeviceBridge…</h2>
+          <div class="status-card__title-row">
+            <h2 data-role="status-title">Проверяем DeviceBridge…</h2>
+            <span class="status-card__pulse" aria-hidden="true"></span>
+          </div>
           <p data-role="status-detail">Это займёт несколько секунд.</p>
 
           <dl class="version-list" data-role="version-data" hidden>
-            <div>
-              <dt>Протокол</dt>
-              <dd data-role="protocol-version">—</dd>
-            </div>
             <div data-role="device-row" hidden>
               <dt>Android-устройство</dt>
               <dd data-role="device-name">—</dd>
+            </div>
+            <div data-role="session-count-row" hidden>
+              <dt>Активных браузеров</dt>
+              <dd data-role="session-count">—</dd>
             </div>
           </dl>
 
           <button class="secondary-button" data-action="retry" type="button" hidden>
             Проверить снова
+          </button>
+          <button class="secondary-button" data-action="disconnect" type="button" hidden>
+            Отключить этот браузер
           </button>
         </div>
       </section>
@@ -169,11 +174,12 @@
 
         <div class="shell-layout__workspace">
           <section class="stage-card" aria-labelledby="stage-title" data-role="session-panel">
-        <p class="stage-card__step">Безопасное подключение</p>
-        <h2 id="stage-title" data-role="session-title">Подготовка подключения…</h2>
-        <p data-role="session-detail">
-          Проверяем локальный сервер на телефоне.
-        </p>
+        <div class="session-heading" data-role="session-heading">
+          <h2 id="stage-title" data-role="session-title">Подготовка подключения…</h2>
+          <p data-role="session-detail">
+            Проверяем локальный сервер на телефоне.
+          </p>
+        </div>
 
         <form class="pairing-form" data-role="pairing-form" hidden novalidate>
           <label for="pairing-code">Шестизначный код с телефона</label>
@@ -203,10 +209,6 @@
             Подключить браузер
           </button>
         </form>
-
-        <button class="secondary-button" data-action="disconnect" type="button" hidden>
-          Отключить этот браузер
-        </button>
 
         <section
           class="text-transfer"
