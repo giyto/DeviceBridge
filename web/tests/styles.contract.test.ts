@@ -55,7 +55,7 @@ describe("responsive style contract", () => {
 
     expect(css).toContain("@keyframes signal-flow");
     expect(css).toMatch(
-      /\.status-card\[data-view-state="loading"\] \.status-card__icon::after\s*\{[^}]*animation:\s*signal-flow/s,
+      /\.status-card\[data-view-state="loading"\] \.status-card__pulse\s*\{[^}]*animation:\s*status-dot-flash/s,
     );
     expect(css).toMatch(
       /\.file-card\[data-view-state="loading"\]::before\s*\{[^}]*animation:\s*signal-flow/s,
@@ -237,8 +237,8 @@ describe("responsive style contract", () => {
     const css = readFileSync(stylesPath, "utf8");
 
     expect(css).not.toMatch(/\.stage-card\[data-view-state="(?:loading|ready|offline|error)"\]\s*\{/);
-    expect(css).toMatch(/\.status-card\[data-state="ready"\] \.status-card__icon/);
-    expect(css).toMatch(/\.status-card\[data-state="offline"\] \.status-card__icon/);
+    expect(css).toMatch(/\.status-card\[data-state="ready"\] \.status-card__pulse/);
+    expect(css).toMatch(/\.status-card\[data-state="offline"\] \.status-card__pulse/);
   });
   it("aligns the wide top line and styles one collapsible warning surface", () => {
     const css = readFileSync(stylesPath, "utf8");

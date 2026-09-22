@@ -223,11 +223,18 @@ a {
   flex: 1 1 auto;
 }
 
+.hero__title-row {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+}
+
 .theme-control-panel {
   display: flex;
   flex: 0 0 auto;
   justify-content: flex-end;
-  padding-top: 0.2rem;
 }
 
 .theme-control {
@@ -353,68 +360,43 @@ h2 {
     border-color var(--motion-duration-standard) var(--motion-easing-standard),
     background-color var(--motion-duration-standard) var(--motion-easing-standard),
     box-shadow var(--motion-duration-standard) var(--motion-easing-standard);
-  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr);
   gap: var(--space-4);
   padding: clamp(1.25rem, 4vw, 2rem);
   box-shadow: var(--shadow);
 }
 
-.status-card__icon {
-  position: relative;
-  display: grid;
-  width: 46px;
-  height: 46px;
-  overflow: hidden;
-  place-items: center;
-  border-radius: 15px;
-  background: var(--accent-soft);
-}
-
-.status-card__icon::after {
-  position: absolute;
-  width: 24px;
-  height: 2px;
-  border-radius: var(--shape-pill);
-  background: var(--color-status-info);
-  content: "";
-  opacity: 0;
-}
-
-.status-card[data-view-state="loading"] .status-card__icon::after {
-  animation: signal-flow 720ms var(--motion-easing-standard) 1;
+.status-card__title-row h2 {
+  display: inline;
 }
 
 .status-card__pulse {
-  width: 12px;
-  height: 12px;
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  margin-left: 0.6rem;
   border-radius: 50%;
+  vertical-align: 0.2em;
   background: var(--accent);
-  box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 40%, transparent);
+  box-shadow: 0 0 0 4px var(--accent-soft);
   animation: none;
 }
 
-.status-card[data-state="ready"] .status-card__icon,
-.status-card[data-state="connected"] .status-card__icon {
-  background: var(--success-soft);
+.status-card[data-view-state="loading"] .status-card__pulse {
+  animation: status-dot-flash 720ms var(--motion-easing-standard) 1;
 }
 
 .status-card[data-state="ready"] .status-card__pulse,
 .status-card[data-state="connected"] .status-card__pulse {
   background: var(--success);
-  animation: none;
-}
-
-.status-card[data-state="offline"] .status-card__icon,
-.status-card[data-state="sessionLost"] .status-card__icon,
-.status-card[data-state="denied"] .status-card__icon {
-  background: var(--danger-soft);
+  box-shadow: 0 0 0 4px var(--success-soft);
 }
 
 .status-card[data-state="offline"] .status-card__pulse,
 .status-card[data-state="sessionLost"] .status-card__pulse,
 .status-card[data-state="denied"] .status-card__pulse {
   background: var(--danger);
-  animation: none;
+  box-shadow: 0 0 0 4px var(--danger-soft);
 }
 
 .status-card__content {
@@ -590,6 +572,12 @@ h2 {
 
 .stage-card__step {
   color: var(--text-muted);
+}
+
+.session-heading[hidden] ~ .text-transfer {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: 0;
 }
 
 .pairing-form,
@@ -1300,6 +1288,17 @@ h2 {
     transform: translateY(0);
   }
 }
+@keyframes status-dot-flash {
+  0%,
+  100% {
+    opacity: 1;
+  }
+
+  50% {
+    opacity: 0.35;
+  }
+}
+
 @keyframes signal-flow {
   0% {
     opacity: 0;
@@ -1321,10 +1320,6 @@ h2 {
     width: min(100%, calc(100% - 1rem));
   }
 
-
-  .status-card {
-    grid-template-columns: 1fr;
-  }
 
   .text-transfer__heading,
   .file-unavailable,

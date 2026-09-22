@@ -22,9 +22,13 @@ export function createShellView(
   const title = requiredElement<HTMLElement>(documentRef, '[data-role="status-title"]');
   const detail = requiredElement<HTMLElement>(documentRef, '[data-role="status-detail"]');
   const versionData = requiredElement<HTMLElement>(documentRef, '[data-role="version-data"]');
-  const protocolVersion = requiredElement<HTMLElement>(documentRef, '[data-role="protocol-version"]');
   const deviceRow = requiredElement<HTMLElement>(documentRef, '[data-role="device-row"]');
   const deviceName = requiredElement<HTMLElement>(documentRef, '[data-role="device-name"]');
+  const sessionCountRow = requiredElement<HTMLElement>(
+    documentRef,
+    '[data-role="session-count-row"]',
+  );
+  const sessionCount = requiredElement<HTMLElement>(documentRef, '[data-role="session-count"]');
   const retryButton = requiredElement<HTMLButtonElement>(documentRef, '[data-action="retry"]');
   const form = requiredElement<HTMLFormElement>(documentRef, '[data-role="pairing-form"]');
   const codeInput = requiredElement<HTMLInputElement>(documentRef, "#pairing-code");
@@ -33,6 +37,10 @@ export function createShellView(
   const disconnectButton = requiredElement<HTMLButtonElement>(
     documentRef,
     '[data-action="disconnect"]',
+  );
+  const sessionHeading = requiredElement<HTMLElement>(
+    documentRef,
+    '[data-role="session-heading"]',
   );
   const sessionTitle = requiredElement<HTMLElement>(documentRef, '[data-role="session-title"]');
   const sessionDetail = requiredElement<HTMLElement>(documentRef, '[data-role="session-detail"]');
@@ -82,6 +90,8 @@ export function createShellView(
     sessionPanel.dataset.viewState = sessionPresentationState(state);
     versionData.hidden = true;
     deviceRow.hidden = true;
+    sessionCountRow.hidden = true;
+    sessionHeading.hidden = false;
     retryButton.hidden = true;
     form.hidden = true;
     disconnectButton.hidden = true;
@@ -93,14 +103,12 @@ export function createShellView(
     retryButton.disabled = false;
     retryButton.textContent = "Проверить снова";
 
-    if ("manifest" in state && state.manifest !== undefined) {
-      protocolVersion.textContent = String(state.manifest.protocolVersion);
-      versionData.hidden = false;
-    }
-
     if ("status" in state) {
       deviceName.textContent = state.status.deviceName;
+      sessionCount.textContent = String(state.status.activeSessionCount);
       deviceRow.hidden = false;
+      sessionCountRow.hidden = false;
+      versionData.hidden = false;
     }
 
     switch (state.kind) {
@@ -158,8 +166,8 @@ export function createShellView(
         title.textContent = "Безопасное подключение активно";
         detail.textContent = "Этот браузер подтверждён телефоном.";
         sessionTitle.textContent = "Браузер подключён";
-        sessionDetail.textContent =
-          `Активных браузеров: ${state.status.activeSessionCount}.`;
+        sessionDetail.textContent = "";
+        sessionHeading.hidden = true;
         disconnectButton.hidden = false;
         break;
       case "reconnecting":
