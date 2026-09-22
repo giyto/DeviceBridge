@@ -17,7 +17,8 @@ class WebStaticRouteTest {
         assertTrue(response.header("content-type").contains("text/html"))
         assertEquals("no-store", response.header("cache-control"))
         assertEquals(
-            "default-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'",
+            "default-src 'self'; script-src 'self' 'sha256-F5EhQ4Xw10HZb4yMlvyeV6RnFM6rJV0SIN4Hvm5VCkc='; " +
+                "connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'",
             response.header("content-security-policy"),
         )
         assertEquals("nosniff", response.header("x-content-type-options"))

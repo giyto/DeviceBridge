@@ -15,13 +15,15 @@
     "pretest": "vite build",
     "test": "vitest run",
     "test:file-transfer-gate": "playwright test --config playwright.file-transfer.config.ts",
+    "test:release-policy": "node --test scripts/release-policy-scan.test.mjs",
     "test:compatibility": "playwright test --config playwright.compatibility.config.ts",
     "test:visual": "playwright test --config playwright.visual.config.ts",
     "dev:file-transfer-gate": "vite --host 127.0.0.1 --port 4174 --strictPort",
     "dev:compatibility": "vite --host 127.0.0.1 --port 4176 --strictPort",
     "dev:visual": "vite --host 127.0.0.1 --port 4175 --strictPort",
     "test:watch": "vitest",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "verify:release-policy": "node --test scripts/release-policy-scan.test.mjs && node scripts/release-policy-scan.mjs ../app/src/main ../app/build.gradle.kts ../settings.gradle.kts ../gradle.properties ../gradle/libs.versions.toml src index.html ../app/src/main/assets/web"
   },
   "dependencies": {
     "@noble/hashes": "2.4.0"

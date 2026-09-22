@@ -13,6 +13,8 @@
 .externalNativeBuild
 .cxx
 local.properties
+*.jks
+*.keystore
 /node_modules/
 /web/node_modules/
 /web/.vite/
