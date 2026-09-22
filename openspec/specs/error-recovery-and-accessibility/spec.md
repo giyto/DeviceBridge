@@ -101,7 +101,7 @@ Android и web UI MUST явно различать initial loading, empty, ready
 
 ### Requirement: Recovery и accessibility поддерживаются в целевой матрице
 
-DeviceBridge MUST сохранять основные сценарии connection, recovery, cancellation и navigation на Android API 29 и API 37.1, в актуальных стабильных Chrome и Edge на Windows 10 и 11, при светлой и тёмной теме, увеличенном системном шрифте и browser viewport от 360 до 1920 пикселей.
+DeviceBridge MUST сохранять основные сценарии connection, recovery, cancellation и navigation на Android API 29 и API 37.1, в актуальных стабильных Chrome и Edge на Windows 11, при светлой и тёмной теме, увеличенном системном шрифте и browser viewport от 360 до 1920 пикселей.
 
 #### Scenario: Android используется с увеличенным шрифтом
 
