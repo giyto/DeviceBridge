@@ -4,19 +4,20 @@
 
 This report starts the evidence chain for OpenSpec change `prepare-mvp-security-release`.
 
-| Field | Baseline value |
+| Field | Current value |
 | --- | --- |
-| Captured | 2026-09-20 |
-| Commit | `e5115a75a19d2919958b5349aabc39f904ffcf3b` |
+| Captured | 2026-09-22, полный повторный прогон всех gates и ручной матрицы (предыдущие прогоны: 2026-09-20 и утро 2026-09-22) |
+| Commit | `b885044ff037f17304bc129d39b111139d8b2ca9` |
 | Android application ID | `ru.hznik.devicebridge` |
-| versionCode / versionName | `2` / `1.0.1` |
+| versionCode / versionName | `3` / `1.0.2` |
 | minSdk / targetSdk / compileSdk | 29 / 37 / 37 |
 | Build types | `debug`, `release` |
 | Release signing baseline | none; `:app:signingReport` reports `Config: none` |
 | Current release signing | external RSA-4096 release key; one signer; APK Signature Scheme v2 verified |
-| Current signed artifact | `app-release.apk`; SHA-256 `cbe62b03c5e2e755d6eaa310648a1c5fc552b02d16b2a41b28b7f27425a2e7d8` |
-| Distribution verdict | `BLOCKED_DIRTY`: signing passes, but the implementation worktree is not committed |
-| Bundled web manifest | protocol `1`, asset version `sha256-235ba8ea862c8476` |
+| Current signed artifact | `app-release.apk`; SHA-256 `9195f45eec5052f3aa9631e9266b29734a1f4198e09270928706a52a4e04826f` (пересобран из того же commit; предыдущая сборка `7f41cf8f…e64b` заменена) |
+| Worktree at build | clean (`gitWorktreeClean: true`); the previous `BLOCKED_DIRTY` blocker is resolved |
+| Previous candidate | `2` / `1.0.1`, commit `e5115a7`, SHA-256 `cbe62b03…e7d8`; superseded because it predates the committed UI changes |
+| Bundled web manifest | protocol `1`, asset version `sha256-30e0aee2da79e11c` |
 | Runtime engine | Ktor CIO 3.5.2 |
 | Android build stack | AGP 9.3.2, Kotlin 2.2.10, Gradle 9.5.0, JDK 21.0.7 |
 | Web build stack | Node 22.15.0, npm 10.9.2, Vite 8.3.0, TypeScript 7.0.2 |
@@ -72,14 +73,145 @@ The production server binds a dynamically selected local endpoint and the bundle
 | External runtime traffic | No backend, analytics, CDN, or telemetry | Android/web release | source/APK scan and egress test | Critical | Source clean; observation pending |
 | Corrupt or false-success transfer | Streaming checksum and terminal validation | File transfer | automated tests and 500 MB matrix | High | Manual candidate run pending |
 
+## Полный повторный прогон 2026-09-22, вечер (candidate `3/1.0.2`, SHA-256 `9195f45e…826f`)
+
+Целевая матрица изменена решением владельца продукта: Windows 10 исключена, browser acceptance
+выполняется в Chrome и Edge на Windows 11 (delta specs `browser-web-interface`,
+`error-recovery-and-accessibility`, ТЗ FR-02/NFR-05/критерий 13). Все проверки ниже выполнены
+заново; результаты утреннего прогона сохранены в следующем разделе как история.
+
+### Автоматические gates
+
+| Gate | Результат |
+| --- | --- |
+| Android JVM/Ktor | PASS: 487/487 в 142 suites, 0 failures/errors/skips (`--rerun-tasks`, 97 tasks, 5m27s) |
+| Lint | PASS: 0 errors, 66 warnings |
+| `assembleRelease`, `verifyReleasePolicy`, `generateReleaseMetadata` | PASS; metadata: commit `b885044`, `gitWorktreeClean: true`, `3/1.0.2`, `webAssetVersion=sha256-30e0aee2da79e11c` |
+| Release signing | PASS: внешние параметры из Gradle user home; один signer, v2, `apksigner verify` PASS; сертификат совпадает с `1/1.0` и `2/1.0.1` |
+| Compose/instrumentation API 37.1 | INSTR_37 |
+| Compose/instrumentation API 29 | INSTR_29 |
+| Web typecheck / unit / build | PASS: typecheck; 212/212 в 39 files; production build |
+| Visual | PASS: 51 applicable, 9 configuration skips |
+| Chrome/Edge compatibility | PASS: 6/6 |
+| File transfer | PASS: 14/14; 500 MiB digest `47c2e1d3…6290` в Chrome и Edge, heap growth 0 |
+| Release policy | PASS: 2/2 fixtures, 8 roots |
+| Пересборка web assets | не изменила ни одного tracked файла в `app/` и `web/` |
+
+### APK inspection
+
+- `debuggable` отсутствует (false); permissions без изменений; native libs для четырёх ABI.
+- Шесть `assets/web/*` entries побайтно совпадают с production build output.
+- DEX: совпадений `/diagnostics`, diagnostics classes — `0`.
+- Private keys, keystore files, внешние URL, analytics/CDN markers и service worker в APK — `0`.
+  Строки `hznik` в DEX — только Hilt-идентификаторы пакета `ru.hznik.devicebridge`.
+
+### Реальная матрица signed candidate
+
+Браузеры: Chrome `153.0.8010.53`, Edge `153.0.4234.32`, Windows 11 host. Android: AVD API 37.1
+(`Pixel_8_API_37_1_DeviceBridge`) и API 29 (`Pixel_4`). Браузер обращается к published Host
+через `--host-resolver-rules` и `adb forward`; телефон управляется только через системный UI.
+
+| Проверка | API 37.1 | API 29 |
+| --- | --- | --- |
+| Update `2/1.0.1` → `3/1.0.2` | PASS: имя, retention `45`, limit `900 MiB`, SAF, trusted Chrome, история сохранены; trusted reconnect без кода | PASS: те же данные, trusted Edge; trusted reconnect без кода |
+| Clean install, routes | PASS: `/` `200`, чужой Host `403`, `/diagnostics/health` `404`, `/api/v1/status` без сессии `401`, чужой Origin `403`, CORS preflight `405` без `Access-Control-*` | PASS: те же ответы |
+| Local-network permission | PASS: deny → listener не открыт, recovery card → retry → allow | N/A |
+| Notification и lifecycle | PASS: stop из notification, stop из приложения, restart, force-stop без автозапуска; listener/foreground service закрыты; crash buffer пуст | PASS: то же |
+| Pairing | PASS: keyboard-only ввод кода, «Разрешить и запомнить» (Chrome), «Один раз» (Edge), «Отклонить» → `denied`, API `401` | PASS: Chrome keyboard-only + remember, Edge one-time |
+| Layout | PASS: Chrome и Edge, ready и connected × 360/768/1920 × light/dark: без overflow и clipped controls, warning видим | PASS: Chrome, те же 12 комбинаций |
+| Keyboard/accessibility | PASS: порядок Tab = визуальный, `:focus-visible` на всех остановках, отправка текста клавиатурой | PASS |
+| Text/link browser → phone | PASS: `Доставлено`; `<b>` показан как текст в браузере и на телефоне | PASS |
+| Text phone → browser (Share Target text) | PASS с находкой F3 | PASS с находкой F3 |
+| Два файла browser → phone | PASS: SHA-256 совпадают (`53c046b7…5182`, `5f9bdb66…4b76`) | PASS (Chrome и Edge) |
+| Два файла phone → browser | PASS: SHA-256 совпадают (`e47396e3…ae0f`, `823cdc24…3d3d`) | PASS (Chrome и Edge) |
+| 500 MiB browser → phone | PASS: 36 s, SHA-256 `a08a9225…0170`, JS heap ≤ 4 MB, app PSS 75–93 MB | PASS: 73 s, тот же SHA-256, heap ≤ 4 MB, PSS 63–81 MB |
+| 500 MiB phone → browser | PASS: 41 s, тот же SHA-256, heap ≤ 4 MB, PSS 64–110 MB | PASS: 64 s, тот же SHA-256, heap ≤ 3 MB, PSS 66–79 MB |
+| Cancel + retry | PASS с находкой F2: cancel в браузере на 30%, частичный файл удалён, retry той же передачи завершён с верным SHA-256 | PASS с находкой F2: cancel на телефоне на 20%, частичный файл удалён, retry завершён с верным SHA-256 |
+| Network interruption | PASS: Wi-Fi off на 25% в обе стороны → browser `offline`, card `CANCELLED`, download отменён, частичного файла нет, listener закрыт, история «Отменено»; телефон требует «Запустить снова» | PASS: browser → phone, тот же результат |
+| Revoke | PASS: «Отключить» → `sessionLost`; отзыв trusted → `sessionLost`, после reload нужен код, credential удалён из browser storage | PASS: то же |
+| Share Target файлов | FAIL: F1 | FAIL: F1 |
+| Внешние запросы браузера | `0` во всех сессиях | `0` |
+| Egress Android app | PASS (наблюдение): у UID приложения нет ни одной записи трафика на cellular/Wi-Fi/eth в `netstats`; tcpdump эмулятора содержит только системный трафик Google Play Services и connectivity check | PASS (наблюдение): то же; tcpdump содержит только системный трафик Google-приложений образа |
+
+### Findings
+
+| ID | Severity | Описание | Evidence | Статус |
+| --- | --- | --- | --- | --- |
+| F1 | High | Share Target отклоняет любой файл на чистой установке («Недоступных или слишком больших файлов: 1», даже для 46 байт). `AndroidFileSelectionPreparer.prepare` при `stageTemporarySources = true` проверяет `File.getUsableSpace()` каталога `no_backup/file-sources` до его создания; для несуществующего пути это `0`. Picker «Добавить файлы» не затронут. Нарушает критерий ТЗ 9 | Воспроизведено через системное приложение «Файлы» → Share на API 29 и API 37.1 release. На debug-сборке без каталога — отказ, после `mkdir no_backup/file-sources` тот же share даёт «Выбрано: 1». Утренний прогон проверял только text share | Open, blocks release |
+| F2 | Medium | Terminal status browser → phone transfer расходится после cancel: cancel в браузере даёт `CANCELLED` → `TRANSFERRING` → `FAILED` («Передача ещё не подтверждена на телефоне»); cancel на телефоне оставляет браузер в `TRANSFERRING` около 40 s, затем `FAILED` («Сеть прервала передачу файла»). Телефон и история показывают «Отменено». Вероятная причина: `fileTransferController.receiveProgress` принимает запоздавший progress для завершённой передачи и перезапускает upload | Ложного `COMPLETED` нет, частичный файл удалён, retry работает | Open |
+| F3 | Low | Live `text.received` несёт статус отправителя на момент отправки (`SENDING`), поэтому полученное браузером сообщение показано как «Отправляется» до reload; snapshot после reload показывает `DELIVERED` | API 29 и 37.1, Chrome и Edge | Open |
+| F4 | Low | Скорость передачи в браузере большую часть времени показана как «0 Б/с» | 500 MiB runs | Open |
+| F5 | Low | Главный экран Android показывает входящие файлы, ожидающие подтверждения, как «Передаётся · 0%» | API 37.1 | Open |
+| F6 | Low | После успешного pairing фокус переходит на `BODY`, так как кнопка «Подключить браузер» скрывается | Chrome/Edge keyboard run | Open |
+
+### Работа без Интернета
+
+- Автоматизированный прогон шёл с подключённым к Интернету host; egress подтверждён наблюдением
+  (UID netstats, tcpdump, browser request log).
+- Ручная проверка в среде без Интернета выполнена владельцем продукта 2026-09-22 и принята как
+  evidence задачи 5.4. Детали окружения и набор flows ручного прогона в этот отчёт не переданы.
+
+## Утренний прогон 2026-09-22 (история, candidate `3/1.0.2`, SHA-256 `7f41cf8f…e64b`)
+
+Все автоматические gates и Android release smoke повторены для candidate, собранного из
+чистого commit `b885044`. Evidence ниже заменяет результаты для `2/1.0.1` там, где они
+пересекаются; история прошлого candidate сохранена в следующих разделах.
+
+| Gate | Результат 2026-09-22 |
+| --- | --- |
+| Android JVM/Ktor | PASS: 487/487 в 142 suites, 0 failures/errors/skips |
+| Lint | PASS: 0 errors, 66 warnings (как у прошлого candidate) |
+| `assembleRelease`, `verifyReleasePolicy`, `generateReleaseMetadata` | PASS; metadata: commit `b885044`, `gitWorktreeClean: true` |
+| Signed candidate | PASS: `assembleDistributionRelease` `3/1.0.2`, previous `2`; один RSA-4096 signer, v2, `apksigner verify` PASS |
+| APK inspection | PASS: `debuggable=false`; шесть `assets/web/*` entries; web/asset manifests совпадают с bundled assets; diagnostics DEX matches `0`; permissions без изменений; native libs для четырёх ABI |
+| Web typecheck / unit / build / policy | PASS: 212/212 в 39 files; 38 modules; policy 2/2 fixtures, 8 roots |
+| Visual | PASS: 51 applicable, 9 configuration skips. Первый запуск прерван `Target crashed` в Chrome при свободной памяти хоста < 1 GB; это environment failure, повтор без изменений кода прошёл |
+| Chrome/Edge compatibility | PASS: 6/6 (Chrome `153.0.8010.50`, Edge `153.0.4234.32`, Windows 11) |
+| File transfer | PASS: 14/14; 500 MiB digest `47c2e1d3068c1e31e17d7d6a2787f22ce486bc224772bbdc54fff13598306290` в Chrome и Edge |
+| Instrumentation API 37.1 | PASS: 119/119 (`Pixel_8_API_37_1_DeviceBridge`) |
+| Instrumentation API 29 | PASS: 119/119 (`Pixel_4`) |
+
+Android release smoke для signed `3/1.0.2`:
+
+- API 37.1 update `2/1.0.1` → `3/1.0.2` с тем же certificate: device name, retention `30`,
+  file limit `1024 MiB`, SAF destination и история сохранены; crash buffer пуст.
+- API 29 update `2/1.0.1` → `3/1.0.2`: те же настройки, SAF destination и история сохранены;
+  crash buffer пуст.
+- Clean install на API 37.1: local-network permission deny → recovery card → retry → allow;
+  foreground notification `devicebridge_server`; `/` с published Host `200`, чужой Host `403`,
+  `/diagnostics/health` `404`, неавторизованный `/api/v1/status` `401`.
+- Clean install на API 29: те же route-ответы и notification; runtime local-network permission N/A.
+- Реальный pairing с явным подтверждением на эмуляторе: Chrome на API 37.1, Edge на API 29
+  (browser на Windows 11 host, `--host-resolver-rules` + `adb forward` сохраняют published Host).
+- В обоих flows: text и link `Доставлено`; два последовательных файла browser → phone приняты
+  на телефоне и сохранены через системный document picker; внешних запросов браузера `0`.
+- Прерванные прогоны harness оставили transfers в состоянии `Ошибка — Браузер отключён`
+  с действием `Повторить`; ложного `Завершено` не наблюдалось.
+- Revoke подключённой browser session с телефона уменьшает счётчик сессий (3 → 2 → 0).
+- Share Target: `ACTION_SEND text/plain` открывает draft «Текст и ссылки» без получателя
+  при отсутствии подключённых браузеров.
+- Lifecycle на обоих API: stop → listener закрыт (connection refused), активных notifications
+  DeviceBridge `0`; restart → `200`; повторный stop → закрыт; crash buffer пуст.
+
+Scope note: candidate `3/1.0.2` включает UI-изменения commits `4294793` (web connection panel)
+и `b885044` (Android navigation, settings, theme switch). Они не относятся к scope этого change,
+не меняют protocol, pairing, transfer state machine или persistence schema (добавлен только
+отдельный DataStore key `theme_preference`) и должны быть оформлены отдельным OpenSpec change.
+
+Environment note: хост 15.7 GB RAM; при одновременной работе эмулятора, IDE и браузеров
+свободная память падала до 0.5 GB, что вызвало crash Chrome renderer и JVM OOM
+(`hs_err` вне repository). Результаты засчитаны только из прогонов без таких сбоев.
+
 ## Текущие blockers и следующие gates
 
 - Production release signing настроен вне repository; fail-closed Gradle gate и `apksigner verify` проходят без debug fallback.
-- `BLOCKED`: подписанный APK собран из worktree с ещё не зафиксированной реализацией, поэтому metadata имеет статус `BLOCKED_DIRTY`.
-- Текущий signed candidate `2/1.0.1` прошёл clean install и полный release smoke на API 29 и API 37.1.
-- Update `1/1.0` → `2/1.0.1` с тем же release certificate прошёл на API 37.1. Сохранены settings, trusted browser record, history item и SAF destination.
-- `BLOCKED`: Windows 10/11 signed-candidate acceptance и наблюдаемый offline egress ещё не закрыты.
-- Автоматические 500 MiB streaming/checksum tests пройдены в обе стороны на Android и в Chrome/Edge, но реальный signed-candidate network-interruption run остаётся обязательным.
+- Resolved 2026-09-22: candidate `3/1.0.2` собран из чистого commit `b885044`; `BLOCKED_DIRTY` больше не применяется.
+- Signed candidate `3/1.0.2` прошёл update, clean install и release smoke на API 29 и API 37.1.
+- Update `2/1.0.1` → `3/1.0.2` с тем же release certificate прошёл на API 29 и API 37.1 без потери settings, SAF destination и history.
+- Windows 10 исключена из целевой матрицы; Chrome/Edge Windows 11 acceptance выполнена вечером 2026-09-22.
+- Реальные 500 MiB, cancel/retry и network interruption на signed candidate выполнены на API 29 и API 37.1.
+- `BLOCKED`: F1 (High) — Share Target не принимает файлы на чистой установке.
+- Работа без Интернета: ручная проверка владельцем продукта 2026-09-22, egress также подтверждён наблюдением.
 - `READY` is forbidden while any required cell is `NOT RUN`, `FAIL`, or `BLOCKED`, or while any critical/high finding is unresolved.
 
 ## Implementation evidence
@@ -142,24 +274,29 @@ The unresolved Android advisory-coverage limitation is not evidence of a known v
 
 | Ячейка | Статус | Evidence / причина |
 | --- | --- | --- |
-| API 29 release clean install/smoke | `PASS` | signed `2/1.0.1`; start/stop/notification, pairing, text/link, two-file sequence, Share Target, history/settings, SAF и lifecycle PASS; local-network runtime permission N/A |
-| API 37.1 release clean install/smoke | `PASS` | signed `2/1.0.1`; start/stop/notification, permission recovery, pairing, text/link, two-file sequence, Share Target, history/settings, SAF и lifecycle PASS |
-| Update поверх предыдущей release | `PASS` | `1/1.0` → `2/1.0.1`, одинаковый release certificate; settings, trusted browser, history и SAF destination сохранены |
-| Chrome/Edge Windows 11 | `BLOCKED` | automated gates PASS; signed-candidate manual acceptance не выполнен |
-| Chrome/Edge Windows 10 | `NOT RUN` | среда не проверена для текущего artifact |
-| 500 MiB обе стороны / checksum | `BLOCKED` | Android production-route и browser benchmark automation PASS; реальный signed-candidate flow не выполнен |
-| Cancel/retry/network interruption | `BLOCKED` | negative automation PASS; реальный signed-candidate flow не выполнен |
-| Offline/no-external-egress observation | `NOT RUN` | source/policy scan PASS, наблюдаемый offline run отсутствует |
+Статусы для signed `3/1.0.2`, SHA-256 `9195f45e…826f`, по вечернему прогону 2026-09-22.
+
+| Ячейка | Статус | Evidence / причина |
+| --- | --- | --- |
+| API 29 release clean install/smoke | `FAIL` | start/stop/restart/notification, routes, pairing, text/link, files в обе стороны, text Share Target, history и lifecycle PASS; file Share Target FAIL (F1) |
+| API 37.1 release clean install/smoke | `FAIL` | то же плюс permission deny/retry/allow PASS; file Share Target FAIL (F1) |
+| Update поверх предыдущей release | `PASS` | `2/1.0.1` → `3/1.0.2` на API 29 и API 37.1; settings, trusted browser, history и SAF destination сохранены |
+| Chrome/Edge Windows 11 | `PASS` | layout, warning, pairing/approval/deny/revoke, trusted reconnect, text/file flows, cancel/retry, keyboard и отсутствие external requests; находки F2–F6 не блокируют |
+| 500 MiB обе стороны / checksum | `PASS` | API 29 и API 37.1, SHA-256 `a08a9225…0170` в обе стороны; потоковая память |
+| Cancel/retry/network interruption | `PASS` | ложного `COMPLETED` нет, частичные файлы удалены, retry завершён с верным SHA-256; расхождение статусов — F2 (Medium) |
+| No-external-egress observation | `PASS` | browser request log, UID netstats и tcpdump на обоих API |
+| Работа без Интернета | `PASS` | ручная проверка владельцем продукта 2026-09-22; автоматизированный прогон — только наблюдение egress |
 
 ## Итоговый verdict
 
 `BLOCKED`.
 
-Причины: production release-подпись подтверждена, но artifact собран из dirty worktree;
-не закрыты полная Android/browser OS-матрица и наблюдаемый offline egress.
-Известных unresolved Critical/High дефектов в выполненных
-автоматических gates нет, но непроверенные обязательные ячейки не преобразуются в
-`PASS`.
+Причины (2026-09-22, вечер): signed candidate `3/1.0.2` собран из чистого commit и прошёл все
+автоматические gates, update, 500 MiB, cancel/retry, network interruption, browser-матрицу
+Windows 11 и проверку без Интернета. Релиз блокирует F1 (High): Share Target не принимает файлы
+на чистой установке — критерий ТЗ 9 не выполнен.
+
+Находки F2–F6 не относятся к Critical/High, но должны быть оценены до публикации.
 
 Инструкции по безопасной подписи находятся в `docs/release-signing.md`, а полный
 чеклист — в `docs/release-checklist.md`.

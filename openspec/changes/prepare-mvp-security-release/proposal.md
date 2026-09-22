@@ -8,7 +8,7 @@
 - Провести security spike по обязательным мерам MVP: поверхность публичных маршрутов, token/pairing/trusted-browser lifecycle, Origin/Host/CORS, upload validation, encrypted storage, журналы, остановка сервера и отсутствие внешнего runtime-трафика.
 - Устранить найденные security/release blockers без расширения продуктового scope и повторно подтвердить негативные сценарии автоматическими тестами.
 - Подготовить release-вариант APK: production web assets, воспроизводимая версия bundle, отключённые debug-only diagnostics, корректные version metadata, подпись и проверяемая установка/обновление.
-- Добавить release checklist и evidence: dependency/security audit, отсутствие секретов и внешних endpoints, smoke-матрица API 29/API 37.1 и Chrome/Edge на Windows 10/11, checksum итогового APK и описание остаточных рисков LAN-only модели.
+- Добавить release checklist и evidence: dependency/security audit, отсутствие секретов и внешних endpoints, smoke-матрица API 29/API 37.1 и Chrome/Edge на Windows 11, checksum итогового APK и описание остаточных рисков LAN-only модели.
 - Обновить пользовательскую и техническую документацию так, чтобы ограничения HTTP, доверенной сети и локального хранения были заметны до передачи данных.
 
 ## Capabilities
@@ -19,7 +19,10 @@
 
 ### Modified Capabilities
 
-- Нет. Существующие пользовательские возможности и protocol contracts сохраняются; найденное расхождение с действующим контрактом должно исправляться в реализации и тестах без добавления новой функции.
+- `browser-web-interface`: целевая desktop-среда браузера сужается до Windows 11; Windows 10 исключена из матрицы MVP 1.0 решением владельца продукта.
+- `error-recovery-and-accessibility`: целевая матрица recovery и accessibility сужается до Chrome и Edge на Windows 11.
+
+Остальные пользовательские возможности и protocol contracts сохраняются; найденное расхождение с действующим контрактом должно исправляться в реализации и тестах без добавления новой функции.
 
 ## Impact
 
