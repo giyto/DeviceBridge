@@ -14,7 +14,9 @@ import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Icon
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.NavigationBarItemDefaults
@@ -186,9 +188,12 @@ fun DeviceBridgeApp(
                                 }
                             },
                             icon = {
-                                Text(
-                                    text = destination.symbol,
-                                    style = MaterialTheme.typography.labelLarge,
+                                Icon(
+                                    imageVector = destination.icon,
+                                    contentDescription = null,
+                                    modifier = Modifier
+                                        .size(28.dp)
+                                        .testTag("top_level_icon_${destination.route}"),
                                 )
                             },
                             label = { Text(destination.label) },
@@ -231,9 +236,12 @@ fun DeviceBridgeApp(
                                 }
                             },
                             icon = {
-                                Text(
-                                    text = destination.symbol,
-                                    style = MaterialTheme.typography.labelLarge,
+                                Icon(
+                                    imageVector = destination.icon,
+                                    contentDescription = null,
+                                    modifier = Modifier
+                                        .size(28.dp)
+                                        .testTag("top_level_icon_${destination.route}"),
                                 )
                             },
                             label = { Text(destination.label) },

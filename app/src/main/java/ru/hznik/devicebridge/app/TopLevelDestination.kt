@@ -1,23 +1,30 @@
 package ru.hznik.devicebridge.app
 
+import androidx.compose.ui.graphics.vector.ImageVector
+import ru.hznik.devicebridge.core.ui.BridgeIcons
+
 internal enum class TopLevelDestination(
     val route: String,
     val label: String,
-    val symbol: String,
 ) {
     Home(
         route = "home",
         label = "Главная",
-        symbol = "●",
     ),
     History(
         route = "history",
         label = "История",
-        symbol = "↺",
     ),
     Settings(
         route = "settings",
         label = "Настройки",
-        symbol = "⚙",
     ),
+    ;
+
+    val icon: ImageVector
+        get() = when (this) {
+            Home -> BridgeIcons.Home
+            History -> BridgeIcons.History
+            Settings -> BridgeIcons.Settings
+        }
 }

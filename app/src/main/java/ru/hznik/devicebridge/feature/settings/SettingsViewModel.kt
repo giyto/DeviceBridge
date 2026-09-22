@@ -15,6 +15,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.launch
 import ru.hznik.devicebridge.domain.file.HARD_MAX_FILE_BYTES
+import ru.hznik.devicebridge.domain.repository.ThemePreferenceRepository
 import ru.hznik.devicebridge.domain.settings.DestinationTree
 import ru.hznik.devicebridge.domain.settings.SettingsUpdateResult
 import ru.hznik.devicebridge.domain.settings.SettingsValidationError
@@ -41,6 +42,7 @@ class SettingsViewModel @Inject constructor(
     observeTrustedBrowsers: ObserveTrustedBrowsersUseCase,
     private val revokeTrustedBrowser: RevokeTrustedBrowserUseCase,
     private val revokeAllTrustedBrowsers: RevokeAllTrustedBrowsersUseCase,
+    private val themePreferenceRepository: ThemePreferenceRepository,
 ) : ViewModel() {
     private sealed interface LoadResult {
         data object Loading : LoadResult
@@ -66,6 +68,11 @@ class SettingsViewModel @Inject constructor(
                         .catch { emit(LoadResult.Failed) }
                 }
                 .collect(::applyLoadResult)
+        }
+        viewModelScope.launch {
+            themePreferenceRepository.themePreference.collect { preference ->
+                mutableUiState.update { it.copy(themePreference = preference) }
+            }
         }
         viewModelScope.launch {
             observeTrustedBrowsers().collect { browsers ->
@@ -143,6 +150,12 @@ class SettingsViewModel @Inject constructor(
                 )
             }
             SettingsAction.SaveDeviceName -> saveDeviceName()
+            is SettingsAction.ThemeSelected -> {
+                mutableUiState.update { it.copy(themePreference = action.value) }
+                viewModelScope.launch {
+                    themePreferenceRepository.updateThemePreference(action.value)
+                }
+            }
             SettingsAction.RetryLoad -> settingsReloadRevision.update(Int::inc)
             is SettingsAction.RetentionChanged -> mutableUiState.update {
                 it.copy(

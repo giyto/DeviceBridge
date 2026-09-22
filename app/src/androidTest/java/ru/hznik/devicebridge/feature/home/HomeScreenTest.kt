@@ -394,7 +394,7 @@ class HomeScreenTest {
     }
 
     @Test
-    fun connectionGuideCoversTrustedWifiPairingAndCanBeReopened() {
+    fun connectionGuideCoversTrustedWifiPairingAndTogglesFromItsHeader() {
         var state by mutableStateOf(ServerSessionUiState())
         composeRule.setContent {
             DeviceBridgeTheme {
@@ -407,6 +407,19 @@ class HomeScreenTest {
         ).assertIsDisplayed()
         composeRule.onNodeWithText(
             "Аккаунт и отдельная программа для компьютера не нужны.",
+        ).assertIsDisplayed()
+        composeRule.onNodeWithContentDescription("Скрыть инструкцию подключения")
+            .assertIsDisplayed()
+            .performClick()
+        composeRule.onNodeWithText(
+            "Подключите телефон и компьютер к одной доверенной Wi-Fi сети.",
+        ).assertDoesNotExist()
+        composeRule.onNodeWithText("Скрыть инструкцию").assertDoesNotExist()
+        composeRule.onNodeWithContentDescription("Показать инструкцию подключения")
+            .assertIsDisplayed()
+            .performClick()
+        composeRule.onNodeWithText(
+            "Подключите телефон и компьютер к одной доверенной Wi-Fi сети.",
         ).assertIsDisplayed()
 
         composeRule.runOnIdle {
@@ -435,13 +448,32 @@ class HomeScreenTest {
                 ),
             )
         }
-        composeRule.onNodeWithText("Показать инструкцию подключения")
+        composeRule.onNodeWithContentDescription("Скрыть инструкцию подключения")
             .performScrollTo()
             .assertIsDisplayed()
-            .performClick()
         composeRule.onNodeWithText("Откройте адрес на компьютере")
             .performScrollTo()
             .assertIsDisplayed()
+    }
+
+    @Test
+    fun collapsedConnectionGuideSurvivesSavedStateRestoration() {
+        val restorationTester = StateRestorationTester(composeRule)
+        restorationTester.setContent {
+            DeviceBridgeTheme {
+                HomeScreen(uiState = ServerSessionUiState())
+            }
+        }
+
+        composeRule.onNodeWithContentDescription("Скрыть инструкцию подключения")
+            .performClick()
+        restorationTester.emulateSavedInstanceStateRestore()
+
+        composeRule.onNodeWithContentDescription("Показать инструкцию подключения")
+            .assertIsDisplayed()
+        composeRule.onNodeWithText(
+            "Подключите телефон и компьютер к одной доверенной Wi-Fi сети.",
+        ).assertDoesNotExist()
     }
 
     @Test

@@ -17,6 +17,7 @@ import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.test.assertCountEquals
+import androidx.compose.ui.test.assertHeightIsEqualTo
 import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.onNodeWithTag
@@ -24,6 +25,7 @@ import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsSelected
+import androidx.compose.ui.test.assertWidthIsEqualTo
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
@@ -64,6 +66,20 @@ class DeviceBridgeNavigationTest {
 
         composeRule.onNodeWithText("DeviceBridge").performScrollTo().assertIsDisplayed()
         composeRule.onNodeWithContentDescription("Раздел Главная").assertIsSelected()
+    }
+
+    @Test
+    fun phoneBottomNavigationUsesProminentIcons() {
+        setAppContent()
+
+        TopLevelDestination.entries.forEach { destination ->
+            composeRule.onNodeWithTag(
+                "top_level_icon_${destination.route}",
+                useUnmergedTree = true,
+            )
+                .assertWidthIsEqualTo(28.dp)
+                .assertHeightIsEqualTo(28.dp)
+        }
     }
 
     @Test

@@ -1,6 +1,7 @@
 package ru.hznik.devicebridge.feature.settings
 
 import ru.hznik.devicebridge.domain.settings.DeviceSettings
+import ru.hznik.devicebridge.domain.settings.ThemePreference
 import ru.hznik.devicebridge.domain.trust.TrustedBrowserId
 
 enum class SettingsLoadState {
@@ -39,6 +40,7 @@ data class SettingsUiState(
     val revokingTrustedBrowserIds: Set<TrustedBrowserId> = emptySet(),
     val revokeAllTrustedBrowsersPending: Boolean = false,
     val trustedBrowsersError: String? = null,
+    val themePreference: ThemePreference? = null,
 )
 
 data class TrustedBrowserUiState(
@@ -67,6 +69,7 @@ sealed interface SettingsAction {
         val isAvailable: Boolean,
     ) : SettingsAction
     data object RevokeAllTrustedBrowsers : SettingsAction
+    data class ThemeSelected(val value: ThemePreference) : SettingsAction
 }
 
 sealed interface SettingsEffect {

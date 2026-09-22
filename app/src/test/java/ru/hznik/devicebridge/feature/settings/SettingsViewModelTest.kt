@@ -1,5 +1,7 @@
 package ru.hznik.devicebridge.feature.settings
 
+import ru.hznik.devicebridge.domain.repository.ThemePreferenceRepository
+import ru.hznik.devicebridge.domain.settings.ThemePreference
 import kotlinx.coroutines.async
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -72,6 +74,20 @@ class SettingsViewModelTest {
         assertEquals("Pixel 8", recreated.uiState.value.settings.deviceName)
         assertEquals("Pixel 8", recreated.uiState.value.deviceNameInput)
     }
+    @Test
+    fun themeSelectionIsShownImmediatelyAndPersisted() = runTest(dispatcher) {
+        val themeRepository = FakeThemePreferenceRepository()
+        val viewModel = viewModel(FakeSettingsRepository(), themeRepository = themeRepository)
+        runCurrent()
+        assertNull(viewModel.uiState.value.themePreference)
+
+        viewModel.onAction(SettingsAction.ThemeSelected(ThemePreference.DARK))
+        assertEquals(ThemePreference.DARK, viewModel.uiState.value.themePreference)
+        runCurrent()
+
+        assertEquals(ThemePreference.DARK, themeRepository.stored.value)
+    }
+
     @Test
     fun settingsReadFailureIsNotShownAsDefaultsAndCanBeRetried() = runTest(dispatcher) {
         val repository = FakeSettingsRepository().apply { failReads = true }
@@ -260,6 +276,7 @@ class SettingsViewModelTest {
         repository: SettingsRepository,
         trustedRepository: FakeTrustedBrowserRepository = FakeTrustedBrowserRepository(),
         sessionRepository: BrowserSessionRepository = FakeBrowserSessionRepository(trustedRepository),
+        themeRepository: ThemePreferenceRepository = FakeThemePreferenceRepository(),
     ) = SettingsViewModel(
         observeSettings = ObserveSettingsUseCase(repository),
         updateDeviceName = UpdateDeviceNameUseCase(repository),
@@ -269,7 +286,16 @@ class SettingsViewModelTest {
         observeTrustedBrowsers = ObserveTrustedBrowsersUseCase(trustedRepository),
         revokeTrustedBrowser = RevokeTrustedBrowserUseCase(sessionRepository),
         revokeAllTrustedBrowsers = RevokeAllTrustedBrowsersUseCase(sessionRepository),
+        themePreferenceRepository = themeRepository,
     )
+
+    private class FakeThemePreferenceRepository : ThemePreferenceRepository {
+        val stored = MutableStateFlow<ThemePreference?>(null)
+        override val themePreference: Flow<ThemePreference?> = stored
+        override suspend fun updateThemePreference(value: ThemePreference) {
+            stored.value = value
+        }
+    }
 
     private class FakeTrustedBrowserRepository : TrustedBrowserRepository {
         val browsers = MutableStateFlow(

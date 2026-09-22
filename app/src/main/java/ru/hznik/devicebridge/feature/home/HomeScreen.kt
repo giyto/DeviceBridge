@@ -2,26 +2,32 @@ package ru.hznik.devicebridge.feature.home
 
 import android.content.ClipData
 import android.content.res.Configuration
+import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.rememberCoroutineScope
@@ -31,14 +37,17 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalClipboard
 import androidx.compose.ui.platform.toClipEntry
 import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
+import ru.hznik.devicebridge.core.ui.BridgeIcons
 import ru.hznik.devicebridge.core.ui.ConnectionStatusCard
 import ru.hznik.devicebridge.core.ui.QuickActionCard
 import ru.hznik.devicebridge.core.ui.MetadataRow
@@ -64,11 +73,7 @@ fun HomeScreen(
     val statusContent = statusContent(uiState)
     val hasConnectedBrowser = uiState.activeBrowsers.isNotEmpty()
     var connectionGuideExpanded by rememberSaveable {
-        mutableStateOf(!hasConnectedBrowser)
-    }
-
-    LaunchedEffect(hasConnectedBrowser) {
-        connectionGuideExpanded = !hasConnectedBrowser
+        mutableStateOf(true)
     }
 
     Column(
@@ -99,20 +104,11 @@ fun HomeScreen(
             },
         )
 
-        if (connectionGuideExpanded) {
-            ConnectionGuideCard(
-                uiState = uiState,
-                canCollapse = hasConnectedBrowser,
-                onCollapse = { connectionGuideExpanded = false },
-            )
-        } else if (hasConnectedBrowser) {
-            OutlinedButton(
-                modifier = Modifier.fillMaxWidth(),
-                onClick = { connectionGuideExpanded = true },
-            ) {
-                Text("Показать инструкцию подключения")
-            }
-        }
+        ConnectionGuideCard(
+            uiState = uiState,
+            expanded = connectionGuideExpanded,
+            onToggle = { connectionGuideExpanded = !connectionGuideExpanded },
+        )
 
         if (
             uiState.status == HomeServerStatus.Running &&
@@ -205,14 +201,14 @@ fun HomeScreen(
                 supportingText = "Продолжайте в уже подтверждённом браузере.",
             )
             QuickActionCard(
-                symbol = "Aa",
+                icon = BridgeIcons.Text,
                 title = "Текст",
                 supportingText = uiState.textTransferStatus.supportingText(),
                 enabled = uiState.canSendText,
                 onClick = onOpenText,
             )
             QuickActionCard(
-                symbol = "⇧",
+                icon = BridgeIcons.Folder,
                 title = "Файлы",
                 supportingText = "Передать документ или изображение",
                 enabled = uiState.canSendFiles,
@@ -235,11 +231,22 @@ fun HomeScreen(
 @Composable
 private fun ConnectionGuideCard(
     uiState: ServerSessionUiState,
-    canCollapse: Boolean,
-    onCollapse: () -> Unit,
+    expanded: Boolean,
+    onToggle: () -> Unit,
 ) {
     Card(
-        modifier = Modifier.fillMaxWidth(),
+        onClick = onToggle,
+        modifier = Modifier
+            .fillMaxWidth()
+            .animateContentSize()
+            .semantics {
+                role = Role.Button
+                contentDescription = if (expanded) {
+                    "Скрыть инструкцию подключения"
+                } else {
+                    "Показать инструкцию подключения"
+                }
+            },
         shape = RoundedCornerShape(22.dp),
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.primaryContainer,
@@ -249,40 +256,47 @@ private fun ConnectionGuideCard(
             modifier = Modifier.padding(18.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            Text(
-                text = "Как подключить компьютер",
-                style = MaterialTheme.typography.titleLarge,
-                fontWeight = FontWeight.SemiBold,
-            )
-            Text("Подключите телефон и компьютер к одной доверенной Wi-Fi сети.")
-
-            if (uiState.status != HomeServerStatus.Running) {
-                Text("Запустите сервер на телефоне.")
-            } else {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
                 Text(
-                    text = "Откройте адрес на компьютере",
-                    style = MaterialTheme.typography.titleMedium,
+                    text = "Как подключить компьютер",
+                    style = MaterialTheme.typography.titleLarge,
                     fontWeight = FontWeight.SemiBold,
                 )
-                Text("Скопируйте актуальный адрес из блока ниже и откройте его в браузере.")
-                if (uiState.activeBrowsers.isEmpty()) {
-                    uiState.pairingCode?.let { code ->
-                        Text("Введите код $code и подтвердите браузер на телефоне.")
-                    }
-                } else {
-                    Text("Браузер подключён. Можно передавать текст и файлы.")
-                }
+                Text(
+                    text = if (expanded) "⌃" else "⌄",
+                    style = MaterialTheme.typography.titleLarge,
+                    color = MaterialTheme.colorScheme.onPrimaryContainer,
+                )
             }
 
-            Text(
-                text = "Аккаунт и отдельная программа для компьютера не нужны.",
-                color = MaterialTheme.colorScheme.onPrimaryContainer,
-            )
+            if (expanded) {
+                Text("Подключите телефон и компьютер к одной доверенной Wi-Fi сети.")
 
-            if (canCollapse) {
-                TextButton(onClick = onCollapse) {
-                    Text("Скрыть инструкцию")
+                if (uiState.status != HomeServerStatus.Running) {
+                    Text("Запустите сервер на телефоне.")
+                } else {
+                    Text(
+                        text = "Откройте адрес на компьютере",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    Text("Скопируйте актуальный адрес из блока ниже и откройте его в браузере.")
+                    if (uiState.activeBrowsers.isEmpty()) {
+                        uiState.pairingCode?.let { code ->
+                            Text("Введите код $code и подтвердите браузер на телефоне.")
+                        }
+                    } else {
+                        Text("Браузер подключён. Можно передавать текст и файлы.")
+                    }
                 }
+
+                Text(
+                    text = "Аккаунт и отдельная программа для компьютера не нужны.",
+                    color = MaterialTheme.colorScheme.onPrimaryContainer,
+                )
             }
         }
     }
@@ -583,12 +597,21 @@ private fun ServerDetailsCard(
         )
         MetadataRow(label = "Адрес", value = address, monospace = true)
         MetadataRow(label = "Время работы", value = formatUptime(uptimeSeconds))
-        TextButton(
+        FilledTonalButton(
             onClick = onCopy,
             modifier = Modifier.semantics {
                 contentDescription = "Скопировать адрес DeviceBridge"
             },
-        ) { Text("Копировать адрес") }
+            contentPadding = ButtonDefaults.ButtonWithIconContentPadding,
+        ) {
+            Icon(
+                imageVector = BridgeIcons.Copy,
+                contentDescription = null,
+                modifier = Modifier.size(ButtonDefaults.IconSize),
+            )
+            Spacer(Modifier.width(ButtonDefaults.IconSpacing))
+            Text("Копировать адрес")
+        }
         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
     }
 }

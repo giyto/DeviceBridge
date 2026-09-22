@@ -1,5 +1,6 @@
 package ru.hznik.devicebridge.feature.settings
 
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -9,6 +10,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
@@ -16,11 +18,13 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
@@ -30,9 +34,10 @@ import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import ru.hznik.devicebridge.core.ui.DestructiveActionButton
-import ru.hznik.devicebridge.core.ui.PrimaryActionButton
+import ru.hznik.devicebridge.domain.settings.ThemePreference
 import ru.hznik.devicebridge.core.ui.ScreenHeader
 import ru.hznik.devicebridge.core.ui.SectionHeader
+import ru.hznik.devicebridge.core.ui.TonalActionButton
 import ru.hznik.devicebridge.core.ui.dismissKeyboardOnUnconsumedTap
 @Composable
 fun SettingsScreen(
@@ -90,6 +95,24 @@ fun SettingsScreen(
                 }
             }
         } else {
+            item {
+                val systemDarkTheme = isSystemInDarkTheme()
+                SettingsCard(title = "Оформление") {
+                    DarkThemeRow(
+                        darkTheme = uiState.themePreference
+                            ?.let { it == ThemePreference.DARK }
+                            ?: systemDarkTheme,
+                        onDarkThemeChange = { dark ->
+                            onAction(
+                                SettingsAction.ThemeSelected(
+                                    if (dark) ThemePreference.DARK else ThemePreference.LIGHT,
+                                ),
+                            )
+                        },
+                    )
+                }
+            }
+
             item {
                 SettingsCard(title = "Устройство") {
                     SettingsTextField(
@@ -169,24 +192,17 @@ fun SettingsScreen(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.spacedBy(10.dp),
                         ) {
-                            Button(
+                            TonalActionButton(
+                                label = when (uiState.destinationAvailability) {
+                                    DestinationAvailability.NONE -> "Выбрать"
+                                    DestinationAvailability.UNAVAILABLE -> "Выбрать снова"
+                                    else -> "Изменить"
+                                },
                                 onClick = { onAction(SettingsAction.ChooseDestination) },
                                 enabled = !uiState.destinationState.isSaving,
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .semantics {
-                                        contentDescription =
-                                            "Выбрать папку для входящих файлов"
-                                    },
-                            ) {
-                                Text(
-                                    when (uiState.destinationAvailability) {
-                                        DestinationAvailability.NONE -> "Выбрать"
-                                        DestinationAvailability.UNAVAILABLE -> "Выбрать снова"
-                                        else -> "Изменить"
-                                    },
-                                )
-                            }
+                                modifier = Modifier.weight(1f),
+                                contentDescription = "Выбрать папку для входящих файлов",
+                            )
                             if (uiState.settings.destinationTree != null) {
                                 OutlinedButton(
                                     onClick = { onAction(SettingsAction.ClearDestination) },
@@ -204,7 +220,7 @@ fun SettingsScreen(
             }
 
             item {
-                SettingsCard(title = "Доверенные браузеры") {
+                SettingsCard(title = "Доверенные браузеры", showDivider = false) {
                     if (uiState.trustedBrowsers.isEmpty()) {
                         Text(
                             text = "Доверенных браузеров пока нет",
@@ -279,6 +295,7 @@ fun SettingsScreen(
 @Composable
 private fun SettingsCard(
     title: String,
+    showDivider: Boolean = true,
     content: @Composable () -> Unit,
 ) {
     Column(
@@ -287,7 +304,49 @@ private fun SettingsCard(
     ) {
         SectionHeader(title = title)
         content()
-        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+        if (showDivider) {
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+        }
+    }
+}
+
+@Composable
+private fun DarkThemeRow(
+    darkTheme: Boolean,
+    onDarkThemeChange: (Boolean) -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag("dark-theme-toggle")
+            .toggleable(
+                value = darkTheme,
+                role = Role.Switch,
+                onValueChange = onDarkThemeChange,
+            )
+            .padding(vertical = 4.dp),
+        horizontalArrangement = Arrangement.spacedBy(16.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            Text(
+                text = "Тёмная тема",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold,
+            )
+            Text(
+                text = "Светлая тема удобнее при ярком свете.",
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                style = MaterialTheme.typography.bodySmall,
+            )
+        }
+        Switch(
+            checked = darkTheme,
+            onCheckedChange = null,
+        )
     }
 }
 
@@ -318,12 +377,18 @@ private fun SettingsTextField(
             },
             singleLine = true,
             isError = fieldState.errorMessage != null,
-            supportingText = {
-                Text(fieldState.errorMessage ?: supportingText)
-            },
             keyboardOptions = keyboardOptions,
         )
-        PrimaryActionButton(
+        Text(
+            text = fieldState.errorMessage ?: supportingText,
+            color = if (fieldState.errorMessage != null) {
+                MaterialTheme.colorScheme.error
+            } else {
+                MaterialTheme.colorScheme.onSurfaceVariant
+            },
+            style = MaterialTheme.typography.bodySmall,
+        )
+        TonalActionButton(
             label = when {
                 fieldState.isSaving -> "Сохранение…"
                 isSaved -> "Сохранено"
