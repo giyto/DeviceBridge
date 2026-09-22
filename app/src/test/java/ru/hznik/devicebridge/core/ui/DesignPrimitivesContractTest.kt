@@ -124,7 +124,7 @@ class DesignPrimitivesContractTest {
         listOf(
             "ScreenHeader(",
             "SectionHeader(",
-            "PrimaryActionButton(",
+            "TonalActionButton(",
             "DestructiveActionButton(",
         ).forEach { primitive ->
             assertTrue("Settings is missing $primitive", settings.contains(primitive))

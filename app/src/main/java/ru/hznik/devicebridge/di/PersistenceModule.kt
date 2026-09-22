@@ -18,6 +18,7 @@ import javax.inject.Qualifier
 import javax.inject.Singleton
 import kotlinx.coroutines.CoroutineScope
 import ru.hznik.devicebridge.data.persistence.datastore.DataStoreSettingsRepository
+import ru.hznik.devicebridge.data.persistence.datastore.DataStoreThemePreferenceRepository
 import ru.hznik.devicebridge.data.persistence.room.DeviceBridgeDatabase
 import ru.hznik.devicebridge.data.persistence.room.HistoryDao
 import ru.hznik.devicebridge.data.persistence.room.RoomHistoryRepository
@@ -28,6 +29,7 @@ import ru.hznik.devicebridge.data.history.HistoryPersistenceFailureReporter
 import ru.hznik.devicebridge.data.text.TextTerminalHistoryRecorder
 import ru.hznik.devicebridge.domain.repository.HistoryRepository
 import ru.hznik.devicebridge.domain.repository.SettingsRepository
+import ru.hznik.devicebridge.domain.repository.ThemePreferenceRepository
 import ru.hznik.devicebridge.domain.repository.TrustedBrowserRepository
 import ru.hznik.devicebridge.domain.settings.androidDeviceName
 import ru.hznik.devicebridge.data.trust.AndroidKeystoreTrustedHmacKeyProvider
@@ -98,6 +100,12 @@ object PersistenceModule {
         dataStore = dataStore,
         defaultDeviceName = defaultDeviceName,
     )
+
+    @Provides
+    @Singleton
+    fun provideThemePreferenceRepository(
+        dataStore: DataStore<Preferences>,
+    ): ThemePreferenceRepository = DataStoreThemePreferenceRepository(dataStore)
 
     @Provides
     @Singleton

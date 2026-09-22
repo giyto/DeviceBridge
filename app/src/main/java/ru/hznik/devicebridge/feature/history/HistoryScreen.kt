@@ -5,10 +5,13 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
@@ -89,23 +92,30 @@ fun HistoryScreen(
         }
 
         item {
-            HistoryFilterTrigger(
-                filter = uiState.filter,
-                onClick = { filterSheetVisible = true },
-            )
-        }
-
-        if (uiState.records.isNotEmpty()) {
-            item {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.End,
-                ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(IntrinsicSize.Min),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                HistoryFilterTrigger(
+                    filter = uiState.filter,
+                    onClick = { filterSheetVisible = true },
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxHeight(),
+                )
+                if (uiState.records.isNotEmpty()) {
                     OutlinedButton(
                         onClick = { onAction(HistoryAction.RequestClear) },
                         enabled = !uiState.isMutating,
+                        modifier = Modifier
+                            .fillMaxHeight()
+                            .semantics { contentDescription = "Очистить историю" },
+                        shape = RoundedCornerShape(20.dp),
+                        contentPadding = PaddingValues(horizontal = 16.dp),
                     ) {
-                        Text("Очистить историю")
+                        Text("Очистить")
                     }
                 }
             }
@@ -229,12 +239,12 @@ fun HistoryScreen(
 private fun HistoryFilterTrigger(
     filter: ru.hznik.devicebridge.domain.history.HistoryFilter,
     onClick: () -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     val activeCount = filter.activeCount()
     OutlinedButton(
         onClick = onClick,
-        modifier = Modifier
-            .fillMaxWidth()
+        modifier = modifier
             .testTag("history-filter-trigger")
             .semantics {
                 contentDescription = "Открыть фильтры истории. Активно: " + activeCount

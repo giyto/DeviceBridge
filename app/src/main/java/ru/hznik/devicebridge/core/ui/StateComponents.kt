@@ -16,9 +16,11 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
@@ -287,6 +289,45 @@ fun PrimaryActionButton(
         Text(label)
     }
 }
+/**
+ * Calm filled action for repeated, low-risk commands (for example "Save" in forms)
+ * where a saturated primary button would dominate the screen.
+ */
+@Composable
+fun TonalActionButton(
+    label: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+    loading: Boolean = false,
+    contentDescription: String = "Действие: $label",
+) {
+    FilledTonalButton(
+        onClick = onClick,
+        enabled = enabled && !loading,
+        modifier = modifier
+            .fillMaxWidth()
+            .semantics {
+                this.contentDescription = contentDescription
+                if (loading) stateDescription = "Выполняется"
+            },
+        colors = ButtonDefaults.filledTonalButtonColors(
+            containerColor = MaterialTheme.colorScheme.primaryContainer,
+            contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+        ),
+    ) {
+        if (loading) {
+            CircularProgressIndicator(
+                modifier = Modifier.size(18.dp),
+                strokeWidth = 2.dp,
+                color = MaterialTheme.colorScheme.onPrimaryContainer,
+            )
+            Spacer(modifier = Modifier.width(BridgeSpacing.small))
+        }
+        Text(label)
+    }
+}
+
 @Composable
 fun SecondaryActionButton(
     label: String,

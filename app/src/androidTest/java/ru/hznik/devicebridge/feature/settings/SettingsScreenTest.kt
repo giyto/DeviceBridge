@@ -14,6 +14,7 @@ import androidx.compose.ui.test.assertTextContains
 import androidx.compose.ui.test.click
 import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsOn
 import androidx.compose.ui.test.assertTextEquals
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
@@ -31,6 +32,7 @@ import org.junit.Rule
 import org.junit.Test
 import ru.hznik.devicebridge.domain.settings.DestinationTree
 import ru.hznik.devicebridge.domain.settings.DeviceSettings
+import ru.hznik.devicebridge.domain.settings.ThemePreference
 import ru.hznik.devicebridge.domain.trust.TrustedBrowserId
 
 class SettingsScreenTest {
@@ -68,12 +70,12 @@ class SettingsScreenTest {
         composeRule.onNodeWithContentDescription("Поле имени телефона")
             .performTextReplacement("Мой телефон")
         composeRule.onNodeWithContentDescription("Сохранить имя телефона").performClick()
-        composeRule.onNodeWithTag("settings-list").performScrollToIndex(3)
+        composeRule.onNodeWithTag("settings-list").performScrollToIndex(4)
         composeRule.onNodeWithText("Папка для входящих файлов").assertIsDisplayed()
         composeRule.onNodeWithContentDescription("Выбрать папку для входящих файлов")
             .performScrollTo()
             .performClick()
-        composeRule.onNodeWithTag("settings-list").performScrollToIndex(4)
+        composeRule.onNodeWithTag("settings-list").performScrollToIndex(5)
         composeRule.onNodeWithText("Доверенные браузеры").assertIsDisplayed()
 
         assertEquals(
@@ -171,13 +173,36 @@ class SettingsScreenTest {
             }
         }
 
-        composeRule.onNode(hasScrollAction()).performScrollToIndex(4)
+        composeRule.onNode(hasScrollAction()).performScrollToIndex(5)
         composeRule.onNodeWithText("Edge на Windows").assertIsDisplayed()
         composeRule.onNodeWithText("trusted-edge", substring = true).assertDoesNotExist()
         composeRule.onNodeWithContentDescription("Отозвать доступ Edge на Windows")
             .performClick()
 
         assertEquals(listOf(SettingsAction.RevokeTrustedBrowser(browserId)), actions)
+    }
+
+    @Test
+    fun darkThemeSwitchReflectsChoiceAndDispatchesOppositeTheme() {
+        val actions = mutableListOf<SettingsAction>()
+        composeRule.setContent {
+            MaterialTheme {
+                SettingsScreen(
+                    uiState = SettingsUiState(
+                        loadState = SettingsLoadState.CONTENT,
+                        themePreference = ThemePreference.DARK,
+                    ),
+                    onAction = actions::add,
+                )
+            }
+        }
+
+        composeRule.onNodeWithTag("dark-theme-toggle")
+            .assertIsDisplayed()
+            .assertIsOn()
+            .performClick()
+
+        assertEquals(listOf(SettingsAction.ThemeSelected(ThemePreference.LIGHT)), actions)
     }
 
     @Test
@@ -225,7 +250,7 @@ class SettingsScreenTest {
                 )
             }
         }
-        composeRule.onNodeWithTag("settings-list").performScrollToIndex(3)
+        composeRule.onNodeWithTag("settings-list").performScrollToIndex(4)
 
         composeRule.onNodeWithText("Выбрать снова").assertIsDisplayed()
         composeRule.onNodeWithContentDescription("Выбрать папку для входящих файлов")
