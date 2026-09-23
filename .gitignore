@@ -22,3 +22,7 @@ local.properties
 /web/playwright-report/
 /app/src/main/assets/web/*
 !/app/src/main/assets/web/.gitkeep
+
+# JVM crash reports
+hs_err_pid*.log
+replay_pid*.log
