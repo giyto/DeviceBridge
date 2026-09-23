@@ -49,6 +49,8 @@ class HomeViewModel @Inject constructor(
     private val revokeBrowserSession: RevokeBrowserSessionUseCase,
     observeTextTransfers: ObserveTextTransfersUseCase,
     observeFileTransfers: ObserveFileTransfersUseCase,
+    private val autoAcceptStatus: ru.hznik.devicebridge.domain.file.AutoAcceptStatusSource =
+        ru.hznik.devicebridge.domain.file.AutoAcceptStatusSource.None,
 ) : ViewModel() {
     private val lifecycleState = observeServerLifecycle()
     private val browserSessionState = observeBrowserSessions()
@@ -77,7 +79,8 @@ class HomeViewModel @Inject constructor(
                 browserSessionState,
                 textTransferState,
                 fileTransferState,
-            ) { lifecycle, sessions, textTransfers, fileTransfers ->
+                autoAcceptStatus.autoAccepted,
+            ) { lifecycle, sessions, textTransfers, fileTransfers, _ ->
                 HomeSourceState(lifecycle, sessions, textTransfers, fileTransfers)
             }.collectLatest { source ->
                 val state = source.lifecycle
@@ -328,6 +331,7 @@ class HomeViewModel @Inject constructor(
                         direction = item.metadata.direction,
                         phase = item.phase,
                         bytesTransferred = item.bytesTransferred,
+                        autoAccepted = item.metadata.id in autoAcceptStatus.autoAccepted.value,
                     )
                 }
             } else {

@@ -60,6 +60,7 @@ data class HomeFileTransferUiState(
     val direction: FileTransferDirection,
     val phase: FileTransferPhase,
     val bytesTransferred: Long,
+    val autoAccepted: Boolean = false,
 ) {
     val progressPercent: Int
         get() = if (sizeBytes == 0L) {

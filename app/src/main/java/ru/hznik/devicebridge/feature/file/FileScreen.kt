@@ -23,6 +23,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.liveRegion
@@ -181,11 +182,29 @@ private fun TransferCard(
             FileTransferPhase.FAILED -> StateTone.ERROR
         },
         modifier = Modifier.semantics {
-            contentDescription = "Этап передачи ${item.displayName}: ${item.phase.label()}"
+            contentDescription = "Этап передачи ${item.displayName}: ${item.phase.label()}" +
+                if (item.autoAccepted) ", принят автоматически" else ""
             liveRegion = LiveRegionMode.Polite
         },
         content = {
             FileTypeBadge(item.mimeType)
+            if (item.autoAccepted) {
+                Text(
+                    text = item.senderLabel
+                        ?.let { "Принят автоматически от $it" }
+                        ?: "Принят автоматически",
+                    color = MaterialTheme.colorScheme.primary,
+                    style = MaterialTheme.typography.bodyMedium,
+                    modifier = Modifier.testTag("auto-accepted-${item.id.value}"),
+                )
+            }
+            if (item.autoAcceptPaused && item.awaitsApproval) {
+                Text(
+                    text = "Автоприём приостановлен: папка недоступна. Примите файл вручную.",
+                    color = MaterialTheme.colorScheme.error,
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+            }
             if (item.hasActiveProgress) {
                 if (item.hasDeterminateProgress) {
                     LinearProgressIndicator(
@@ -214,19 +233,21 @@ private fun TransferCard(
         },
         actions = {
             if (item.awaitsApproval) {
+                // A paused auto-accept means the saved folder is unavailable, so accepting opens the picker.
+                val usableDefaultDestination = hasDefaultDestination && !item.autoAcceptPaused
                 Button(
                     onClick = { onAction(FileAction.ApproveIncoming(item.id)) },
                     modifier = Modifier.fillMaxWidth(),
                 ) {
                     Text(
-                        if (hasDefaultDestination) {
+                        if (usableDefaultDestination) {
                             "Принять в выбранную папку"
                         } else {
                             "Принять и выбрать папку"
                         },
                     )
                 }
-                if (hasDefaultDestination) {
+                if (usableDefaultDestination) {
                     OutlinedButton(
                         onClick = { onAction(FileAction.ChangeIncomingDestination(item.id)) },
                         modifier = Modifier.fillMaxWidth(),

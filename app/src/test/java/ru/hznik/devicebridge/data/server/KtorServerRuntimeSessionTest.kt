@@ -84,6 +84,7 @@ class KtorServerRuntimeSessionTest {
         val completedFiles = CompletedFileRegistry()
         val destinationLeases = FileDestinationLeaseRegistry()
         val releasedLeases = mutableListOf<String>()
+        val autoAcceptEvents = mutableListOf<String>()
         val trackedId = ru.hznik.devicebridge.domain.file.FileTransferId("tracked-file")
         fileSources.register(trackedId, "content://source")
         completedFiles.register(trackedId, "content://completed")
@@ -119,6 +120,10 @@ class KtorServerRuntimeSessionTest {
                 wallClockMs = { 1_000_000 },
             ),
             monotonicClock = clock,
+            autoAccept = object : ru.hznik.devicebridge.data.file.AutoAcceptLifecycle {
+                override fun activate() { autoAcceptEvents += "activate" }
+                override fun deactivate() { autoAcceptEvents += "deactivate" }
+            },
         ).create()
         val endpoint = runtime.start()
         try {
@@ -126,7 +131,9 @@ class KtorServerRuntimeSessionTest {
             assertEquals(503, before.statusCode())
             assertEquals(BrowserSessionPhase.INACTIVE, sessions.state.value.phase)
 
+            assertTrue(autoAcceptEvents.isEmpty())
             runtime.activateSessionGeneration(1)
+            assertEquals(listOf("activate"), autoAcceptEvents)
 
             val active = challenge(endpoint.port, endpoint.host, endpoint.port)
             assertEquals(200, active.statusCode())
@@ -154,6 +161,7 @@ class KtorServerRuntimeSessionTest {
             assertFalse(pending.isCompleted)
 
             runtime.closeSessionGeneration()
+            assertEquals(listOf("activate", "deactivate"), autoAcceptEvents)
             assertEquals(BrowserSessionPhase.INACTIVE, sessions.state.value.phase)
             assertTrue(textTransfers.state.value.items.isEmpty())
             assertEquals(null, fileSources.sourceUri(trackedId))
@@ -181,6 +189,7 @@ class KtorServerRuntimeSessionTest {
             runtime.stop()
             scope.cancel()
         }
+        assertEquals(listOf("activate", "deactivate"), autoAcceptEvents)
     }
 
     private fun challenge(listenerPort: Int, host: String, port: Int): RawResponse {

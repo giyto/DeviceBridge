@@ -27,6 +27,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
@@ -216,6 +217,13 @@ fun SettingsScreen(
                             }
                         }
                     }
+
+                    AutoAcceptRow(
+                        checked = uiState.settings.autoAcceptTrustedFiles,
+                        status = uiState.autoAcceptStatus,
+                        fieldState = uiState.autoAcceptState,
+                        onCheckedChange = { onAction(SettingsAction.AutoAcceptToggled(it)) },
+                    )
                 }
             }
 
@@ -347,6 +355,68 @@ private fun DarkThemeRow(
             checked = darkTheme,
             onCheckedChange = null,
         )
+    }
+}
+
+@Composable
+private fun AutoAcceptRow(
+    checked: Boolean,
+    status: AutoAcceptStatus,
+    fieldState: SettingsFieldState,
+    onCheckedChange: (Boolean) -> Unit,
+) {
+    val enabled = status != AutoAcceptStatus.NO_DESTINATION && !fieldState.isSaving
+    val statusText = when (status) {
+        AutoAcceptStatus.NO_DESTINATION -> "Сначала выберите папку для входящих файлов."
+        AutoAcceptStatus.OFF ->
+            "Файлы от запомненных браузеров будут сохраняться в выбранную папку без подтверждения."
+        AutoAcceptStatus.ON ->
+            "Включено. Одноразовые подключения по-прежнему требуют подтверждения."
+        AutoAcceptStatus.PAUSED ->
+            "Приостановлено: папка недоступна. Выберите папку снова."
+    }
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .testTag("auto-accept-toggle")
+                .toggleable(
+                    value = checked,
+                    enabled = enabled,
+                    role = Role.Switch,
+                    onValueChange = onCheckedChange,
+                )
+                .semantics { stateDescription = statusText }
+                .padding(vertical = 4.dp),
+            horizontalArrangement = Arrangement.spacedBy(16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                Text(
+                    text = "Автоприём от запомненных браузеров",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                Text(
+                    text = statusText,
+                    color = if (status == AutoAcceptStatus.PAUSED) {
+                        MaterialTheme.colorScheme.error
+                    } else {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
+            Switch(
+                checked = checked,
+                onCheckedChange = null,
+                enabled = enabled,
+            )
+        }
+        fieldState.errorMessage?.let { FieldError(it) }
     }
 }
 

@@ -38,6 +38,13 @@ class UpdateFileLimitUseCase(
         repository.updateEffectiveFileLimitBytes(value)
 }
 
+class UpdateAutoAcceptTrustedFilesUseCase(
+    private val repository: SettingsRepository,
+) {
+    suspend operator fun invoke(enabled: Boolean) =
+        repository.updateAutoAcceptTrustedFiles(enabled)
+}
+
 class ObserveTrustedBrowsersUseCase(
     private val repository: TrustedBrowserRepository,
 ) {

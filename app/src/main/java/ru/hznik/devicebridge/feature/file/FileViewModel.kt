@@ -1,5 +1,6 @@
 package ru.hznik.devicebridge.feature.file
 
+import ru.hznik.devicebridge.domain.file.AutoAcceptStatusSource
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -46,6 +47,7 @@ class FileViewModel private constructor(
     private val cancelTransfer: CancelFileTransferUseCase,
     private val retryTransfer: RetryFileTransferUseCase,
     private val nowEpochMillis: () -> Long,
+    autoAcceptStatus: AutoAcceptStatusSource,
 ) : ViewModel() {
     @Inject
     constructor(
@@ -56,6 +58,7 @@ class FileViewModel private constructor(
         approveTransfer: ApproveFileTransferUseCase,
         cancelTransfer: CancelFileTransferUseCase,
         retryTransfer: RetryFileTransferUseCase,
+        autoAcceptStatus: AutoAcceptStatusSource,
     ) : this(
         observeBrowserSessions,
         observeTransfers,
@@ -65,6 +68,7 @@ class FileViewModel private constructor(
         cancelTransfer,
         retryTransfer,
         System::currentTimeMillis,
+        autoAcceptStatus,
     )
 
     internal constructor(
@@ -77,6 +81,7 @@ class FileViewModel private constructor(
         retryTransfer: RetryFileTransferUseCase,
         nowEpochMillis: () -> Long,
         @Suppress("UNUSED_PARAMETER") testOnly: Unit = Unit,
+        autoAcceptStatus: AutoAcceptStatusSource = AutoAcceptStatusSource.None,
     ) : this(
         observeBrowserSessions,
         observeTransfers,
@@ -86,6 +91,7 @@ class FileViewModel private constructor(
         cancelTransfer,
         retryTransfer,
         nowEpochMillis,
+        autoAcceptStatus,
     )
     private data class LocalState(
         val selection: List<FileDraftItem> = emptyList(),
@@ -103,12 +109,23 @@ class FileViewModel private constructor(
         SharingStarted.Eagerly,
         DeviceSettings.defaults(),
     )
+    private val autoAcceptFlags = combine(
+        autoAcceptStatus.autoAccepted,
+        autoAcceptStatus.paused,
+    ) { accepted, paused -> AutoAcceptFlags(accepted, paused) }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, AutoAcceptFlags())
     private val sequence = AtomicLong()
     private val local = MutableStateFlow(
         LocalState(selectedSessionId = sessions.value.sessions.singleOrNull()?.id),
     )
     private val mutableUiState = MutableStateFlow(
-        buildUiState(sessions.value, transfers.value, settings.value, local.value),
+        buildUiState(
+            sessions.value,
+            transfers.value,
+            settings.value,
+            local.value,
+            AutoAcceptFlags(autoAcceptStatus.autoAccepted.value, autoAcceptStatus.paused.value),
+        ),
     )
     private val effectChannel = Channel<FileEffect>(Channel.BUFFERED)
 
@@ -120,13 +137,14 @@ class FileViewModel private constructor(
             sessions.collectLatest { reconcileRecipient(it.sessions) }
         }
         viewModelScope.launch {
-            combine(sessions, transfers, settings, local) {
+            combine(sessions, transfers, settings, local, autoAcceptFlags) {
                     browserState,
                     fileState,
                     settingsState,
                     localState,
+                    flags,
                 ->
-                buildUiState(browserState, fileState, settingsState, localState)
+                buildUiState(browserState, fileState, settingsState, localState, flags)
             }.collectLatest(mutableUiState::emit)
         }
     }
@@ -354,6 +372,7 @@ class FileViewModel private constructor(
         snapshot: FileTransferSnapshot,
         settingsState: DeviceSettings,
         localState: LocalState,
+        flags: AutoAcceptFlags,
     ): FileUiState {
         val selected = localState.selectedSessionId?.takeIf { id -> sessionState.sessions.any { it.id == id } }
         return FileUiState(
@@ -374,6 +393,11 @@ class FileViewModel private constructor(
                     bytesTransferred = item.bytesTransferred,
                     speedBytesPerSecond = item.speedBytesPerSecond,
                     failure = item.failure,
+                    senderLabel = sessionState.sessions
+                        .firstOrNull { it.id == item.ownerSessionId }
+                        ?.browserLabel,
+                    autoAccepted = item.metadata.id in flags.accepted,
+                    autoAcceptPaused = item.metadata.id in flags.paused,
                 )
             },
             isSubmitting = localState.isSubmitting,
@@ -386,6 +410,11 @@ class FileViewModel private constructor(
         )
     }
 }
+
+private data class AutoAcceptFlags(
+    val accepted: Set<ru.hznik.devicebridge.domain.file.FileTransferId> = emptySet(),
+    val paused: Set<ru.hznik.devicebridge.domain.file.FileTransferId> = emptySet(),
+)
 
 private data class PreparedDraftTransfer(
     val item: FileDraftItem,

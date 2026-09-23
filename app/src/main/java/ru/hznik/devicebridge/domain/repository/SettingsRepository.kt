@@ -15,4 +15,6 @@ interface SettingsRepository {
     suspend fun updateDestinationTree(value: DestinationTree?): SettingsUpdateResult
 
     suspend fun updateEffectiveFileLimitBytes(value: Long): SettingsUpdateResult
+
+    suspend fun updateAutoAcceptTrustedFiles(enabled: Boolean): SettingsUpdateResult
 }

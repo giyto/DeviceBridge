@@ -22,10 +22,20 @@ export interface FileTransferView {
   dispose(): void;
 }
 
+export interface FileTransferViewOptions {
+  /** Clock used to name pasted screenshots; injectable for tests. */
+  readonly now?: () => Date;
+}
+
+const PASTE_HINT = "Скриншот можно вставить из буфера обмена: Ctrl+V.";
+const PASTED_INTO_TEXT_MESSAGE = "Картинка добавлена в файлы.";
+
 export function createFileTransferView(
   documentRef: Document,
   actions: FileTransferActions,
+  options: FileTransferViewOptions = {},
 ): FileTransferView {
+  const now = options.now ?? (() => new Date());
   const section = required<HTMLElement>(documentRef, '[data-role="file-transfer"]');
   const input = required<HTMLInputElement>(documentRef, "#file-input");
   const dropZone = required<HTMLElement>(documentRef, '[data-role="file-drop-zone"]');
@@ -37,6 +47,7 @@ export function createFileTransferView(
   const empty = required<HTMLElement>(documentRef, '[data-role="file-transfer-empty"]');
   const count = required<HTMLElement>(documentRef, '[data-role="file-transfer-count"]');
   const announcer = required<HTMLElement>(documentRef, '[data-role="file-announcer"]');
+  const pasteHint = required<HTMLElement>(documentRef, '[data-role="file-paste-hint"]');
   const knownStatuses = new Map<string, string>();
   const transferCards = new Map<string, HTMLLIElement>();
   let pendingActionFocus: Readonly<{ transferId: string; source: "cancel" | "retry" }> | undefined;
@@ -76,7 +87,24 @@ export function createFileTransferView(
       input.click();
     }
   };
+  const onPaste = (event: ClipboardEvent): void => {
+    // Only an authorized, visible file section accepts clipboard files.
+    if (section.hidden) return;
+    const clipboard = event.clipboardData;
+    if (clipboard === null) return;
+    const files = Array.from(clipboard.files ?? []);
+    const inTextField = isTextEntry(event.target);
+    if (inTextField && clipboard.getData("text/plain").trim() !== "") return;
+    if (files.length === 0) return;
+    event.preventDefault();
+    select(namePastedFiles(files, now()));
+    if (inTextField) {
+      pasteHint.textContent = PASTED_INTO_TEXT_MESSAGE;
+      announcer.textContent = PASTED_INTO_TEXT_MESSAGE;
+    }
+  };
   input.addEventListener("change", onInput);
+  documentRef.addEventListener("paste", onPaste);
   confirm.addEventListener("click", onConfirm);
   clearDraft.addEventListener("click", onClearDraft);
   dropZone.addEventListener("dragover", onDragOver);
@@ -87,6 +115,7 @@ export function createFileTransferView(
     section.dataset.viewState = filePresentationState(state);
     if (state.kind === "inactive") {
       section.hidden = true;
+      pasteHint.textContent = PASTE_HINT;
       selection.replaceChildren();
       list.replaceChildren();
       error.hidden = true;
@@ -157,6 +186,7 @@ export function createFileTransferView(
     render,
     dispose: () => {
       input.removeEventListener("change", onInput);
+      documentRef.removeEventListener("paste", onPaste);
       confirm.removeEventListener("click", onConfirm);
       clearDraft.removeEventListener("click", onClearDraft);
       dropZone.removeEventListener("dragover", onDragOver);
@@ -164,6 +194,46 @@ export function createFileTransferView(
       dropZone.removeEventListener("keydown", onDropKey);
     },
   };
+}
+
+function isTextEntry(target: EventTarget | null): boolean {
+  if (typeof HTMLTextAreaElement !== "undefined" && target instanceof HTMLTextAreaElement) return true;
+  if (typeof HTMLInputElement !== "undefined" && target instanceof HTMLInputElement) {
+    return target.type !== "file" && target.type !== "checkbox";
+  }
+  return target instanceof HTMLElement && target.isContentEditable;
+}
+
+const IMAGE_EXTENSIONS: Readonly<Record<string, string>> = {
+  "image/png": "png",
+  "image/jpeg": "jpg",
+  "image/gif": "gif",
+  "image/webp": "webp",
+  "image/bmp": "bmp",
+};
+
+// Browsers name clipboard images generically ("image.png"); real file names are kept.
+function namePastedFiles(files: readonly File[], pastedAt: Date): File[] {
+  const base = "Скриншот " + formatPasteTimestamp(pastedAt);
+  let screenshots = 0;
+  return files.map((file) => {
+    if (!file.type.startsWith("image/") || !/^(image(\.\w+)?|blob)?$/i.test(file.name)) {
+      return file;
+    }
+    screenshots += 1;
+    const extension = IMAGE_EXTENSIONS[file.type] ?? file.name.split(".").at(-1) ?? "png";
+    const suffix = screenshots > 1 ? ` (${screenshots})` : "";
+    return new File([file], `${base}${suffix}.${extension}`, {
+      type: file.type,
+      lastModified: pastedAt.getTime(),
+    });
+  });
+}
+
+function formatPasteTimestamp(date: Date): string {
+  const pad = (value: number) => String(value).padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ` +
+    `${pad(date.getHours())}-${pad(date.getMinutes())}-${pad(date.getSeconds())}`;
 }
 
 function createTransferCard(

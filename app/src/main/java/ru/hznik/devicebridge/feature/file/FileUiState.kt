@@ -42,6 +42,9 @@ data class FileTransferItemUiState(
     val bytesTransferred: Long,
     val speedBytesPerSecond: Long,
     val failure: FileTransferFailure?,
+    val senderLabel: String? = null,
+    val autoAccepted: Boolean = false,
+    val autoAcceptPaused: Boolean = false,
 ) {
     val progress: Float
         get() = if (sizeBytes == 0L) {

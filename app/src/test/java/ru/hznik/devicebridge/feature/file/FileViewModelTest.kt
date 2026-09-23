@@ -335,6 +335,9 @@ class FileViewModelTest {
 
         override suspend fun updateEffectiveFileLimitBytes(value: Long): SettingsUpdateResult =
             SettingsUpdateResult.Updated(current.value)
+
+        override suspend fun updateAutoAcceptTrustedFiles(enabled: Boolean): SettingsUpdateResult =
+            SettingsUpdateResult.Updated(current.value)
     }
 
     private class FakeSessions(initial: BrowserSessionState) : BrowserSessionRepository {

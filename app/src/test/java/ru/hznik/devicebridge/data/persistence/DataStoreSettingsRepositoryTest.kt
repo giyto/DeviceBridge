@@ -14,6 +14,7 @@ import ru.hznik.devicebridge.data.persistence.datastore.DataStoreSettingsReposit
 import ru.hznik.devicebridge.domain.settings.DestinationTree
 import ru.hznik.devicebridge.domain.settings.DeviceSettings
 import ru.hznik.devicebridge.domain.settings.SettingsUpdateResult
+import ru.hznik.devicebridge.domain.settings.SettingsValidationError
 import ru.hznik.devicebridge.domain.file.HARD_MAX_FILE_BYTES
 
 class DataStoreSettingsRepositoryTest {
@@ -141,6 +142,31 @@ class DataStoreSettingsRepositoryTest {
         )
         assertEquals(512L * 1024 * 1024, migrated.effectiveFileLimitBytes)
     }
+    @Test
+    fun autoAcceptIsOffByDefaultAndCannotBeEnabledWithoutDestination() = runTest {
+        val repository = repository()
+
+        assertEquals(false, repository.settings.first().autoAcceptTrustedFiles)
+        assertEquals(
+            SettingsUpdateResult.Invalid(SettingsValidationError.AUTO_ACCEPT_DESTINATION),
+            repository.updateAutoAcceptTrustedFiles(true),
+        )
+        assertEquals(false, repository.settings.first().autoAcceptTrustedFiles)
+    }
+
+    @Test
+    fun autoAcceptPersistsWithDestinationAndSurvivesRecreation() = runTest {
+        val dataStore = InMemoryPreferencesDataStore()
+        val first = DataStoreSettingsRepository(dataStore)
+        first.updateDestinationTree(DestinationTree("content://documents/tree/devicebridge"))
+
+        assertTrue(first.updateAutoAcceptTrustedFiles(true) is SettingsUpdateResult.Updated)
+        assertEquals(true, DataStoreSettingsRepository(dataStore).settings.first().autoAcceptTrustedFiles)
+
+        assertTrue(first.updateAutoAcceptTrustedFiles(false) is SettingsUpdateResult.Updated)
+        assertEquals(false, DataStoreSettingsRepository(dataStore).settings.first().autoAcceptTrustedFiles)
+    }
+
     private fun repository(): DataStoreSettingsRepository =
         DataStoreSettingsRepository(InMemoryPreferencesDataStore())
 

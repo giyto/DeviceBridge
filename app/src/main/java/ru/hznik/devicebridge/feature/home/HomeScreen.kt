@@ -313,7 +313,8 @@ private fun ActiveFileTransfersSection(items: List<HomeFileTransferUiState>) {
             OperationalItem(
                 statusLabel = "Передаётся",
                 title = item.displayName,
-                metadata = "${item.direction.homeLabel()} · ${item.progressPercent}%",
+                metadata = "${item.direction.homeLabel()} · ${item.progressPercent}%" +
+                    if (item.autoAccepted) " · принят автоматически" else "",
                 tone = StateTone.LOADING,
             )
         }

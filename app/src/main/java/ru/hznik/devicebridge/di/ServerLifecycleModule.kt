@@ -152,6 +152,52 @@ abstract class ServerLifecycleModule {
 
         @Provides
         @Singleton
+        fun provideTrustedAutoAcceptController(
+            coordinator: FileTransferCoordinator,
+            browserSessions: BrowserSessionCoordinator,
+            observeSettings: ru.hznik.devicebridge.domain.usecase.ObserveSettingsUseCase,
+            destinationLeases: FileDestinationLeaseRegistry,
+            @dagger.hilt.android.qualifiers.ApplicationContext context: android.content.Context,
+        ): ru.hznik.devicebridge.data.file.TrustedAutoAcceptController {
+            val destinations = ru.hznik.devicebridge.data.file.PersistedDestinationPermissionController(
+                ru.hznik.devicebridge.data.file.ContentResolverDocumentTreePermissionGateway(
+                    context.contentResolver,
+                ),
+            )
+            return ru.hznik.devicebridge.data.file.TrustedAutoAcceptController(
+                transfers = coordinator,
+                sessions = browserSessions.state,
+                settings = observeSettings(),
+                destinations = ru.hznik.devicebridge.data.file.PersistedDestinationOpener(
+                    destinations::openPersisted,
+                ),
+                leases = destinationLeases,
+            )
+        }
+
+        @Provides
+        @Singleton
+        fun provideAutoAcceptStatusSource(
+            controller: ru.hznik.devicebridge.data.file.TrustedAutoAcceptController,
+        ): ru.hznik.devicebridge.domain.file.AutoAcceptStatusSource = controller
+
+        @Provides
+        @Singleton
+        fun provideAutoAcceptLifecycle(
+            controller: ru.hznik.devicebridge.data.file.TrustedAutoAcceptController,
+            @ApplicationScope applicationScope: CoroutineScope,
+        ): ru.hznik.devicebridge.data.file.AutoAcceptLifecycle {
+            // SAF permission checks block on the provider, so evaluation runs on the IO pool.
+            val ioScope = CoroutineScope(applicationScope.coroutineContext + kotlinx.coroutines.Dispatchers.IO)
+            return object : ru.hznik.devicebridge.data.file.AutoAcceptLifecycle {
+                override fun activate() = controller.start(ioScope)
+
+                override fun deactivate() = controller.stop()
+            }
+        }
+
+        @Provides
+        @Singleton
         fun provideFileTerminalHistoryRecorder(
             historyRepository: ru.hznik.devicebridge.domain.repository.HistoryRepository,
             browserSessions: BrowserSessionCoordinator,

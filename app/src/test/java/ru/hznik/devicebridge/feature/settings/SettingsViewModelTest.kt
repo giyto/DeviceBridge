@@ -33,6 +33,7 @@ import ru.hznik.devicebridge.domain.settings.DeviceSettings
 import ru.hznik.devicebridge.domain.settings.SettingsUpdateResult
 import ru.hznik.devicebridge.domain.settings.SettingsValidationError
 import ru.hznik.devicebridge.domain.usecase.ObserveSettingsUseCase
+import ru.hznik.devicebridge.domain.usecase.UpdateAutoAcceptTrustedFilesUseCase
 import ru.hznik.devicebridge.domain.usecase.UpdateDestinationTreeUseCase
 import ru.hznik.devicebridge.domain.usecase.UpdateDeviceNameUseCase
 import ru.hznik.devicebridge.domain.usecase.UpdateFileLimitUseCase
@@ -272,6 +273,63 @@ class SettingsViewModelTest {
         )
     }
 
+    @Test
+    fun autoAcceptCannotBeEnabledWithoutDestination() = runTest(dispatcher) {
+        val repository = FakeSettingsRepository()
+        val viewModel = viewModel(repository)
+        runCurrent()
+
+        assertEquals(AutoAcceptStatus.NO_DESTINATION, viewModel.uiState.value.autoAcceptStatus)
+        viewModel.onAction(SettingsAction.AutoAcceptToggled(true))
+        runCurrent()
+
+        assertFalse(repository.current.value.autoAcceptTrustedFiles)
+        assertEquals(0, repository.autoAcceptWrites)
+        assertTrue(requireNotNull(viewModel.uiState.value.autoAcceptState.errorMessage).isNotBlank())
+    }
+
+    @Test
+    fun autoAcceptTogglesWhenDestinationIsAvailable() = runTest(dispatcher) {
+        val repository = FakeSettingsRepository()
+        repository.current.value = repository.current.value.copy(destinationTree = TEST_TREE)
+        val viewModel = viewModel(repository)
+        runCurrent()
+        viewModel.onAction(SettingsAction.DestinationAvailabilityChecked(TEST_TREE.value, true))
+
+        assertEquals(AutoAcceptStatus.OFF, viewModel.uiState.value.autoAcceptStatus)
+        viewModel.onAction(SettingsAction.AutoAcceptToggled(true))
+        runCurrent()
+        assertTrue(repository.current.value.autoAcceptTrustedFiles)
+        assertEquals(AutoAcceptStatus.ON, viewModel.uiState.value.autoAcceptStatus)
+
+        viewModel.onAction(SettingsAction.AutoAcceptToggled(false))
+        runCurrent()
+        assertFalse(repository.current.value.autoAcceptTrustedFiles)
+        assertEquals(AutoAcceptStatus.OFF, viewModel.uiState.value.autoAcceptStatus)
+    }
+
+    @Test
+    fun enabledAutoAcceptIsPausedWhileDestinationIsUnavailable() = runTest(dispatcher) {
+        val repository = FakeSettingsRepository()
+        repository.current.value = repository.current.value.copy(
+            destinationTree = TEST_TREE,
+            autoAcceptTrustedFiles = true,
+        )
+        val viewModel = viewModel(repository)
+        runCurrent()
+
+        viewModel.onAction(SettingsAction.DestinationAvailabilityChecked(TEST_TREE.value, false))
+        assertEquals(AutoAcceptStatus.PAUSED, viewModel.uiState.value.autoAcceptStatus)
+        assertTrue(repository.current.value.autoAcceptTrustedFiles)
+
+        viewModel.onAction(SettingsAction.AutoAcceptToggled(true))
+        runCurrent()
+        assertEquals(0, repository.autoAcceptWrites)
+
+        viewModel.onAction(SettingsAction.DestinationAvailabilityChecked(TEST_TREE.value, true))
+        assertEquals(AutoAcceptStatus.ON, viewModel.uiState.value.autoAcceptStatus)
+    }
+
     private fun viewModel(
         repository: SettingsRepository,
         trustedRepository: FakeTrustedBrowserRepository = FakeTrustedBrowserRepository(),
@@ -283,6 +341,7 @@ class SettingsViewModelTest {
         updateRetentionDays = UpdateRetentionDaysUseCase(repository),
         updateDestinationTree = UpdateDestinationTreeUseCase(repository),
         updateFileLimit = UpdateFileLimitUseCase(repository),
+        updateAutoAcceptTrustedFiles = UpdateAutoAcceptTrustedFilesUseCase(repository),
         observeTrustedBrowsers = ObserveTrustedBrowsersUseCase(trustedRepository),
         revokeTrustedBrowser = RevokeTrustedBrowserUseCase(sessionRepository),
         revokeAllTrustedBrowsers = RevokeAllTrustedBrowsersUseCase(sessionRepository),
@@ -350,6 +409,7 @@ class SettingsViewModelTest {
         var failReads = false
         var failDeviceNameWrites = 0
         var deviceNameWriteAttempts = 0
+        var autoAcceptWrites = 0
         override val settings: Flow<DeviceSettings> = flow {
             if (failReads) throw java.io.IOException("settings unavailable")
             emitAll(current)
@@ -391,5 +451,18 @@ class SettingsViewModelTest {
             current.value = current.value.copy(effectiveFileLimitBytes = value)
             return SettingsUpdateResult.Updated(current.value)
         }
+
+        override suspend fun updateAutoAcceptTrustedFiles(enabled: Boolean): SettingsUpdateResult {
+            autoAcceptWrites += 1
+            if (enabled && current.value.destinationTree == null) {
+                return SettingsUpdateResult.Invalid(SettingsValidationError.AUTO_ACCEPT_DESTINATION)
+            }
+            current.value = current.value.copy(autoAcceptTrustedFiles = enabled)
+            return SettingsUpdateResult.Updated(current.value)
+        }
+    }
+
+    private companion object {
+        val TEST_TREE = DestinationTree("content://documents/tree/devicebridge")
     }
 }

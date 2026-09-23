@@ -245,6 +245,55 @@ test("file cancel and retry keep one transfer, keyboard focus and live feedback"
   await expect(page.locator('[data-role="file-transfer-list"] .file-card')).toHaveCount(1);
 });
 
+test("pasted clipboard image joins the file draft and uploads only after confirmation", async ({
+  page,
+}) => {
+  const offers: Array<{ items: Array<{ displayName: string; mimeType: string; sizeBytes: number }> }> = [];
+  await installConnectedSession(page, "paste-compatibility-token");
+  await page.route("**/api/v1/files", (route) => {
+    const body = JSON.parse(route.request().postData() ?? "{}");
+    offers.push(body);
+    const item = body.items[0];
+    return route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({
+        protocolVersion: 1,
+        messageId: "paste-offer-accepted",
+        type: "file.snapshot",
+        timestamp: Date.now(),
+        items: [{ metadata: item, status: "QUEUED", bytesTransferred: 0, speedBytesPerSecond: 0 }],
+      }),
+    });
+  });
+
+  await page.goto("/");
+  await expectConnected(page);
+  await expect(page.locator('[data-role="file-paste-hint"]')).toContainText("Ctrl+V");
+
+  await page.evaluate(() => {
+    const transfer = new DataTransfer();
+    transfer.items.add(new File([new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10])], "image.png", {
+      type: "image/png",
+    }));
+    document.body.dispatchEvent(new ClipboardEvent("paste", {
+      bubbles: true,
+      cancelable: true,
+      clipboardData: transfer,
+    }));
+  });
+
+  const draft = page.locator('[data-role="file-selection"]');
+  await expect(draft).toContainText(/Скриншот \d{4}-\d{2}-\d{2} \d{2}-\d{2}-\d{2}\.png/);
+  await page.waitForTimeout(300);
+  expect(offers).toHaveLength(0);
+
+  await page.getByRole("button", { name: "Подтвердить отправку" }).click();
+  await expect.poll(() => offers.length).toBe(1);
+  expect(offers[0]!.items[0]!.displayName).toMatch(/^Скриншот .+\.png$/);
+  expect(offers[0]!.items[0]!.mimeType).toBe("image/png");
+  expect(offers[0]!.items[0]!.sizeBytes).toBe(8);
+});
+
 async function installManifest(page: Page): Promise<void> {
   await page.route("**/web-manifest.json", (route) => route.fulfill({
     contentType: "application/json",

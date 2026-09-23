@@ -40,6 +40,56 @@ class FileScreenTest {
     @get:Rule val composeRule = createComposeRule()
 
     @Test
+    fun autoAcceptedTransferShowsLabelSenderAndAccessibleDescription() {
+        setScreen(
+            FileUiState(
+                transfers = listOf(
+                    item("auto", FileTransferPhase.TRANSFERRING, 5, 10).copy(
+                        senderLabel = "Chrome • Windows",
+                        autoAccepted = true,
+                    ),
+                ),
+            ),
+        )
+
+        composeRule.onNodeWithText("Принят автоматически от Chrome • Windows", useUnmergedTree = true)
+            .performScrollTo()
+            .assertIsDisplayed()
+        composeRule.onNodeWithContentDescription(
+            "Этап передачи auto.bin: Передаётся, принят автоматически",
+        ).assertIsDisplayed()
+    }
+
+    @Test
+    fun pausedAutoAcceptKeepsManualAcceptanceAvailable() {
+        val actions = mutableListOf<FileAction>()
+        setScreen(
+            FileUiState(
+                transfers = listOf(
+                    item("paused", FileTransferPhase.CONNECTING, 0, 10).copy(
+                        autoAcceptPaused = true,
+                    ),
+                ),
+                hasDefaultDestination = true,
+            ),
+            onAction = { actions += it },
+        )
+
+        composeRule.onNodeWithText(
+            "Автоприём приостановлен: папка недоступна. Примите файл вручную.",
+            useUnmergedTree = true,
+        ).performScrollTo().assertIsDisplayed()
+        composeRule.onNodeWithText("Принять в выбранную папку", useUnmergedTree = true)
+            .assertDoesNotExist()
+        composeRule.onNodeWithText("Выбрать другую папку", useUnmergedTree = true)
+            .assertDoesNotExist()
+        composeRule.onNodeWithText("Принять и выбрать папку", useUnmergedTree = true)
+            .performScrollTo()
+            .performClick()
+        assertEquals(listOf<FileAction>(FileAction.ApproveIncoming(FileTransferId("paused"))), actions)
+    }
+
+    @Test
     fun emptyStateOffersFileSelection() {
         setScreen(FileUiState())
         composeRule.onNodeWithText("Файлы").assertIsDisplayed()
@@ -339,8 +389,8 @@ class FileScreenTest {
             "Файл недоступен. Закрыть сообщение",
         ).assert(button)
     }
-    private fun setScreen(state: FileUiState) {
-        composeRule.setContent { DeviceBridgeTheme { FileScreen(state) } }
+    private fun setScreen(state: FileUiState, onAction: (FileAction) -> Unit = {}) {
+        composeRule.setContent { DeviceBridgeTheme { FileScreen(state, onAction = onAction) } }
     }
 
     private fun item(id: String, phase: FileTransferPhase, bytes: Long, size: Long) =
