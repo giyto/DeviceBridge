@@ -1,6 +1,7 @@
 package ru.hznik.devicebridge.di
 
 import android.content.Context
+import android.content.pm.ApplicationInfo
 import android.os.Build
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.PreferenceDataStoreFactory
@@ -47,6 +48,7 @@ import ru.hznik.devicebridge.domain.usecase.UpdateDestinationTreeUseCase
 import ru.hznik.devicebridge.domain.usecase.UpdateDeviceNameUseCase
 import ru.hznik.devicebridge.domain.usecase.UpdateFileLimitUseCase
 import ru.hznik.devicebridge.domain.usecase.UpdateAutoAcceptTrustedFilesUseCase
+import ru.hznik.devicebridge.domain.usecase.UpdateIdleStopTimeoutUseCase
 import ru.hznik.devicebridge.domain.usecase.UpdateRetentionDaysUseCase
 
 private const val DATABASE_NAME = "devicebridge.db"
@@ -95,11 +97,15 @@ object PersistenceModule {
     @Provides
     @Singleton
     fun provideSettingsRepository(
+        @ApplicationContext context: Context,
         dataStore: DataStore<Preferences>,
         @PhysicalDeviceName defaultDeviceName: String,
     ): SettingsRepository = DataStoreSettingsRepository(
         dataStore = dataStore,
         defaultDeviceName = defaultDeviceName,
+        // The one-minute idle stop exists only so E2E checks on debug builds do not wait.
+        allowDebugIdleTimeout =
+            context.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE != 0,
     )
 
     @Provides
@@ -227,6 +233,11 @@ object PersistenceModule {
     fun provideUpdateAutoAcceptTrustedFilesUseCase(
         repository: SettingsRepository,
     ): UpdateAutoAcceptTrustedFilesUseCase = UpdateAutoAcceptTrustedFilesUseCase(repository)
+
+    @Provides
+    fun provideUpdateIdleStopTimeoutUseCase(
+        repository: SettingsRepository,
+    ): UpdateIdleStopTimeoutUseCase = UpdateIdleStopTimeoutUseCase(repository)
 }
 
 @EntryPoint

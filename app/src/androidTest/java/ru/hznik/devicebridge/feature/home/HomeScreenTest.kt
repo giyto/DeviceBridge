@@ -70,6 +70,17 @@ class HomeScreenTest {
     }
 
     @Test
+    fun idleStopIsShownAsAPlainStopWithItsReason() {
+        setScreen(ServerSessionUiState(idleStoppedAfterMinutes = 30))
+
+        composeRule.onNodeWithText("Сервер остановлен").assertIsDisplayed()
+        composeRule.onNodeWithText("Остановлен автоматически: 30 минут без подключений.")
+            .assertIsDisplayed()
+        composeRule.onNodeWithText("Нужен повторный запуск").assertDoesNotExist()
+        composeRule.onNodeWithText("Запустить сервер").performScrollTo().assertIsEnabled()
+    }
+
+    @Test
     fun lifecycleFailureShowsOnlyItsApplicableRecoveryAction() {
         var received: HomeAction? = null
         val permissionFailure = ru.hznik.devicebridge.domain.error.UserFacingFailure(

@@ -24,6 +24,7 @@ data class DeviceSettings(
     val destinationTree: DestinationTree?,
     val effectiveFileLimitBytes: Long,
     val autoAcceptTrustedFiles: Boolean = false,
+    val idleStopTimeout: IdleStopTimeout = IdleStopTimeout.DEFAULT,
 ) {
     init {
         require(deviceName.isNotBlank())
@@ -53,4 +54,27 @@ enum class SettingsValidationError {
     RETENTION_DAYS,
     FILE_LIMIT,
     AUTO_ACCEPT_DESTINATION,
+    IDLE_STOP_TIMEOUT,
+}
+
+/** How long the server may stay without live browser connections before it stops itself. */
+enum class IdleStopTimeout(val minutes: Int?, val storageValue: String) {
+    OFF(null, "off"),
+    MIN_15(15, "15"),
+    MIN_30(30, "30"),
+    MIN_60(60, "60"),
+
+    /** Only offered by debug builds so E2E checks do not wait 15 minutes. */
+    DEBUG_1(1, "debug_1"),
+    ;
+
+    companion object {
+        val DEFAULT = MIN_30
+        val USER_CHOICES = listOf(OFF, MIN_15, MIN_30, MIN_60)
+
+        fun fromStorage(value: String?, allowDebug: Boolean): IdleStopTimeout {
+            val parsed = entries.firstOrNull { it.storageValue == value } ?: return DEFAULT
+            return if (parsed == DEBUG_1 && !allowDebug) DEFAULT else parsed
+        }
+    }
 }

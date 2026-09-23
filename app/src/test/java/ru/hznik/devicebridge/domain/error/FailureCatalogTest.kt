@@ -299,6 +299,11 @@ class FailureCatalogTest {
                 FailureSeverity.RECOVERABLE,
                 RecoveryAction.SELECT_DESTINATION,
             ),
+            SettingsValidationError.IDLE_STOP_TIMEOUT to expected(
+                FailureCode.INVALID_PAYLOAD,
+                FailureSeverity.TERMINAL,
+                RecoveryAction.EDIT_SETTING,
+            ),
         )
 
         assertEquals(SettingsValidationError.entries.toSet(), settingsCases.keys)

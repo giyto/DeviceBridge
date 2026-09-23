@@ -4,6 +4,7 @@ import ru.hznik.devicebridge.domain.repository.SettingsRepository
 import ru.hznik.devicebridge.domain.repository.BrowserSessionRepository
 import ru.hznik.devicebridge.domain.repository.TrustedBrowserRepository
 import ru.hznik.devicebridge.domain.settings.DestinationTree
+import ru.hznik.devicebridge.domain.settings.IdleStopTimeout
 import ru.hznik.devicebridge.domain.trust.TrustedBrowserId
 
 class ObserveSettingsUseCase(
@@ -43,6 +44,13 @@ class UpdateAutoAcceptTrustedFilesUseCase(
 ) {
     suspend operator fun invoke(enabled: Boolean) =
         repository.updateAutoAcceptTrustedFiles(enabled)
+}
+
+class UpdateIdleStopTimeoutUseCase(
+    private val repository: SettingsRepository,
+) {
+    suspend operator fun invoke(value: IdleStopTimeout) =
+        repository.updateIdleStopTimeout(value)
 }
 
 class ObserveTrustedBrowsersUseCase(

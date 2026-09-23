@@ -41,6 +41,8 @@ import ru.hznik.devicebridge.data.file.FileDestinationLeaseRegistry
 import ru.hznik.devicebridge.data.file.FileSourceRegistry
 import ru.hznik.devicebridge.web.FileSessionEventBridge
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import ru.hznik.devicebridge.domain.usecase.ObserveTextTransfersUseCase
 import ru.hznik.devicebridge.domain.usecase.ReceiveTextFromBrowserUseCase
 import ru.hznik.devicebridge.domain.usecase.RetryTextTransferUseCase
@@ -298,11 +300,33 @@ abstract class ServerLifecycleModule {
 
         @Provides
         @Singleton
+        fun provideIdleStopController(
+            coordinator: ServerLifecycleCoordinator,
+            browserSessions: BrowserSessionCoordinator,
+            textTransfers: TextTransferRepository,
+            fileTransfers: FileTransferRepository,
+            observeSettings: ru.hznik.devicebridge.domain.usecase.ObserveSettingsUseCase,
+            clock: MonotonicClock,
+        ): ru.hznik.devicebridge.data.server.IdleStopController =
+            ru.hznik.devicebridge.data.server.IdleStopController(
+                lifecycle = coordinator.state,
+                activeConnections = browserSessions.activeConnectionCount,
+                sessions = browserSessions.state,
+                textTransfers = textTransfers.state,
+                fileTransfers = fileTransfers.state,
+                timeout = observeSettings().map { it.idleStopTimeout }.distinctUntilChanged(),
+                clock = clock,
+                wallClockMs = System::currentTimeMillis,
+            )
+
+        @Provides
+        @Singleton
         fun provideServerLifecycleRepository(
             coordinator: ServerLifecycleCoordinator,
             serviceCommands: ServerServiceCommandGateway,
         ): ServerLifecycleRepository = AndroidServerLifecycleRepository(
             state = coordinator.state,
+            lastStopReason = coordinator.lastStopReason,
             serviceCommands = serviceCommands,
         )
 

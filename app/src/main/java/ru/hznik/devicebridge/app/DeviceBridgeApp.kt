@@ -98,6 +98,7 @@ fun DeviceBridgeApp(
     navController: NavHostController = rememberNavController(),
     sharedTextDraft: SharedTextDraft? = null,
     sharedFileDraft: SharedFileDraft? = null,
+    startServerRequest: Long? = null,
     onSharedTextConsumed: (Long) -> Unit = {},
     onSharedFileConsumed: (Long) -> Unit = {},
     completedFileRegistry: CompletedFileRegistry? = null,
@@ -309,6 +310,12 @@ fun DeviceBridgeApp(
             navController.navigate(TEXT_ROUTE) {
                 launchSingleTop = true
             }
+        }
+    }
+    LaunchedEffect(startServerRequest, currentRoute) {
+        val home = TopLevelDestination.Home.route
+        if (startServerRequest != null && currentRoute != null && currentRoute != home) {
+            navController.navigate(home) { launchSingleTop = true }
         }
     }
     LaunchedEffect(sharedFileDraft?.requestId, currentRoute) {

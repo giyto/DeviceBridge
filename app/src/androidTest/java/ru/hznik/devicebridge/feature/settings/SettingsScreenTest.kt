@@ -16,6 +16,8 @@ import androidx.compose.ui.test.assertTextContains
 import androidx.compose.ui.test.click
 import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsNotSelected
+import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.assertIsOn
 import androidx.compose.ui.test.assertTextEquals
 import androidx.compose.ui.test.junit4.createComposeRule
@@ -26,14 +28,18 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextReplacement
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.hasScrollAction
+import androidx.compose.ui.test.performScrollToNode
+import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.hasTestTag
+import androidx.compose.ui.test.SemanticsNodeInteraction
 import androidx.compose.ui.test.performScrollTo
-import androidx.compose.ui.test.performScrollToIndex
 import androidx.compose.ui.unit.Density
 import org.junit.Assert.assertEquals
 import org.junit.Rule
 import org.junit.Test
 import ru.hznik.devicebridge.domain.settings.DestinationTree
 import ru.hznik.devicebridge.domain.settings.DeviceSettings
+import ru.hznik.devicebridge.domain.settings.IdleStopTimeout
 import ru.hznik.devicebridge.domain.settings.ThemePreference
 import ru.hznik.devicebridge.domain.trust.TrustedBrowserId
 
@@ -54,14 +60,14 @@ class SettingsScreenTest {
             }
         }
 
-        composeRule.onNodeWithTag("auto-accept-toggle").performScrollTo().assertIsNotEnabled()
+        scrollToTag("auto-accept-toggle").performScrollTo().assertIsNotEnabled()
         composeRule.onNodeWithText("Сначала выберите папку для входящих файлов.").assertIsDisplayed()
 
         state = state.copy(
             settings = state.settings.copy(destinationTree = tree),
             destinationAvailability = DestinationAvailability.AVAILABLE,
         )
-        composeRule.onNodeWithTag("auto-accept-toggle").performScrollTo().assertIsEnabled().assertIsOff()
+        scrollToTag("auto-accept-toggle").performScrollTo().assertIsEnabled().assertIsOff()
         composeRule.onNodeWithTag("auto-accept-toggle").performClick()
         assertEquals(listOf<SettingsAction>(SettingsAction.AutoAcceptToggled(true)), actions)
 
@@ -69,9 +75,56 @@ class SettingsScreenTest {
             settings = state.settings.copy(autoAcceptTrustedFiles = true),
             destinationAvailability = DestinationAvailability.UNAVAILABLE,
         )
-        composeRule.onNodeWithTag("auto-accept-toggle").performScrollTo().assertIsOn()
+        scrollToTag("auto-accept-toggle").performScrollTo().assertIsOn()
         composeRule.onNodeWithText("Приостановлено: папка недоступна. Выберите папку снова.")
             .assertIsDisplayed()
+    }
+
+    @Test
+    fun idleStopSelectorShowsDefaultAndDispatchesChoice() {
+        val actions = mutableListOf<SettingsAction>()
+        composeRule.setContent {
+            MaterialTheme {
+                SettingsScreen(
+                    uiState = SettingsUiState(loadState = SettingsLoadState.CONTENT),
+                    onAction = { actions += it },
+                )
+            }
+        }
+
+        composeRule.onNodeWithText("Автоостановка без подключений").performScrollTo().assertIsDisplayed()
+        composeRule.onNodeWithTag("idle-stop-30").performScrollTo().assertIsSelected()
+        composeRule.onNodeWithTag("idle-stop-off").performScrollTo().assertIsNotSelected()
+        // Instrumentation runs a debuggable build, so the one-minute E2E option is offered too.
+        composeRule.onNodeWithTag("idle-stop-debug_1").performScrollTo().assertIsDisplayed()
+
+        composeRule.onNodeWithTag("idle-stop-off").performClick()
+        assertEquals(
+            listOf<SettingsAction>(SettingsAction.IdleStopSelected(IdleStopTimeout.OFF)),
+            actions,
+        )
+    }
+
+    @Test
+    fun serverCardOffersTheTileForThisAndroidVersion() {
+        composeRule.setContent {
+            MaterialTheme {
+                SettingsScreen(
+                    uiState = SettingsUiState(loadState = SettingsLoadState.CONTENT),
+                    onAction = {},
+                )
+            }
+        }
+
+        composeRule.onNodeWithTag("add-server-tile").performScrollTo()
+        composeRule.onNodeWithText("Плитка в быстрых настройках").assertIsDisplayed()
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+            composeRule.onNodeWithContentDescription("Добавить плитку DeviceBridge в быстрые настройки")
+                .performScrollTo()
+                .assertIsEnabled()
+        } else {
+            composeRule.onNodeWithText("Откройте шторку", substring = true).assertIsDisplayed()
+        }
     }
 
     @Test
@@ -100,18 +153,16 @@ class SettingsScreenTest {
         }
 
         composeRule.onNodeWithText("Имя телефона").assertIsDisplayed()
-        composeRule.onNodeWithText("Срок хранения истории").assertIsDisplayed()
-        composeRule.onNodeWithText("Максимальный размер файла").assertIsDisplayed()
         composeRule.onNodeWithContentDescription("Поле имени телефона")
             .performTextReplacement("Мой телефон")
         composeRule.onNodeWithContentDescription("Сохранить имя телефона").performClick()
-        composeRule.onNodeWithTag("settings-list").performScrollToIndex(4)
-        composeRule.onNodeWithText("Папка для входящих файлов").assertIsDisplayed()
+        scrollToText("Срок хранения истории").assertIsDisplayed()
+        scrollToText("Максимальный размер файла").assertIsDisplayed()
+        scrollToText("Папка для входящих файлов").assertIsDisplayed()
         composeRule.onNodeWithContentDescription("Выбрать папку для входящих файлов")
             .performScrollTo()
             .performClick()
-        composeRule.onNodeWithTag("settings-list").performScrollToIndex(5)
-        composeRule.onNodeWithText("Доверенные браузеры").assertIsDisplayed()
+        scrollToText("Доверенные браузеры").assertIsDisplayed()
 
         assertEquals(
             listOf(
@@ -181,8 +232,8 @@ class SettingsScreenTest {
         }
 
         composeRule.onNodeWithText("Настройки").assertIsDisplayed()
-        composeRule.onNodeWithText("Введите число от 1 до 365.").assertIsDisplayed()
-        composeRule.onNodeWithText("Доверенных браузеров пока нет").assertIsDisplayed()
+        scrollToText("Введите число от 1 до 365.").assertIsDisplayed()
+        scrollToText("Доверенных браузеров пока нет").assertIsDisplayed()
     }
 
     @Test
@@ -208,8 +259,7 @@ class SettingsScreenTest {
             }
         }
 
-        composeRule.onNode(hasScrollAction()).performScrollToIndex(5)
-        composeRule.onNodeWithText("Edge на Windows").assertIsDisplayed()
+        scrollToText("Edge на Windows").assertIsDisplayed()
         composeRule.onNodeWithText("trusted-edge", substring = true).assertDoesNotExist()
         composeRule.onNodeWithContentDescription("Отозвать доступ Edge на Windows")
             .performClick()
@@ -285,9 +335,7 @@ class SettingsScreenTest {
                 )
             }
         }
-        composeRule.onNodeWithTag("settings-list").performScrollToIndex(4)
-
-        composeRule.onNodeWithText("Выбрать снова").assertIsDisplayed()
+        scrollToText("Выбрать снова").assertIsDisplayed()
         composeRule.onNodeWithContentDescription("Выбрать папку для входящих файлов")
             .performScrollTo()
             .performClick()
@@ -375,5 +423,16 @@ class SettingsScreenTest {
         composeRule.onNodeWithText(
             "Все параметры хранятся только на этом телефоне.",
         ).assertDoesNotExist()
+    }
+
+    // Settings is a lazy list: cards below the fold are not composed until scrolled to.
+    private fun scrollToTag(tag: String): SemanticsNodeInteraction {
+        composeRule.onNode(hasScrollAction()).performScrollToNode(hasTestTag(tag))
+        return composeRule.onNodeWithTag(tag)
+    }
+
+    private fun scrollToText(text: String): SemanticsNodeInteraction {
+        composeRule.onNode(hasScrollAction()).performScrollToNode(hasText(text))
+        return composeRule.onNodeWithText(text)
     }
 }

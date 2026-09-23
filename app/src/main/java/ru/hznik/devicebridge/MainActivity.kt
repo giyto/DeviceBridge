@@ -26,6 +26,7 @@ import javax.inject.Inject
 import ru.hznik.devicebridge.data.file.CompletedFileRegistry
 import ru.hznik.devicebridge.data.file.FileDestinationLeaseRegistry
 import ru.hznik.devicebridge.data.file.FileSourceRegistry
+import ru.hznik.devicebridge.server.ServerStartRequests
 
 @AndroidEntryPoint
 class MainActivity : ComponentActivity() {
@@ -37,6 +38,8 @@ class MainActivity : ComponentActivity() {
     lateinit var fileSourceRegistry: FileSourceRegistry
     @Inject
     lateinit var themePreferenceRepository: ThemePreferenceRepository
+    @Inject
+    lateinit var serverStartRequests: ServerStartRequests
 
     private val sharedTextDraft = MutableStateFlow<SharedTextDraft?>(null)
     private val sharedFileDraft = MutableStateFlow<SharedFileDraft?>(null)
@@ -50,10 +53,14 @@ class MainActivity : ComponentActivity() {
         if (!sharedIntentHandled) {
             acceptSharedIntent(intent)
         }
+        if (savedInstanceState == null) {
+            acceptTileStartIntent(intent)
+        }
         enableEdgeToEdge()
         setContent {
             val pendingSharedDraft by sharedTextDraft.collectAsStateWithLifecycle()
             val pendingSharedFileDraft by sharedFileDraft.collectAsStateWithLifecycle()
+            val pendingServerStart by serverStartRequests.pending.collectAsStateWithLifecycle()
             val themePreference by themePreferenceRepository.themePreference
                 .collectAsStateWithLifecycle(initialValue = null)
             val systemDarkTheme = isSystemInDarkTheme()
@@ -82,6 +89,7 @@ class MainActivity : ComponentActivity() {
                         fileSourceRegistry = fileSourceRegistry,
                         sharedTextDraft = pendingSharedDraft,
                         sharedFileDraft = pendingSharedFileDraft,
+                        startServerRequest = pendingServerStart,
                         onSharedTextConsumed = { requestId ->
                             if (sharedTextDraft.value?.requestId == requestId) {
                                 sharedTextDraft.value = null
@@ -103,11 +111,19 @@ class MainActivity : ComponentActivity() {
         setIntent(intent)
         sharedIntentHandled = false
         acceptSharedIntent(intent)
+        acceptTileStartIntent(intent)
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
         outState.putBoolean(STATE_SHARED_INTENT_HANDLED, sharedIntentHandled)
         super.onSaveInstanceState(outState)
+    }
+
+    /** The Quick Settings tile opens the app when it cannot start the server by itself. */
+    private fun acceptTileStartIntent(source: Intent?) {
+        if (source?.getBooleanExtra(EXTRA_START_SERVER_FROM_TILE, false) != true) return
+        source.removeExtra(EXTRA_START_SERVER_FROM_TILE)
+        serverStartRequests.request()
     }
 
     private fun acceptSharedIntent(source: Intent?) {
@@ -127,9 +143,10 @@ class MainActivity : ComponentActivity() {
         )
     }
 
-    private companion object {
-        const val STATE_SHARED_INTENT_HANDLED = "shared_text_intent_handled"
-        val LIGHT_NAVIGATION_SCRIM = Color.argb(0xe6, 0xFF, 0xFF, 0xFF)
-        val DARK_NAVIGATION_SCRIM = Color.argb(0x80, 0x1b, 0x1b, 0x1b)
+    companion object {
+        const val EXTRA_START_SERVER_FROM_TILE = "ru.hznik.devicebridge.extra.START_SERVER_FROM_TILE"
+        private const val STATE_SHARED_INTENT_HANDLED = "shared_text_intent_handled"
+        private val LIGHT_NAVIGATION_SCRIM = Color.argb(0xe6, 0xFF, 0xFF, 0xFF)
+        private val DARK_NAVIGATION_SCRIM = Color.argb(0x80, 0x1b, 0x1b, 0x1b)
     }
 }

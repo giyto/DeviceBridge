@@ -330,6 +330,34 @@ class SettingsViewModelTest {
         assertEquals(AutoAcceptStatus.ON, viewModel.uiState.value.autoAcceptStatus)
     }
 
+    @Test
+    fun idleStopSelectionIsSavedOnceAndReflectedInState() = runTest(dispatcher) {
+        val repository = FakeSettingsRepository()
+        val viewModel = viewModel(repository)
+        runCurrent()
+
+        assertEquals(
+            ru.hznik.devicebridge.domain.settings.IdleStopTimeout.MIN_30,
+            viewModel.uiState.value.settings.idleStopTimeout,
+        )
+        viewModel.onAction(
+            SettingsAction.IdleStopSelected(ru.hznik.devicebridge.domain.settings.IdleStopTimeout.MIN_30),
+        )
+        runCurrent()
+        assertEquals(0, repository.idleStopWrites)
+
+        viewModel.onAction(
+            SettingsAction.IdleStopSelected(ru.hznik.devicebridge.domain.settings.IdleStopTimeout.OFF),
+        )
+        runCurrent()
+        assertEquals(1, repository.idleStopWrites)
+        assertEquals(
+            ru.hznik.devicebridge.domain.settings.IdleStopTimeout.OFF,
+            viewModel.uiState.value.settings.idleStopTimeout,
+        )
+        assertFalse(viewModel.uiState.value.idleStopState.isSaving)
+    }
+
     private fun viewModel(
         repository: SettingsRepository,
         trustedRepository: FakeTrustedBrowserRepository = FakeTrustedBrowserRepository(),
@@ -342,6 +370,7 @@ class SettingsViewModelTest {
         updateDestinationTree = UpdateDestinationTreeUseCase(repository),
         updateFileLimit = UpdateFileLimitUseCase(repository),
         updateAutoAcceptTrustedFiles = UpdateAutoAcceptTrustedFilesUseCase(repository),
+        updateIdleStopTimeout = ru.hznik.devicebridge.domain.usecase.UpdateIdleStopTimeoutUseCase(repository),
         observeTrustedBrowsers = ObserveTrustedBrowsersUseCase(trustedRepository),
         revokeTrustedBrowser = RevokeTrustedBrowserUseCase(sessionRepository),
         revokeAllTrustedBrowsers = RevokeAllTrustedBrowsersUseCase(sessionRepository),
@@ -410,6 +439,7 @@ class SettingsViewModelTest {
         var failDeviceNameWrites = 0
         var deviceNameWriteAttempts = 0
         var autoAcceptWrites = 0
+        var idleStopWrites = 0
         override val settings: Flow<DeviceSettings> = flow {
             if (failReads) throw java.io.IOException("settings unavailable")
             emitAll(current)
@@ -458,6 +488,14 @@ class SettingsViewModelTest {
                 return SettingsUpdateResult.Invalid(SettingsValidationError.AUTO_ACCEPT_DESTINATION)
             }
             current.value = current.value.copy(autoAcceptTrustedFiles = enabled)
+            return SettingsUpdateResult.Updated(current.value)
+        }
+
+        override suspend fun updateIdleStopTimeout(
+            value: ru.hznik.devicebridge.domain.settings.IdleStopTimeout,
+        ): SettingsUpdateResult {
+            idleStopWrites += 1
+            current.value = current.value.copy(idleStopTimeout = value)
             return SettingsUpdateResult.Updated(current.value)
         }
     }

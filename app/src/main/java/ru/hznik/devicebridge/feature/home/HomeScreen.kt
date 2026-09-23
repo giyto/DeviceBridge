@@ -658,7 +658,9 @@ private fun statusContent(uiState: ServerSessionUiState): StatusContent =
     when (uiState.status) {
         HomeServerStatus.Stopped -> StatusContent(
             "Сервер остановлен",
-            "Телефон пока не принимает подключения от компьютера.",
+            uiState.idleStoppedAfterMinutes?.let { minutes ->
+                "Остановлен автоматически: ${formatIdleMinutes(minutes)} без подключений."
+            } ?: "Телефон пока не принимает подключения от компьютера.",
             MaterialTheme.colorScheme.outline,
             MaterialTheme.colorScheme.surfaceVariant,
         )
@@ -694,6 +696,18 @@ private data class StatusContent(
     val color: androidx.compose.ui.graphics.Color,
     val containerColor: androidx.compose.ui.graphics.Color,
 )
+
+internal fun formatIdleMinutes(minutes: Int): String {
+    val lastTwo = minutes % 100
+    val last = minutes % 10
+    val word = when {
+        lastTwo in 11..14 -> "минут"
+        last == 1 -> "минута"
+        last in 2..4 -> "минуты"
+        else -> "минут"
+    }
+    return "$minutes $word"
+}
 
 internal fun formatUptime(totalSeconds: Long): String {
     val safeSeconds = totalSeconds.coerceAtLeast(0)

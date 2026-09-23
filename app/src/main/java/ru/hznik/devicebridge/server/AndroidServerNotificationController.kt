@@ -9,11 +9,15 @@ import android.content.Intent
 import android.os.Build
 import androidx.core.app.NotificationCompat
 import dagger.hilt.android.qualifiers.ApplicationContext
+import java.time.Instant
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
 import javax.inject.Inject
 import javax.inject.Singleton
 import ru.hznik.devicebridge.R
 import ru.hznik.devicebridge.domain.model.ServerLifecycleState
 import ru.hznik.devicebridge.domain.repository.BrowserSessionRepository
+import ru.hznik.devicebridge.data.server.IdleStopController
 import ru.hznik.devicebridge.domain.repository.TextTransferRepository
 import ru.hznik.devicebridge.domain.repository.FileTransferRepository
 import ru.hznik.devicebridge.domain.file.FileTransferPhase
@@ -34,6 +38,7 @@ class AndroidServerNotificationController @Inject constructor(
     private val browserSessionRepository: BrowserSessionRepository,
     private val textTransferRepository: TextTransferRepository,
     private val fileTransferRepository: FileTransferRepository,
+    private val idleStopController: IdleStopController,
 ) : ServerNotificationController {
 
     private val notificationManager =
@@ -49,6 +54,7 @@ class AndroidServerNotificationController @Inject constructor(
                 activeSessionCount = browserSessionRepository.state.value.sessions.size,
                 hasActiveTextTransfer = textTransferRepository.hasActiveTransfer(),
                 activeFileTransfer = fileTransferRepository.activeNotificationTransfer(),
+                idleStopAtLocalTime = idleStopAtLocalTime(),
             ),
         ) {
             "Foreground notification requires an active server state"
@@ -82,6 +88,7 @@ class AndroidServerNotificationController @Inject constructor(
             activeSessionCount = browserSessionRepository.state.value.sessions.size,
             hasActiveTextTransfer = textTransferRepository.hasActiveTransfer(),
             activeFileTransfer = fileTransferRepository.activeNotificationTransfer(),
+            idleStopAtLocalTime = idleStopAtLocalTime(),
         )
         if (model == null) {
             cancel()
@@ -122,6 +129,12 @@ class AndroidServerNotificationController @Inject constructor(
             .setAction(ServerForegroundService.ACTION_STOP),
         PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
     )
+
+    private fun idleStopAtLocalTime(): String? =
+        idleStopController.stopAtWallClockMs.value?.let { epochMs ->
+            DateTimeFormatter.ofPattern("HH:mm")
+                .format(Instant.ofEpochMilli(epochMs).atZone(ZoneId.systemDefault()))
+        }
 
     private fun TextTransferRepository.hasActiveTransfer(): Boolean =
         state.value.items.any {

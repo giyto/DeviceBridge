@@ -48,6 +48,21 @@ class ServerNotificationModelTest {
     }
 
     @Test
+    fun idleCountdownAddsStopTimeOnlyWhileItRuns() {
+        val running = ServerLifecycleState.Running(
+            generation = 1,
+            endpoint = ServerEndpoint("192.168.1.24", 8_787),
+            startedAtElapsedRealtimeMs = 10,
+        )
+
+        val counting = requireNotNull(factory.create(running, idleStopAtLocalTime = "16:55"))
+        val connected = requireNotNull(factory.create(running, activeSessionCount = 1))
+
+        assertTrue(counting.text.endsWith("\nОстановится в 16:55 без подключений"))
+        assertFalse(connected.text.contains("Остановится"))
+    }
+
+    @Test
     fun stoppedAndErrorDoNotCreateForegroundNotificationModel() {
         assertNull(factory.create(ServerLifecycleState.Stopped))
         assertNull(

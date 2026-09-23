@@ -50,6 +50,36 @@ class BrowserSessionCoordinatorCleanupTest {
     }
 
     @Test
+    fun activeConnectionCountFollowsTransportsWhileSessionSurvives() = runTest {
+        val coordinator = coordinator()
+        val handle = coordinator.activate(ServerGenerationId(1))
+        val approved = pair(coordinator, handle, "Chrome", "192.168.1.2", "123456")
+        val firstTab = RecordingConnection()
+        val reconnectedTab = RecordingConnection()
+        assertEquals(0, coordinator.activeConnectionCount.value)
+
+        coordinator.attachConnection(approved.sessionId, firstTab)
+        coordinator.attachConnection(approved.sessionId, reconnectedTab)
+        assertEquals(2, coordinator.activeConnectionCount.value)
+
+        coordinator.detachConnection(approved.sessionId, firstTab)
+        coordinator.detachConnection(approved.sessionId, reconnectedTab)
+        assertEquals(0, coordinator.activeConnectionCount.value)
+        // Closing the tab drops the transport, not the session: it can still reconnect.
+        assertEquals(1, coordinator.state.value.sessions.size)
+
+        coordinator.attachConnection(approved.sessionId, RecordingConnection())
+        assertEquals(1, coordinator.activeConnectionCount.value)
+        coordinator.revoke(approved.sessionId)
+        assertEquals(0, coordinator.activeConnectionCount.value)
+
+        val second = pair(coordinator, handle, "Edge", "192.168.1.3", "654321")
+        coordinator.attachConnection(second.sessionId, RecordingConnection())
+        coordinator.closeGeneration(handle)
+        assertEquals(0, coordinator.activeConnectionCount.value)
+    }
+
+    @Test
     fun staleCloseCannotAffectNewGeneration() = runTest {
         val coordinator = coordinator()
         val oldHandle = coordinator.activate(ServerGenerationId(1))

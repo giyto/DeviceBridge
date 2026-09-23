@@ -162,6 +162,7 @@ class BrowserSessionCoordinator(
     private val sessions = LinkedHashMap<BrowserSessionId, StoredSession>()
     private val connections = LinkedHashMap<BrowserSessionId, MutableSet<SessionConnection>>()
     private val mutableState = MutableStateFlow(BrowserSessionState.inactive())
+    private val mutableActiveConnectionCount = MutableStateFlow(0)
 
     @Volatile
     private var activeHandle: SessionGenerationHandle? = null
@@ -185,6 +186,12 @@ class BrowserSessionCoordinator(
     }
 
     override val state: StateFlow<BrowserSessionState> = mutableState.asStateFlow()
+
+    /**
+     * Live transport connections across all sessions. Unlike [state] sessions, this drops as soon
+     * as a browser tab closes its WebSocket, so idle detection can rely on it.
+     */
+    val activeConnectionCount: StateFlow<Int> = mutableActiveConnectionCount.asStateFlow()
 
     suspend fun activate(generationId: ServerGenerationId): SessionGenerationHandle {
         val (handle, oldConnections) = mutex.withLock {
@@ -535,6 +542,7 @@ class BrowserSessionCoordinator(
     ): Boolean = mutex.withLock {
         if (sessionId !in sessions) return@withLock false
         connections.getOrPut(sessionId, ::linkedSetOf).add(connection)
+        publishConnectionCountLocked()
         true
     }
 
@@ -547,6 +555,7 @@ class BrowserSessionCoordinator(
                 bound.remove(connection)
                 if (bound.isEmpty()) connections.remove(sessionId)
             }
+            publishConnectionCountLocked()
         }
     }
 
@@ -558,6 +567,7 @@ class BrowserSessionCoordinator(
                 BrowserSessionEvent.SessionRevoked(removed.session.generationId, sessionId),
             )
             connections.remove(sessionId)?.toList().orEmpty()
+                .also { publishConnectionCountLocked() }
         }
         toClose.forEach { connection ->
             try {
@@ -614,6 +624,7 @@ class BrowserSessionCoordinator(
                     ),
                 )
                 connections.remove(sessionId)?.toList().orEmpty()
+                    .also { publishConnectionCountLocked() }
             }
         }
         closeConnections(toClose.distinct())
@@ -770,12 +781,17 @@ class BrowserSessionCoordinator(
         rateLimiter.clear()
         val toClose = connections.values.flatten().distinct()
         connections.clear()
+        publishConnectionCountLocked()
         activeHandle = null
         mutableState.value = BrowserSessionReducer.reduce(
             mutableState.value,
             BrowserSessionEvent.Deactivated(handle.generationId),
         )
         return toClose
+    }
+
+    private fun publishConnectionCountLocked() {
+        mutableActiveConnectionCount.value = connections.values.sumOf { it.size }
     }
 
     private suspend fun closeConnections(connections: List<SessionConnection>) {

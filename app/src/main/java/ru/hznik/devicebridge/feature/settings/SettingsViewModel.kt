@@ -21,6 +21,7 @@ import ru.hznik.devicebridge.domain.settings.SettingsUpdateResult
 import ru.hznik.devicebridge.domain.settings.SettingsValidationError
 import ru.hznik.devicebridge.domain.usecase.ObserveSettingsUseCase
 import ru.hznik.devicebridge.domain.usecase.UpdateAutoAcceptTrustedFilesUseCase
+import ru.hznik.devicebridge.domain.usecase.UpdateIdleStopTimeoutUseCase
 import ru.hznik.devicebridge.domain.usecase.UpdateDestinationTreeUseCase
 import ru.hznik.devicebridge.domain.usecase.UpdateDeviceNameUseCase
 import ru.hznik.devicebridge.domain.usecase.UpdateFileLimitUseCase
@@ -41,6 +42,7 @@ class SettingsViewModel @Inject constructor(
     private val updateDestinationTree: UpdateDestinationTreeUseCase,
     private val updateFileLimit: UpdateFileLimitUseCase,
     private val updateAutoAcceptTrustedFiles: UpdateAutoAcceptTrustedFilesUseCase,
+    private val updateIdleStopTimeout: UpdateIdleStopTimeoutUseCase,
     observeTrustedBrowsers: ObserveTrustedBrowsersUseCase,
     private val revokeTrustedBrowser: RevokeTrustedBrowserUseCase,
     private val revokeAllTrustedBrowsers: RevokeAllTrustedBrowsersUseCase,
@@ -203,6 +205,7 @@ class SettingsViewModel @Inject constructor(
             is SettingsAction.RevokeTrustedBrowser -> revokeTrusted(action.browserId)
             SettingsAction.RevokeAllTrustedBrowsers -> revokeAllTrusted()
             is SettingsAction.AutoAcceptToggled -> toggleAutoAccept(action.enabled)
+            is SettingsAction.IdleStopSelected -> selectIdleStop(action.value)
         }
     }
 
@@ -274,6 +277,15 @@ class SettingsViewModel @Inject constructor(
         updateField(
             field = SettingField.AUTO_ACCEPT,
             operation = { updateAutoAcceptTrustedFiles(enabled) },
+        )
+    }
+
+    private fun selectIdleStop(value: ru.hznik.devicebridge.domain.settings.IdleStopTimeout) {
+        val state = mutableUiState.value
+        if (state.idleStopState.isSaving || state.settings.idleStopTimeout == value) return
+        updateField(
+            field = SettingField.IDLE_STOP,
+            operation = { updateIdleStopTimeout(value) },
         )
     }
 
@@ -379,7 +391,7 @@ class SettingsViewModel @Inject constructor(
                 SettingField.DEVICE_NAME -> current.deviceNameInput
                 SettingField.RETENTION -> current.retentionInput
                 SettingField.FILE_LIMIT -> current.fileLimitMiBInput
-                SettingField.DESTINATION, SettingField.AUTO_ACCEPT -> null
+                SettingField.DESTINATION, SettingField.AUTO_ACCEPT, SettingField.IDLE_STOP -> null
             }
             val hasNewerDraft = submittedDraft != null && currentDraft != submittedDraft
             val base = current.copy(
@@ -418,6 +430,9 @@ class SettingsViewModel @Inject constructor(
                 SettingField.AUTO_ACCEPT -> base.copy(
                     autoAcceptState = SettingsFieldState(),
                 )
+                SettingField.IDLE_STOP -> base.copy(
+                    idleStopState = SettingsFieldState(),
+                )
             }
         }
     }
@@ -444,6 +459,8 @@ class SettingsViewModel @Inject constructor(
                     current.copy(fileLimitState = transform(current.fileLimitState))
                 SettingField.AUTO_ACCEPT ->
                     current.copy(autoAcceptState = transform(current.autoAcceptState))
+                SettingField.IDLE_STOP ->
+                    current.copy(idleStopState = transform(current.idleStopState))
             }
         }
     }
@@ -455,6 +472,7 @@ private enum class SettingField {
     DESTINATION,
     FILE_LIMIT,
     AUTO_ACCEPT,
+    IDLE_STOP,
 }
 
 private fun SettingsValidationError.message(): String = when (this) {
@@ -462,4 +480,5 @@ private fun SettingsValidationError.message(): String = when (this) {
     SettingsValidationError.RETENTION_DAYS -> "Введите число от 1 до 365."
     SettingsValidationError.FILE_LIMIT -> "Введите размер от 1 до 1024 МиБ."
     SettingsValidationError.AUTO_ACCEPT_DESTINATION -> "Сначала выберите папку для входящих файлов."
+    SettingsValidationError.IDLE_STOP_TIMEOUT -> "Выберите время автоостановки из списка."
 }

@@ -13,12 +13,14 @@ class AndroidServerLifecycleRepositoryTest {
     fun stateIsCoordinatorStateAndCommandsGoToForegroundService() = runBlocking {
         val state = MutableStateFlow<ServerLifecycleState>(ServerLifecycleState.Stopped)
         val commands = FakeCommands()
-        val repository = AndroidServerLifecycleRepository(state, commands)
+        val lastStopReason = MutableStateFlow<ServerStopReason?>(null)
+        val repository = AndroidServerLifecycleRepository(state, lastStopReason, commands)
 
         repository.start()
         repository.stop(ServerStopReason.UserRequested)
 
         assertSame(state, repository.state)
+        assertSame(lastStopReason, repository.lastStopReason)
         assertEquals(1, commands.startCalls)
         assertEquals(1, commands.stopCalls)
     }

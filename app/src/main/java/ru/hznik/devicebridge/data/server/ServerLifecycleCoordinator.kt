@@ -50,6 +50,8 @@ class ServerLifecycleCoordinator @Inject constructor(
     private var activeRuntime: ServerRuntime? = null
 
     override val state: StateFlow<ServerLifecycleState> = mutableState.asStateFlow()
+    private val mutableLastStopReason = MutableStateFlow<ServerStopReason?>(null)
+    override val lastStopReason: StateFlow<ServerStopReason?> = mutableLastStopReason.asStateFlow()
 
     override suspend fun start() {
         mutex.withLock {
@@ -60,6 +62,7 @@ class ServerLifecycleCoordinator @Inject constructor(
                 return
             }
 
+            mutableLastStopReason.value = null
             val currentGeneration = ++generation
             mutableState.value = ServerLifecycleReducer.reduce(
                 mutableState.value,
@@ -138,6 +141,8 @@ class ServerLifecycleCoordinator @Inject constructor(
                 withTimeout(stopTimeoutPolicy.timeoutMillis) {
                     runtime?.stop()
                 }
+                // Publish the reason first so observers of Stopped always see why.
+                mutableLastStopReason.value = reason
                 mutableState.value = ServerLifecycleReducer.reduce(
                     mutableState.value,
                     ServerLifecycleEvent.Stopped(currentGeneration),

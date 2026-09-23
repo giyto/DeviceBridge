@@ -35,6 +35,7 @@ class ServerLifecycleUseCasesTest {
     private class FakeServerLifecycleRepository : ServerLifecycleRepository {
         override val state: StateFlow<ServerLifecycleState> =
             MutableStateFlow(ServerLifecycleState.Stopped)
+        override val lastStopReason: StateFlow<ServerStopReason?> = MutableStateFlow(null)
         var startCalls: Int = 0
         val stopReasons = mutableListOf<ServerStopReason>()
 
