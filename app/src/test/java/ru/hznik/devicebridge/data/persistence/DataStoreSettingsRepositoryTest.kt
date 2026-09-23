@@ -3,6 +3,7 @@ package ru.hznik.devicebridge.data.persistence
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.emptyPreferences
+import androidx.datastore.preferences.core.stringPreferencesKey
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
@@ -13,6 +14,7 @@ import org.junit.Test
 import ru.hznik.devicebridge.data.persistence.datastore.DataStoreSettingsRepository
 import ru.hznik.devicebridge.domain.settings.DestinationTree
 import ru.hznik.devicebridge.domain.settings.DeviceSettings
+import ru.hznik.devicebridge.domain.settings.IdleStopTimeout
 import ru.hznik.devicebridge.domain.settings.SettingsUpdateResult
 import ru.hznik.devicebridge.domain.settings.SettingsValidationError
 import ru.hznik.devicebridge.domain.file.HARD_MAX_FILE_BYTES
@@ -165,6 +167,48 @@ class DataStoreSettingsRepositoryTest {
 
         assertTrue(first.updateAutoAcceptTrustedFiles(false) is SettingsUpdateResult.Updated)
         assertEquals(false, DataStoreSettingsRepository(dataStore).settings.first().autoAcceptTrustedFiles)
+    }
+
+    @Test
+    fun idleStopDefaultsToThirtyMinutesAndPersistsEveryUserChoice() = runTest {
+        val dataStore = InMemoryPreferencesDataStore()
+        val repository = DataStoreSettingsRepository(dataStore)
+
+        assertEquals(IdleStopTimeout.MIN_30, repository.settings.first().idleStopTimeout)
+        IdleStopTimeout.USER_CHOICES.forEach { choice ->
+            assertTrue(repository.updateIdleStopTimeout(choice) is SettingsUpdateResult.Updated)
+            assertEquals(choice, DataStoreSettingsRepository(dataStore).settings.first().idleStopTimeout)
+        }
+    }
+
+    @Test
+    fun debugIdleStopIsRejectedAndIgnoredOutsideDebugBuilds() = runTest {
+        val dataStore = InMemoryPreferencesDataStore()
+        val release = DataStoreSettingsRepository(dataStore)
+        val debug = DataStoreSettingsRepository(dataStore, allowDebugIdleTimeout = true)
+
+        assertEquals(
+            SettingsUpdateResult.Invalid(SettingsValidationError.IDLE_STOP_TIMEOUT),
+            release.updateIdleStopTimeout(IdleStopTimeout.DEBUG_1),
+        )
+        assertTrue(debug.updateIdleStopTimeout(IdleStopTimeout.DEBUG_1) is SettingsUpdateResult.Updated)
+        assertEquals(IdleStopTimeout.DEBUG_1, debug.settings.first().idleStopTimeout)
+        assertEquals(IdleStopTimeout.MIN_30, release.settings.first().idleStopTimeout)
+    }
+
+    @Test
+    fun unknownStoredIdleStopFallsBackToDefault() = runTest {
+        val dataStore = InMemoryPreferencesDataStore()
+        dataStore.updateData { preferences ->
+            preferences.toMutablePreferences().apply {
+                this[stringPreferencesKey("idle_stop_timeout")] = "45"
+            }
+        }
+
+        assertEquals(
+            IdleStopTimeout.MIN_30,
+            DataStoreSettingsRepository(dataStore).settings.first().idleStopTimeout,
+        )
     }
 
     private fun repository(): DataStoreSettingsRepository =

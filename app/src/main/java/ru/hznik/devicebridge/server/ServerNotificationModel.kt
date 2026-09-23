@@ -25,6 +25,7 @@ class ServerNotificationModelFactory @Inject constructor() {
         activeSessionCount: Int = 0,
         hasActiveTextTransfer: Boolean = false,
         activeFileTransfer: FileNotificationProgress? = null,
+        idleStopAtLocalTime: String? = null,
     ): ServerNotificationModel? {
         require(activeSessionCount >= 0) { "Active session count cannot be negative" }
         return when (state) {
@@ -49,7 +50,8 @@ class ServerNotificationModelFactory @Inject constructor() {
                     "Передача текста выполняется"
                 } else {
                     "Передача не выполняется"
-                },
+                } +
+                idleStopAtLocalTime?.let { "\nОстановится в $it без подключений" }.orEmpty(),
             ongoing = true,
             showStopAction = true,
         )

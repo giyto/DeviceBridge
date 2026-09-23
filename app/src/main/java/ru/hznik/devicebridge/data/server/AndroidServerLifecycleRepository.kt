@@ -38,6 +38,7 @@ class AndroidServerServiceCommandGateway @Inject constructor(
 
 class AndroidServerLifecycleRepository(
     override val state: StateFlow<ServerLifecycleState>,
+    override val lastStopReason: StateFlow<ServerStopReason?>,
     private val serviceCommands: ServerServiceCommandGateway,
 ) : ServerLifecycleRepository {
     override suspend fun start() = serviceCommands.requestStart()

@@ -22,6 +22,7 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
+import ru.hznik.devicebridge.server.ServerStartRequests
 import ru.hznik.devicebridge.data.permission.ServerPermissionGateway
 import ru.hznik.devicebridge.data.permission.ServerPermissionPolicy
 import ru.hznik.devicebridge.data.permission.ServerPermissionRequestPlanner
@@ -220,6 +221,28 @@ class HomeViewModelTest {
         }
 
     @Test
+    fun idleStopReasonIsShownOnlyForAnAutomaticStop() = runTest(dispatcher) {
+        val lifecycle = FakeRepository(runningState())
+        val viewModel = createViewModel(lifecycle)
+        runCurrent()
+
+        lifecycle.mutableLastStopReason.value = ServerStopReason.IdleTimeout(minutes = 30)
+        lifecycle.mutableState.value = ServerLifecycleState.Stopped
+        runCurrent()
+        assertEquals(HomeServerStatus.Stopped, viewModel.uiState.value.status)
+        assertEquals(30, viewModel.uiState.value.idleStoppedAfterMinutes)
+        assertTrue(viewModel.uiState.value.canStart)
+
+        lifecycle.mutableLastStopReason.value = null
+        lifecycle.mutableState.value = runningState()
+        runCurrent()
+        lifecycle.mutableLastStopReason.value = ServerStopReason.UserRequested
+        lifecycle.mutableState.value = ServerLifecycleState.Stopped
+        runCurrent()
+        assertNull(viewModel.uiState.value.idleStoppedAfterMinutes)
+    }
+
+    @Test
     fun currentTextStatusTracksActiveCompletedFailedAndClearsOutsideRunning() =
         runTest(dispatcher) {
             val lifecycle = FakeRepository(runningState())
@@ -274,6 +297,47 @@ class HomeViewModelTest {
             HomeEffect.RequestPermissions(
                 listOf("android.permission.ACCESS_LOCAL_NETWORK"),
             ),
+            effect.await(),
+        )
+        assertEquals(0, repository.startCalls)
+    }
+
+    @Test
+    fun tileStartRequestRunsTheNormalStartOnce() = runTest(dispatcher) {
+        val repository = FakeRepository()
+        val requests = ServerStartRequests()
+        val viewModel = createViewModel(repository, startRequests = requests)
+        runCurrent()
+
+        requests.request()
+        runCurrent()
+        assertEquals(1, repository.startCalls)
+        assertNull(requests.pending.value)
+
+        // A recreated screen must not start the server a second time.
+        createViewModel(repository, startRequests = requests)
+        runCurrent()
+        assertEquals(1, repository.startCalls)
+        assertTrue(viewModel.uiState.value.commandPending)
+    }
+
+    @Test
+    fun tileStartRequestAsksForMissingLanPermissionFirst() = runTest(dispatcher) {
+        val repository = FakeRepository()
+        val requests = ServerStartRequests()
+        val viewModel = createViewModel(
+            repository,
+            FakePermissionGateway(snapshot(sdk = 37, lan = false)),
+            startRequests = requests,
+        )
+        val effect = async { viewModel.effects.first() }
+        runCurrent()
+
+        requests.request()
+        runCurrent()
+
+        assertEquals(
+            HomeEffect.RequestPermissions(listOf("android.permission.ACCESS_LOCAL_NETWORK")),
             effect.await(),
         )
         assertEquals(0, repository.startCalls)
@@ -437,6 +501,7 @@ class HomeViewModelTest {
         sessionRepository: FakeBrowserSessionRepository = FakeBrowserSessionRepository(),
         textRepository: FakeTextTransferRepository = FakeTextTransferRepository(),
         fileRepository: FakeFileTransferRepository = FakeFileTransferRepository(),
+        startRequests: ServerStartRequests = ServerStartRequests(),
     ) = HomeViewModel(
         StartServerUseCase(repository),
         StopServerUseCase(repository),
@@ -451,6 +516,7 @@ class HomeViewModelTest {
         RevokeBrowserSessionUseCase(sessionRepository),
         ObserveTextTransfersUseCase(textRepository),
         ObserveFileTransfersUseCase(fileRepository),
+        serverStartRequests = startRequests,
     )
 
     private class FakeRepository(
@@ -458,6 +524,8 @@ class HomeViewModelTest {
     ) : ServerLifecycleRepository {
         val mutableState = MutableStateFlow(initial)
         override val state: StateFlow<ServerLifecycleState> = mutableState
+        val mutableLastStopReason = MutableStateFlow<ServerStopReason?>(null)
+        override val lastStopReason: StateFlow<ServerStopReason?> = mutableLastStopReason
         var startCalls = 0
         val stopReasons = mutableListOf<ServerStopReason>()
 

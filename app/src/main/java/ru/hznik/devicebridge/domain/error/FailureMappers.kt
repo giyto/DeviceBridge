@@ -247,6 +247,11 @@ fun SettingsValidationError.toUserFacingFailure(): UserFacingFailure = when (thi
         FailureSeverity.RECOVERABLE,
         RecoveryAction.SELECT_DESTINATION,
     )
+    SettingsValidationError.IDLE_STOP_TIMEOUT -> failure(
+        FailureCode.INVALID_PAYLOAD,
+        FailureSeverity.TERMINAL,
+        RecoveryAction.EDIT_SETTING,
+    )
 }
 
 private fun failure(

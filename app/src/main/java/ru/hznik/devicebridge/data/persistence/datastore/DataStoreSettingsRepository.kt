@@ -16,6 +16,7 @@ import ru.hznik.devicebridge.domain.file.HARD_MAX_FILE_BYTES
 import ru.hznik.devicebridge.domain.repository.SettingsRepository
 import ru.hznik.devicebridge.domain.settings.DestinationTree
 import ru.hznik.devicebridge.domain.settings.DeviceSettings
+import ru.hznik.devicebridge.domain.settings.IdleStopTimeout
 import ru.hznik.devicebridge.domain.settings.SettingsDefaults
 import ru.hznik.devicebridge.domain.settings.SettingsUpdateResult
 import ru.hznik.devicebridge.domain.settings.SettingsValidationError
@@ -26,11 +27,13 @@ internal object SettingsPreferenceKeys {
     val destinationTree = stringPreferencesKey("destination_tree_uri")
     val effectiveFileLimitBytes = longPreferencesKey("effective_file_limit_bytes")
     val autoAcceptTrustedFiles = booleanPreferencesKey("auto_accept_trusted_files")
+    val idleStopTimeout = stringPreferencesKey("idle_stop_timeout")
 }
 
 class DataStoreSettingsRepository(
     private val dataStore: DataStore<Preferences>,
     defaultDeviceName: String = SettingsDefaults.DEFAULT_DEVICE_NAME,
+    private val allowDebugIdleTimeout: Boolean = false,
 ) : SettingsRepository {
     private val initialDeviceName = defaultDeviceName.trim().takeIf { candidate ->
         candidate.isNotBlank() &&
@@ -105,6 +108,15 @@ class DataStoreSettingsRepository(
         }
     }
 
+    override suspend fun updateIdleStopTimeout(value: IdleStopTimeout): SettingsUpdateResult {
+        if (value == IdleStopTimeout.DEBUG_1 && !allowDebugIdleTimeout) {
+            return SettingsUpdateResult.Invalid(SettingsValidationError.IDLE_STOP_TIMEOUT)
+        }
+        return update { preferences ->
+            preferences[SettingsPreferenceKeys.idleStopTimeout] = value.storageValue
+        }
+    }
+
     private suspend fun update(
         transform: suspend (androidx.datastore.preferences.core.MutablePreferences) -> Unit,
     ): SettingsUpdateResult {
@@ -144,6 +156,10 @@ class DataStoreSettingsRepository(
             effectiveFileLimitBytes = effectiveFileLimitBytes,
             autoAcceptTrustedFiles =
                 preferences[SettingsPreferenceKeys.autoAcceptTrustedFiles] ?: false,
+            idleStopTimeout = IdleStopTimeout.fromStorage(
+                preferences[SettingsPreferenceKeys.idleStopTimeout],
+                allowDebug = allowDebugIdleTimeout,
+            ),
         )
     }
 }

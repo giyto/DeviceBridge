@@ -1,5 +1,10 @@
 package ru.hznik.devicebridge.feature.settings
 
+import android.app.StatusBarManager
+import android.content.Context
+import android.graphics.drawable.Icon
+import android.os.Build
+import androidx.annotation.RequiresApi
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -10,6 +15,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Button
@@ -18,11 +25,17 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
@@ -35,11 +48,14 @@ import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import ru.hznik.devicebridge.core.ui.DestructiveActionButton
+import ru.hznik.devicebridge.domain.settings.IdleStopTimeout
 import ru.hznik.devicebridge.domain.settings.ThemePreference
 import ru.hznik.devicebridge.core.ui.ScreenHeader
 import ru.hznik.devicebridge.core.ui.SectionHeader
 import ru.hznik.devicebridge.core.ui.TonalActionButton
 import ru.hznik.devicebridge.core.ui.dismissKeyboardOnUnconsumedTap
+import ru.hznik.devicebridge.server.DeviceBridgeTileService
+import ru.hznik.devicebridge.R
 @Composable
 fun SettingsScreen(
     uiState: SettingsUiState,
@@ -128,6 +144,25 @@ fun SettingsScreen(
                             uiState.deviceNameInput.trim() == uiState.settings.deviceName,
                         onSave = { onAction(SettingsAction.SaveDeviceName) },
                     )
+                }
+            }
+
+            item {
+                val context = LocalContext.current
+                val debugBuild = context.applicationInfo.flags and
+                    android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE != 0
+                SettingsCard(title = "Сервер") {
+                    IdleStopSelector(
+                        selected = uiState.settings.idleStopTimeout,
+                        choices = if (debugBuild) {
+                            IdleStopTimeout.USER_CHOICES + IdleStopTimeout.DEBUG_1
+                        } else {
+                            IdleStopTimeout.USER_CHOICES
+                        },
+                        fieldState = uiState.idleStopState,
+                        onSelect = { onAction(SettingsAction.IdleStopSelected(it)) },
+                    )
+                    AddServerTileRow()
                 }
             }
 
@@ -356,6 +391,121 @@ private fun DarkThemeRow(
             onCheckedChange = null,
         )
     }
+}
+
+@Composable
+private fun IdleStopSelector(
+    selected: IdleStopTimeout,
+    choices: List<IdleStopTimeout>,
+    fieldState: SettingsFieldState,
+    onSelect: (IdleStopTimeout) -> Unit,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Text(
+            text = "Автоостановка без подключений",
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.SemiBold,
+        )
+        Text(
+            text = "Сервер остановится сам, если за это время к нему не подключится ни один " +
+                "браузер и не будет передач.",
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            style = MaterialTheme.typography.bodySmall,
+        )
+        Column(Modifier.selectableGroup()) {
+            choices.forEach { choice ->
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("idle-stop-${choice.storageValue}")
+                        .selectable(
+                            selected = choice == selected,
+                            enabled = !fieldState.isSaving,
+                            role = Role.RadioButton,
+                            onClick = { onSelect(choice) },
+                        )
+                        .padding(vertical = 6.dp),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    RadioButton(
+                        selected = choice == selected,
+                        onClick = null,
+                        enabled = !fieldState.isSaving,
+                    )
+                    Text(choice.label(), style = MaterialTheme.typography.bodyLarge)
+                }
+            }
+        }
+        fieldState.errorMessage?.let { FieldError(it) }
+    }
+}
+
+@Composable
+private fun AddServerTileRow() {
+    val context = LocalContext.current
+    Column(
+        modifier = Modifier.testTag("add-server-tile"),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Text(
+            text = "Плитка в быстрых настройках",
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.SemiBold,
+        )
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            var result by remember { mutableStateOf<String?>(null) }
+            Text(
+                text = "Запускайте и останавливайте сервер из шторки, не открывая приложение.",
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                style = MaterialTheme.typography.bodySmall,
+            )
+            TonalActionButton(
+                label = "Добавить плитку",
+                onClick = { requestAddServerTile(context) { result = it } },
+                contentDescription = "Добавить плитку DeviceBridge в быстрые настройки",
+            )
+            result?.let {
+                Text(it, style = MaterialTheme.typography.bodySmall)
+            }
+        } else {
+            Text(
+                text = "Откройте шторку, нажмите «Изменить» (значок карандаша) и перетащите " +
+                    "плитку DeviceBridge в список активных. Она запускает и останавливает сервер.",
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                style = MaterialTheme.typography.bodySmall,
+            )
+        }
+    }
+}
+
+@RequiresApi(Build.VERSION_CODES.TIRAMISU)
+private fun requestAddServerTile(context: Context, onResult: (String?) -> Unit) {
+    val statusBar = context.getSystemService(StatusBarManager::class.java) ?: return
+    statusBar.requestAddTileService(
+        DeviceBridgeTileService.component(context),
+        context.getString(R.string.tile_label),
+        Icon.createWithResource(context, R.drawable.ic_server_notification),
+        context.mainExecutor,
+    ) { code ->
+        onResult(
+            when (code) {
+                StatusBarManager.TILE_ADD_REQUEST_RESULT_TILE_ADDED -> "Плитка добавлена."
+                StatusBarManager.TILE_ADD_REQUEST_RESULT_TILE_ALREADY_ADDED ->
+                    "Плитка уже есть в быстрых настройках."
+                StatusBarManager.TILE_ADD_REQUEST_RESULT_TILE_NOT_ADDED -> null
+                else -> "Не удалось добавить плитку. Добавьте её вручную через «Изменить» в шторке."
+            },
+        )
+    }
+}
+
+private fun IdleStopTimeout.label(): String = when (this) {
+    IdleStopTimeout.OFF -> "Не останавливать"
+    IdleStopTimeout.MIN_15 -> "Через 15 минут"
+    IdleStopTimeout.MIN_30 -> "Через 30 минут"
+    IdleStopTimeout.MIN_60 -> "Через 1 час"
+    IdleStopTimeout.DEBUG_1 -> "Через 1 минуту (отладка)"
 }
 
 @Composable

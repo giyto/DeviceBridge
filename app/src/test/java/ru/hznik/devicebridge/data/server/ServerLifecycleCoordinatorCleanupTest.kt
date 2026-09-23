@@ -4,11 +4,13 @@ import java.util.ArrayDeque
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.awaitCancellation
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import ru.hznik.devicebridge.domain.model.ServerEndpoint
 import ru.hznik.devicebridge.domain.model.ServerLifecycleError
 import ru.hznik.devicebridge.domain.model.ServerLifecycleState
+import ru.hznik.devicebridge.domain.model.ServerStopReason
 
 class ServerLifecycleCoordinatorCleanupTest {
 
@@ -34,6 +36,23 @@ class ServerLifecycleCoordinatorCleanupTest {
 
         assertTrue(coordinator.state.value is ServerLifecycleState.Running)
         assertEquals(2, factory.createCalls)
+    }
+
+    @Test
+    fun idleStopIsAPlainStopWhoseReasonClearsOnTheNextStart() = runBlocking {
+        val factory = QueueRuntimeFactory(RecordingRuntime(), RecordingRuntime(port = 8_788))
+        val coordinator = ServerLifecycleCoordinator(factory, MonotonicClock { 10 })
+
+        coordinator.start()
+        coordinator.stop(ServerStopReason.IdleTimeout(minutes = 30))
+
+        assertEquals(ServerLifecycleState.Stopped, coordinator.state.value)
+        assertEquals(ServerStopReason.IdleTimeout(minutes = 30), coordinator.lastStopReason.value)
+
+        coordinator.start()
+        assertNull(coordinator.lastStopReason.value)
+        coordinator.stop()
+        assertEquals(ServerStopReason.UserRequested, coordinator.lastStopReason.value)
     }
 
     @Test

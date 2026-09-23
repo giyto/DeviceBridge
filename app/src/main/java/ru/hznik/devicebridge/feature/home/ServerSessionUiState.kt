@@ -38,6 +38,8 @@ data class ServerSessionUiState(
     val activeBrowsers: List<ActiveBrowserUiState> = emptyList(),
     val textTransferStatus: HomeTextTransferStatus = HomeTextTransferStatus.Idle,
     val activeFileTransfers: List<HomeFileTransferUiState> = emptyList(),
+    /** Minutes of inactivity after which the server stopped itself, when that was the reason. */
+    val idleStoppedAfterMinutes: Int? = null,
 ) {
     val canStart: Boolean
         get() = !commandPending &&

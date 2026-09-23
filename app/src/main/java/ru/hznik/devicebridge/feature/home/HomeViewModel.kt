@@ -16,6 +16,7 @@ import ru.hznik.devicebridge.data.permission.ServerPermissionRequestPlanner
 import ru.hznik.devicebridge.data.server.MonotonicClock
 import ru.hznik.devicebridge.domain.model.ServerLifecycleError
 import ru.hznik.devicebridge.domain.model.ServerLifecycleState
+import ru.hznik.devicebridge.domain.model.ServerStopReason
 import ru.hznik.devicebridge.domain.error.toUserFacingFailure
 import ru.hznik.devicebridge.domain.session.BrowserSessionId
 import ru.hznik.devicebridge.domain.session.BrowserApprovalDecision
@@ -51,8 +52,11 @@ class HomeViewModel @Inject constructor(
     observeFileTransfers: ObserveFileTransfersUseCase,
     private val autoAcceptStatus: ru.hznik.devicebridge.domain.file.AutoAcceptStatusSource =
         ru.hznik.devicebridge.domain.file.AutoAcceptStatusSource.None,
+    private val serverStartRequests: ru.hznik.devicebridge.server.ServerStartRequests =
+        ru.hznik.devicebridge.server.ServerStartRequests(),
 ) : ViewModel() {
     private val lifecycleState = observeServerLifecycle()
+    private val lastStopReason = observeServerLifecycle.lastStopReason()
     private val browserSessionState = observeBrowserSessions()
     private val textTransferState = observeTextTransfers()
     private val fileTransferState = observeFileTransfers()
@@ -73,6 +77,15 @@ class HomeViewModel @Inject constructor(
     val effects = effectChannel.receiveAsFlow()
 
     init {
+        viewModelScope.launch {
+            // A tile tap that needed the visible screen continues as the same explicit start.
+            serverStartRequests.pending.collect { requestId ->
+                if (requestId != null) {
+                    serverStartRequests.consume(requestId)
+                    requestPermissionsOrStart()
+                }
+            }
+        }
         viewModelScope.launch {
             combine(
                 lifecycleState,
@@ -256,7 +269,10 @@ class HomeViewModel @Inject constructor(
         previous: ServerSessionUiState = ServerSessionUiState(),
     ): ServerSessionUiState {
         val base = when (this) {
-            ServerLifecycleState.Stopped -> ServerSessionUiState()
+            ServerLifecycleState.Stopped -> ServerSessionUiState(
+                idleStoppedAfterMinutes =
+                    (lastStopReason.value as? ServerStopReason.IdleTimeout)?.minutes,
+            )
             is ServerLifecycleState.Starting -> ServerSessionUiState(
                 status = HomeServerStatus.Starting,
             )

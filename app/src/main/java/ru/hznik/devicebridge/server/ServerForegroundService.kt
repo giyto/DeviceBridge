@@ -17,6 +17,7 @@ import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import ru.hznik.devicebridge.data.server.IdleStopController
 import ru.hznik.devicebridge.data.server.ServerLifecycleCoordinator
 import ru.hznik.devicebridge.di.ApplicationScope
 import ru.hznik.devicebridge.domain.model.ServerLifecycleError
@@ -45,6 +46,9 @@ class ServerForegroundService : Service() {
     lateinit var fileTransferRepository: FileTransferRepository
 
     @Inject
+    lateinit var idleStopController: IdleStopController
+
+    @Inject
     @ApplicationScope
     lateinit var applicationScope: CoroutineScope
 
@@ -53,16 +57,25 @@ class ServerForegroundService : Service() {
     private var pendingStopStartId: Int? = null
     private var stateCollectionJob: Job? = null
     private var stopJob: Job? = null
+    private var idleStopJob: Job? = null
 
     override fun onCreate() {
         super.onCreate()
+        idleStopJob = idleStopController.run(applicationScope) { timeout ->
+            withContext(Dispatchers.Main.immediate) {
+                // Same path as the notification "Stop" action, only with the idle reason.
+                pendingStopStartId = latestStartId
+                requestStop(ServerStopReason.IdleTimeout(timeout.minutes ?: 0))
+            }
+        }
         stateCollectionJob = applicationScope.launch {
             combine(
                 coordinator.state,
                 browserSessionRepository.state,
                 textTransferRepository.state,
                 fileTransferRepository.state,
-            ) { lifecycleState, _, _, _ -> lifecycleState }
+                idleStopController.stopAtWallClockMs,
+            ) { lifecycleState, _, _, _, _ -> lifecycleState }
                 .collect { state ->
                 withContext(Dispatchers.Main.immediate) {
                     if (!foregroundStarted) {
@@ -148,6 +161,8 @@ class ServerForegroundService : Service() {
     override fun onDestroy() {
         stateCollectionJob?.cancel()
         stateCollectionJob = null
+        idleStopJob?.cancel()
+        idleStopJob = null
         if (
             stopJob == null &&
             coordinator.state.value !is ServerLifecycleState.Stopped &&
@@ -160,12 +175,12 @@ class ServerForegroundService : Service() {
         super.onDestroy()
     }
 
-    private fun requestStop() {
+    private fun requestStop(reason: ServerStopReason = ServerStopReason.UserRequested) {
         if (stopJob?.isActive == true) {
             return
         }
         stopJob = applicationScope.launch {
-            coordinator.stop(ServerStopReason.UserRequested)
+            coordinator.stop(reason)
             withContext(Dispatchers.Main.immediate) {
                 pendingStopStartId?.let { stopStartId ->
                     finishForegroundService(stopStartId)

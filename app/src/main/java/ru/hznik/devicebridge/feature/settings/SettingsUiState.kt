@@ -1,6 +1,7 @@
 package ru.hznik.devicebridge.feature.settings
 
 import ru.hznik.devicebridge.domain.settings.DeviceSettings
+import ru.hznik.devicebridge.domain.settings.IdleStopTimeout
 import ru.hznik.devicebridge.domain.settings.ThemePreference
 import ru.hznik.devicebridge.domain.trust.TrustedBrowserId
 
@@ -43,6 +44,7 @@ data class SettingsUiState(
     val destinationState: SettingsFieldState = SettingsFieldState(),
     val fileLimitState: SettingsFieldState = SettingsFieldState(),
     val autoAcceptState: SettingsFieldState = SettingsFieldState(),
+    val idleStopState: SettingsFieldState = SettingsFieldState(),
     val trustedBrowsers: List<TrustedBrowserUiState> = emptyList(),
     val destinationAvailability: DestinationAvailability = DestinationAvailability.NONE,
     val revokingTrustedBrowserIds: Set<TrustedBrowserId> = emptySet(),
@@ -87,6 +89,7 @@ sealed interface SettingsAction {
     data object RevokeAllTrustedBrowsers : SettingsAction
     data class ThemeSelected(val value: ThemePreference) : SettingsAction
     data class AutoAcceptToggled(val enabled: Boolean) : SettingsAction
+    data class IdleStopSelected(val value: IdleStopTimeout) : SettingsAction
 }
 
 sealed interface SettingsEffect {

@@ -40,5 +40,9 @@ class EffectiveFileLimitProviderTest {
 
         override suspend fun updateAutoAcceptTrustedFiles(enabled: Boolean): SettingsUpdateResult =
             error("Not used")
+
+        override suspend fun updateIdleStopTimeout(
+            value: ru.hznik.devicebridge.domain.settings.IdleStopTimeout,
+        ): SettingsUpdateResult = error("Not used")
     }
 }

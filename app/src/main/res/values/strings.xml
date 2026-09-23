@@ -1,3 +1,4 @@
 <resources>
     <string name="app_name">DeviceBridge</string>
+    <string name="tile_label">DeviceBridge</string>
 </resources>
