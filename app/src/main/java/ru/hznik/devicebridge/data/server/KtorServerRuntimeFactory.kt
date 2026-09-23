@@ -26,6 +26,7 @@ import ru.hznik.devicebridge.data.file.FileUploadTargetFactory
 import ru.hznik.devicebridge.data.file.FileDownloadSourceFactory
 import ru.hznik.devicebridge.data.file.FileSourceRegistry
 import ru.hznik.devicebridge.data.file.CompletedFileRegistry
+import ru.hznik.devicebridge.data.file.AutoAcceptLifecycle
 import ru.hznik.devicebridge.data.file.FileDestinationLeaseRegistry
 import ru.hznik.devicebridge.domain.session.ServerGenerationId
 import ru.hznik.devicebridge.domain.settings.DeviceSettings
@@ -96,6 +97,7 @@ class KtorServerRuntimeFactory @Inject constructor(
         EffectiveFileLimitProvider.hardLimit(),
     @param:ProductionServerPort
     private val preferredPort: Int = DEFAULT_PRODUCTION_SERVER_PORT,
+    private val autoAccept: AutoAcceptLifecycle = AutoAcceptLifecycle.None,
 ) : ServerRuntimeFactory {
 
     init {
@@ -119,6 +121,7 @@ class KtorServerRuntimeFactory @Inject constructor(
         effectiveFileLimitBytes = effectiveFileLimitProvider::currentBytes,
         deviceName = effectiveFileLimitProvider::currentDeviceName,
         preferredPort = preferredPort,
+        autoAccept = autoAccept,
     )
 }
 
@@ -139,6 +142,7 @@ private class KtorServerRuntime(
     private val effectiveFileLimitBytes: () -> Long,
     private val deviceName: () -> String,
     private val preferredPort: Int,
+    private val autoAccept: AutoAcceptLifecycle,
 ) : ServerRuntime {
 
     private var stopServer: (() -> Unit)? = null
@@ -235,10 +239,12 @@ private class KtorServerRuntime(
         textTransferCoordinator.activate(generationId)
         fileTransferCoordinator.activate(generationId)
         sessionHandle.set(handle)
+        autoAccept.activate()
     }
 
     override suspend fun closeSessionGeneration() {
         val handle = sessionHandle.getAndSet(null) ?: return
+        autoAccept.deactivate()
         fileTransferCoordinator.close(handle.generationId)
         textTransferCoordinator.close(handle.generationId)
         browserSessionCoordinator.closeGeneration(handle)

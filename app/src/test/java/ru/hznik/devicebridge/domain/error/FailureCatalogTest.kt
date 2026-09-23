@@ -294,6 +294,11 @@ class FailureCatalogTest {
                 FailureSeverity.TERMINAL,
                 RecoveryAction.EDIT_SETTING,
             ),
+            SettingsValidationError.AUTO_ACCEPT_DESTINATION to expected(
+                FailureCode.FILE_STORAGE_UNAVAILABLE,
+                FailureSeverity.RECOVERABLE,
+                RecoveryAction.SELECT_DESTINATION,
+            ),
         )
 
         assertEquals(SettingsValidationError.entries.toSet(), settingsCases.keys)

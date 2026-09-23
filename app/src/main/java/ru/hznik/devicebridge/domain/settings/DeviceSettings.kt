@@ -23,6 +23,7 @@ data class DeviceSettings(
     val retentionDays: Int,
     val destinationTree: DestinationTree?,
     val effectiveFileLimitBytes: Long,
+    val autoAcceptTrustedFiles: Boolean = false,
 ) {
     init {
         require(deviceName.isNotBlank())
@@ -51,4 +52,5 @@ enum class SettingsValidationError {
     DEVICE_NAME,
     RETENTION_DAYS,
     FILE_LIMIT,
+    AUTO_ACCEPT_DESTINATION,
 }

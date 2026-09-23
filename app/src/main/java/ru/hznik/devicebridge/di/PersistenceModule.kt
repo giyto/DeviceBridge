@@ -46,6 +46,7 @@ import ru.hznik.devicebridge.domain.usecase.ObserveSettingsUseCase
 import ru.hznik.devicebridge.domain.usecase.UpdateDestinationTreeUseCase
 import ru.hznik.devicebridge.domain.usecase.UpdateDeviceNameUseCase
 import ru.hznik.devicebridge.domain.usecase.UpdateFileLimitUseCase
+import ru.hznik.devicebridge.domain.usecase.UpdateAutoAcceptTrustedFilesUseCase
 import ru.hznik.devicebridge.domain.usecase.UpdateRetentionDaysUseCase
 
 private const val DATABASE_NAME = "devicebridge.db"
@@ -221,6 +222,11 @@ object PersistenceModule {
     fun provideUpdateFileLimitUseCase(
         repository: SettingsRepository,
     ): UpdateFileLimitUseCase = UpdateFileLimitUseCase(repository)
+
+    @Provides
+    fun provideUpdateAutoAcceptTrustedFilesUseCase(
+        repository: SettingsRepository,
+    ): UpdateAutoAcceptTrustedFilesUseCase = UpdateAutoAcceptTrustedFilesUseCase(repository)
 }
 
 @EntryPoint

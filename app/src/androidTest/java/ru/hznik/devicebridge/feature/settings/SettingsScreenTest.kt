@@ -8,6 +8,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.test.assertIsEnabled
+import androidx.compose.ui.test.assertIsOff
+import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertIsFocused
 import androidx.compose.ui.test.assertIsNotFocused
 import androidx.compose.ui.test.assertTextContains
@@ -38,6 +40,39 @@ import ru.hznik.devicebridge.domain.trust.TrustedBrowserId
 class SettingsScreenTest {
     @get:Rule
     val composeRule = createComposeRule()
+
+    @Test
+    fun autoAcceptToggleReflectsDestinationAndDispatchesAction() {
+        val actions = mutableListOf<SettingsAction>()
+        val tree = DestinationTree("content://documents/tree/devicebridge")
+        var state by mutableStateOf(
+            SettingsUiState(loadState = SettingsLoadState.CONTENT),
+        )
+        composeRule.setContent {
+            MaterialTheme {
+                SettingsScreen(uiState = state, onAction = { actions += it })
+            }
+        }
+
+        composeRule.onNodeWithTag("auto-accept-toggle").performScrollTo().assertIsNotEnabled()
+        composeRule.onNodeWithText("Сначала выберите папку для входящих файлов.").assertIsDisplayed()
+
+        state = state.copy(
+            settings = state.settings.copy(destinationTree = tree),
+            destinationAvailability = DestinationAvailability.AVAILABLE,
+        )
+        composeRule.onNodeWithTag("auto-accept-toggle").performScrollTo().assertIsEnabled().assertIsOff()
+        composeRule.onNodeWithTag("auto-accept-toggle").performClick()
+        assertEquals(listOf<SettingsAction>(SettingsAction.AutoAcceptToggled(true)), actions)
+
+        state = state.copy(
+            settings = state.settings.copy(autoAcceptTrustedFiles = true),
+            destinationAvailability = DestinationAvailability.UNAVAILABLE,
+        )
+        composeRule.onNodeWithTag("auto-accept-toggle").performScrollTo().assertIsOn()
+        composeRule.onNodeWithText("Приостановлено: папка недоступна. Выберите папку снова.")
+            .assertIsDisplayed()
+    }
 
     @Test
     fun exposesSettingsControlsAndDispatchesIndependentActions() {

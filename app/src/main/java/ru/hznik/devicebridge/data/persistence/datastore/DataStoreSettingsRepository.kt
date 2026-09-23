@@ -2,6 +2,7 @@ package ru.hznik.devicebridge.data.persistence.datastore
 
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
+import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.emptyPreferences
 import androidx.datastore.preferences.core.intPreferencesKey
@@ -24,6 +25,7 @@ internal object SettingsPreferenceKeys {
     val retentionDays = intPreferencesKey("retention_days")
     val destinationTree = stringPreferencesKey("destination_tree_uri")
     val effectiveFileLimitBytes = longPreferencesKey("effective_file_limit_bytes")
+    val autoAcceptTrustedFiles = booleanPreferencesKey("auto_accept_trusted_files")
 }
 
 class DataStoreSettingsRepository(
@@ -87,6 +89,22 @@ class DataStoreSettingsRepository(
         }
     }
 
+    override suspend fun updateAutoAcceptTrustedFiles(enabled: Boolean): SettingsUpdateResult {
+        var rejected = false
+        val result = update { preferences ->
+            if (enabled && preferences[SettingsPreferenceKeys.destinationTree] == null) {
+                rejected = true
+            } else {
+                preferences[SettingsPreferenceKeys.autoAcceptTrustedFiles] = enabled
+            }
+        }
+        return if (rejected) {
+            SettingsUpdateResult.Invalid(SettingsValidationError.AUTO_ACCEPT_DESTINATION)
+        } else {
+            result
+        }
+    }
+
     private suspend fun update(
         transform: suspend (androidx.datastore.preferences.core.MutablePreferences) -> Unit,
     ): SettingsUpdateResult {
@@ -124,6 +142,8 @@ class DataStoreSettingsRepository(
             retentionDays = retentionDays,
             destinationTree = destinationTree,
             effectiveFileLimitBytes = effectiveFileLimitBytes,
+            autoAcceptTrustedFiles =
+                preferences[SettingsPreferenceKeys.autoAcceptTrustedFiles] ?: false,
         )
     }
 }

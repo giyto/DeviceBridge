@@ -37,5 +37,8 @@ class EffectiveFileLimitProviderTest {
 
         override suspend fun updateEffectiveFileLimitBytes(value: Long): SettingsUpdateResult =
             error("Not used")
+
+        override suspend fun updateAutoAcceptTrustedFiles(enabled: Boolean): SettingsUpdateResult =
+            error("Not used")
     }
 }

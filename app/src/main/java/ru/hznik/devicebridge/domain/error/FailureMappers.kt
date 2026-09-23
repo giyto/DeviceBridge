@@ -242,6 +242,11 @@ fun SettingsValidationError.toUserFacingFailure(): UserFacingFailure = when (thi
         FailureSeverity.TERMINAL,
         RecoveryAction.EDIT_SETTING,
     )
+    SettingsValidationError.AUTO_ACCEPT_DESTINATION -> failure(
+        FailureCode.FILE_STORAGE_UNAVAILABLE,
+        FailureSeverity.RECOVERABLE,
+        RecoveryAction.SELECT_DESTINATION,
+    )
 }
 
 private fun failure(

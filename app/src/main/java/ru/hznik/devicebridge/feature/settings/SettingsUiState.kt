@@ -17,6 +17,13 @@ enum class DestinationAvailability {
     UNAVAILABLE,
 }
 
+enum class AutoAcceptStatus {
+    NO_DESTINATION,
+    OFF,
+    ON,
+    PAUSED,
+}
+
 data class SettingsFieldState(
     val isSaving: Boolean = false,
     val errorMessage: String? = null,
@@ -35,13 +42,22 @@ data class SettingsUiState(
     val retentionState: SettingsFieldState = SettingsFieldState(),
     val destinationState: SettingsFieldState = SettingsFieldState(),
     val fileLimitState: SettingsFieldState = SettingsFieldState(),
+    val autoAcceptState: SettingsFieldState = SettingsFieldState(),
     val trustedBrowsers: List<TrustedBrowserUiState> = emptyList(),
     val destinationAvailability: DestinationAvailability = DestinationAvailability.NONE,
     val revokingTrustedBrowserIds: Set<TrustedBrowserId> = emptySet(),
     val revokeAllTrustedBrowsersPending: Boolean = false,
     val trustedBrowsersError: String? = null,
     val themePreference: ThemePreference? = null,
-)
+) {
+    val autoAcceptStatus: AutoAcceptStatus
+        get() = when {
+            settings.destinationTree == null -> AutoAcceptStatus.NO_DESTINATION
+            !settings.autoAcceptTrustedFiles -> AutoAcceptStatus.OFF
+            destinationAvailability == DestinationAvailability.UNAVAILABLE -> AutoAcceptStatus.PAUSED
+            else -> AutoAcceptStatus.ON
+        }
+}
 
 data class TrustedBrowserUiState(
     val id: TrustedBrowserId,
@@ -70,6 +86,7 @@ sealed interface SettingsAction {
     ) : SettingsAction
     data object RevokeAllTrustedBrowsers : SettingsAction
     data class ThemeSelected(val value: ThemePreference) : SettingsAction
+    data class AutoAcceptToggled(val enabled: Boolean) : SettingsAction
 }
 
 sealed interface SettingsEffect {

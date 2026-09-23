@@ -20,6 +20,7 @@ import ru.hznik.devicebridge.domain.settings.DestinationTree
 import ru.hznik.devicebridge.domain.settings.SettingsUpdateResult
 import ru.hznik.devicebridge.domain.settings.SettingsValidationError
 import ru.hznik.devicebridge.domain.usecase.ObserveSettingsUseCase
+import ru.hznik.devicebridge.domain.usecase.UpdateAutoAcceptTrustedFilesUseCase
 import ru.hznik.devicebridge.domain.usecase.UpdateDestinationTreeUseCase
 import ru.hznik.devicebridge.domain.usecase.UpdateDeviceNameUseCase
 import ru.hznik.devicebridge.domain.usecase.UpdateFileLimitUseCase
@@ -39,6 +40,7 @@ class SettingsViewModel @Inject constructor(
     private val updateRetentionDays: UpdateRetentionDaysUseCase,
     private val updateDestinationTree: UpdateDestinationTreeUseCase,
     private val updateFileLimit: UpdateFileLimitUseCase,
+    private val updateAutoAcceptTrustedFiles: UpdateAutoAcceptTrustedFilesUseCase,
     observeTrustedBrowsers: ObserveTrustedBrowsersUseCase,
     private val revokeTrustedBrowser: RevokeTrustedBrowserUseCase,
     private val revokeAllTrustedBrowsers: RevokeAllTrustedBrowsersUseCase,
@@ -200,6 +202,7 @@ class SettingsViewModel @Inject constructor(
             )
             is SettingsAction.RevokeTrustedBrowser -> revokeTrusted(action.browserId)
             SettingsAction.RevokeAllTrustedBrowsers -> revokeAllTrusted()
+            is SettingsAction.AutoAcceptToggled -> toggleAutoAccept(action.enabled)
         }
     }
 
@@ -252,6 +255,25 @@ class SettingsViewModel @Inject constructor(
             field = SettingField.DESTINATION,
             availabilityOnSuccess = availabilityOnSuccess,
             operation = { updateDestinationTree(value) },
+        )
+    }
+
+    private fun toggleAutoAccept(enabled: Boolean) {
+        val state = mutableUiState.value
+        if (
+            enabled &&
+            (state.settings.destinationTree == null ||
+                state.destinationAvailability == DestinationAvailability.UNAVAILABLE)
+        ) {
+            setFieldError(
+                SettingField.AUTO_ACCEPT,
+                SettingsValidationError.AUTO_ACCEPT_DESTINATION.message(),
+            )
+            return
+        }
+        updateField(
+            field = SettingField.AUTO_ACCEPT,
+            operation = { updateAutoAcceptTrustedFiles(enabled) },
         )
     }
 
@@ -357,7 +379,7 @@ class SettingsViewModel @Inject constructor(
                 SettingField.DEVICE_NAME -> current.deviceNameInput
                 SettingField.RETENTION -> current.retentionInput
                 SettingField.FILE_LIMIT -> current.fileLimitMiBInput
-                SettingField.DESTINATION -> null
+                SettingField.DESTINATION, SettingField.AUTO_ACCEPT -> null
             }
             val hasNewerDraft = submittedDraft != null && currentDraft != submittedDraft
             val base = current.copy(
@@ -393,6 +415,9 @@ class SettingsViewModel @Inject constructor(
                 SettingField.DESTINATION -> base.copy(
                     destinationState = SettingsFieldState(),
                 )
+                SettingField.AUTO_ACCEPT -> base.copy(
+                    autoAcceptState = SettingsFieldState(),
+                )
             }
         }
     }
@@ -417,6 +442,8 @@ class SettingsViewModel @Inject constructor(
                     current.copy(destinationState = transform(current.destinationState))
                 SettingField.FILE_LIMIT ->
                     current.copy(fileLimitState = transform(current.fileLimitState))
+                SettingField.AUTO_ACCEPT ->
+                    current.copy(autoAcceptState = transform(current.autoAcceptState))
             }
         }
     }
@@ -427,10 +454,12 @@ private enum class SettingField {
     RETENTION,
     DESTINATION,
     FILE_LIMIT,
+    AUTO_ACCEPT,
 }
 
 private fun SettingsValidationError.message(): String = when (this) {
     SettingsValidationError.DEVICE_NAME -> "Введите имя длиной от 1 до 40 символов."
     SettingsValidationError.RETENTION_DAYS -> "Введите число от 1 до 365."
     SettingsValidationError.FILE_LIMIT -> "Введите размер от 1 до 1024 МиБ."
+    SettingsValidationError.AUTO_ACCEPT_DESTINATION -> "Сначала выберите папку для входящих файлов."
 }

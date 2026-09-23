@@ -22,6 +22,19 @@ class FileDestinationLeaseRegistry @Inject constructor() {
         return destinationId
     }
 
+    /** Registers [lease] only when no destination is registered yet; returns null otherwise. */
+    fun registerIfAbsent(
+        transferId: FileTransferId,
+        lease: ScopedDocumentTreeLease,
+    ): FileDestinationId? {
+        val destinationId = FileDestinationId(transferId.value)
+        val previous = leases.putIfAbsent(
+            transferId,
+            RegisteredDestination(destinationId, lease),
+        )
+        return destinationId.takeIf { previous == null }
+    }
+
     fun uri(
         transferId: FileTransferId,
         destinationId: FileDestinationId,
@@ -33,6 +46,12 @@ class FileDestinationLeaseRegistry @Inject constructor() {
 
     fun release(transferId: FileTransferId) {
         leases.remove(transferId)?.lease?.release()
+    }
+
+    /** Releases the registration only if it still holds this exact [lease]. */
+    fun release(transferId: FileTransferId, lease: ScopedDocumentTreeLease) {
+        val registered = RegisteredDestination(FileDestinationId(transferId.value), lease)
+        if (leases.remove(transferId, registered)) lease.release()
     }
 
     fun releaseAll() {
