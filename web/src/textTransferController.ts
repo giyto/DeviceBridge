@@ -329,7 +329,11 @@ export class TextTransferController {
     let merged = this.state.items;
     for (const item of items) {
       if (merged.some((existing) => existing.messageId === item.messageId)) continue;
-      merged = upsertBounded(merged, item);
+      // The phone sends its text while it is still "sending"; having it here is the delivery.
+      merged = upsertBounded(
+        merged,
+        item.direction === "ANDROID_TO_BROWSER" ? { ...item, status: "DELIVERED" } : item,
+      );
     }
     this.emit({ ...this.state, items: merged });
   }
