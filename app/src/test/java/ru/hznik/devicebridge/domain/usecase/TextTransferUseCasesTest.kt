@@ -8,7 +8,6 @@ import org.junit.Assert.assertSame
 import org.junit.Test
 import ru.hznik.devicebridge.domain.repository.TextTransferRepository
 import ru.hznik.devicebridge.domain.session.BrowserSessionId
-import ru.hznik.devicebridge.domain.session.ServerGenerationId
 import ru.hznik.devicebridge.domain.text.IncomingTextRequest
 import ru.hznik.devicebridge.domain.text.SendTextRequest
 import ru.hznik.devicebridge.domain.text.TextMessageId
@@ -32,22 +31,12 @@ class TextTransferUseCasesTest {
             sessionId = BrowserSessionId("session-1"),
             content = "hello",
         )
-        val incoming = IncomingTextRequest(
-            id = TextMessageId("message-2"),
-            generationId = ServerGenerationId(7),
-            sessionId = BrowserSessionId("session-2"),
-            browserLabel = "Edge on Windows",
-            content = "from browser",
-            requestedAtEpochMillis = 2_000,
-        )
         val retryId = TextMessageId("message-3")
 
         SendTextToBrowserUseCase(repository)(send)
-        ReceiveTextFromBrowserUseCase(repository)(incoming)
         RetryTextTransferUseCase(repository)(retryId)
 
         assertEquals(listOf(send), repository.sent)
-        assertEquals(listOf(incoming), repository.received)
         assertEquals(listOf(retryId), repository.retried)
     }
 
@@ -55,7 +44,6 @@ class TextTransferUseCasesTest {
         override val state: StateFlow<TextTransferState> =
             MutableStateFlow(TextTransferState.empty())
         val sent = mutableListOf<SendTextRequest>()
-        val received = mutableListOf<IncomingTextRequest>()
         val retried = mutableListOf<TextMessageId>()
 
         override suspend fun send(request: SendTextRequest): TextTransferResult {
@@ -64,7 +52,6 @@ class TextTransferUseCasesTest {
         }
 
         override suspend fun receive(request: IncomingTextRequest): TextTransferResult {
-            received += request
             return TextTransferResult.Rejected(TextTransferRejection.SESSION_UNAVAILABLE)
         }
 

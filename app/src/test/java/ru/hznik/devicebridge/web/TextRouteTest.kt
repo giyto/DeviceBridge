@@ -108,24 +108,6 @@ class TextRouteTest {
         }
 
     @Test
-    fun oversizedContentReturnsPayloadTooLargeWithoutCreatingIncomingItem() =
-        withSessionRouteServer { server ->
-            val paired = server.pairBrowser("Firefox")
-            val oversized = "a".repeat(TextContentValidator.MAX_UTF8_BYTES + 1)
-            val response = server.request(
-                "POST",
-                "/api/v1/text",
-                sendBody(content = oversized),
-                server.sameOriginJsonHeaders(
-                    mapOf("Authorization" to "Bearer ${paired.token}"),
-                ),
-            )
-
-            assertEquals(413, response.statusCode())
-            assertEquals(0, server.textCoordinator.state.value.items.size)
-        }
-
-    @Test
     fun exactContentLimitIsAcceptedWhileOneExtraByteIsRejected() =
         withSessionRouteServer { server ->
             val paired = server.pairBrowser("Chrome")

@@ -9,7 +9,7 @@ import org.junit.Test
 class ReleaseWebIsolationContractTest {
 
     @Test
-    fun releaseContainsSafeKtorWebRuntimeWhileDiagnosticsRemainDebugOnly() {
+    fun releaseContainsSafeKtorWebRuntimeAndNoDebugOnlyServerCode() {
         val buildFile = Files.readString(Path.of("build.gradle.kts"))
         val viteConfig = Files.readString(Path.of("../web/vite.config.ts"))
 
@@ -20,14 +20,7 @@ class ReleaseWebIsolationContractTest {
         assertFalse(buildFile.contains("debugImplementation(libs.ktor.server.websockets)"))
         assertTrue(buildFile.contains("outputs.dir(webOutputDirectory)"))
         assertTrue(viteConfig.contains("fileName: \".gitkeep\""))
-        assertFalse(Files.exists(Path.of("src/debug/java/ru/hznik/devicebridge/web/WebRoutes.kt")))
         assertTrue(Files.exists(Path.of("src/main/java/ru/hznik/devicebridge/web/WebRoutes.kt")))
-        assertTrue(
-            Files.exists(
-                Path.of(
-                    "src/debug/java/ru/hznik/devicebridge/diagnostics/server/DiagnosticRoutes.kt",
-                ),
-            ),
-        )
+        assertFalse(Files.exists(Path.of("src/debug/java")))
     }
 }

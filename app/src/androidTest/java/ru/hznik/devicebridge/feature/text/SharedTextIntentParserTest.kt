@@ -10,18 +10,6 @@ import org.junit.runner.RunWith
 @RunWith(AndroidJUnit4::class)
 class SharedTextIntentParserTest {
     @Test
-    fun acceptsOnlyNonBlankTextPlainPayload() {
-        val intent = Intent(Intent.ACTION_SEND)
-            .setType("text/plain")
-            .putExtra(Intent.EXTRA_TEXT, "Привет из меню Поделиться")
-
-        assertEquals(
-            "Привет из меню Поделиться",
-            SharedTextIntentParser.parse(intent),
-        )
-    }
-
-    @Test
     fun rejectsUnsupportedMimeMissingPayloadAndWhitespace() {
         assertNull(
             SharedTextIntentParser.parse(

@@ -1,8 +1,9 @@
-package ru.hznik.devicebridge.diagnostics.stream
+package ru.hznik.devicebridge.benchmark
 
 import java.security.MessageDigest
 
-class DiagnosticPayloadGenerator(
+/** Deterministic payload of any size, so a benchmark knows its SHA-256 without storing it. */
+class BenchmarkPayloadGenerator(
     val totalBytes: Long,
     val chunkSize: Int,
 ) {
@@ -95,5 +96,5 @@ class StreamingSha256 {
     }
 }
 
-const val DEFAULT_DIAGNOSTIC_PAYLOAD_BYTES: Long = 500L * 1024L * 1024L
-const val DEFAULT_DIAGNOSTIC_CHUNK_BYTES: Int = 64 * 1024
+const val BENCHMARK_PAYLOAD_BYTES: Long = 500L * 1024L * 1024L
+const val BENCHMARK_CHUNK_BYTES: Int = 64 * 1024

@@ -1,7 +1,6 @@
 package ru.hznik.devicebridge.data.session
 
 import ru.hznik.devicebridge.core.protocol.session.MAX_CLIENT_LABEL_LENGTH
-import ru.hznik.devicebridge.core.protocol.session.MAX_SESSION_JSON_BYTES
 
 data class NormalizedClientMetadata(
     val browserLabel: String,
@@ -33,8 +32,6 @@ object ClientMetadataNormalizer {
         }
         return ClientMetadataResult.Valid(NormalizedClientMetadata(label, sourceIpv4))
     }
-
-    fun isJsonBodySizeAccepted(bytes: ByteArray): Boolean = bytes.size <= MAX_SESSION_JSON_BYTES
 
     private fun isCanonicalIpv4(value: String): Boolean {
         val octets = value.split('.')

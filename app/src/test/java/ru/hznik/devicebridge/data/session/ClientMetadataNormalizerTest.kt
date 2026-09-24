@@ -1,9 +1,7 @@
 package ru.hznik.devicebridge.data.session
 
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertTrue
 import org.junit.Test
-import ru.hznik.devicebridge.core.protocol.session.MAX_SESSION_JSON_BYTES
 import ru.hznik.devicebridge.core.protocol.session.MAX_CLIENT_LABEL_LENGTH
 
 class ClientMetadataNormalizerTest {
@@ -61,15 +59,6 @@ class ClientMetadataNormalizerTest {
         assertEquals(
             ClientMetadataResult.Invalid(ClientMetadataError.INVALID_LABEL),
             ClientMetadataNormalizer.normalize("   ", "192.168.1.20"),
-        )
-    }
-
-    @Test
-    fun jsonBodyLimitIsEnforcedInUtf8Bytes() {
-        assertTrue(ClientMetadataNormalizer.isJsonBodySizeAccepted(ByteArray(MAX_SESSION_JSON_BYTES)))
-        assertEquals(
-            false,
-            ClientMetadataNormalizer.isJsonBodySizeAccepted(ByteArray(MAX_SESSION_JSON_BYTES + 1)),
         )
     }
 }

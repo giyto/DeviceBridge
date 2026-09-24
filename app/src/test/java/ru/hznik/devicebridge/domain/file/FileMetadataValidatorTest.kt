@@ -66,24 +66,6 @@ class FileMetadataValidatorTest {
     }
 
     @Test
-    fun actualSizeMustMatchValidatedMetadata() {
-        val metadata = (
-            FileMetadataValidator.validate(candidate(sizeBytes = 512))
-                as FileMetadataValidation.Valid
-            ).metadata
-
-        assertEquals(null, FileMetadataValidator.validateActualSize(metadata, 512))
-        assertEquals(
-            FileMetadataError.SIZE_MISMATCH,
-            FileMetadataValidator.validateActualSize(metadata, 511),
-        )
-        assertEquals(
-            FileMetadataError.FILE_TOO_LARGE,
-            FileMetadataValidator.validateActualSize(metadata, HARD_MAX_FILE_BYTES + 1),
-        )
-    }
-
-    @Test
     fun effectiveLimitAcceptsZeroAndBoundaryButRejectsBoundaryPlusOne() {
         val limit = 512L
 

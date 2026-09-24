@@ -55,15 +55,6 @@ class DataStoreSettingsRepositoryTest {
     }
 
     @Test
-    fun invalidWriteKeepsLastValidValue() = runTest {
-        val repository = repository()
-        repository.updateRetentionDays(14)
-
-        assertTrue(repository.updateRetentionDays(0) is SettingsUpdateResult.Invalid)
-        assertEquals(14, repository.settings.first().retentionDays)
-    }
-
-    @Test
     fun everyInvalidFieldKeepsItsLastValidValue() = runTest {
         val repository = repository()
         repository.updateDeviceName("Pixel")

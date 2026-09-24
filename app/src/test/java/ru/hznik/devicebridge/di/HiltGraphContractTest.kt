@@ -72,7 +72,6 @@ class HiltGraphContractTest {
         assertTrue(module.contains("provideTextTransferRepository"))
         assertTrue(module.contains("provideObserveTextTransfersUseCase"))
         assertTrue(module.contains("provideSendTextToBrowserUseCase"))
-        assertTrue(module.contains("provideReceiveTextFromBrowserUseCase"))
         assertTrue(module.contains("provideRetryTextTransferUseCase"))
         listOf(repository, useCases).forEach { source ->
             assertTrue(!source.contains("io.ktor"))
@@ -104,7 +103,6 @@ class HiltGraphContractTest {
         assertTrue(module.contains("provideApproveFileTransferUseCase"))
         assertTrue(module.contains("provideCancelFileTransferUseCase"))
         assertTrue(module.contains("provideRetryFileTransferUseCase"))
-        assertTrue(module.contains("provideVerifyFileTransferUseCase"))
         listOf(repository, useCases).forEach { source ->
             assertTrue(!source.contains("io.ktor"))
             assertTrue(!source.contains("android."))

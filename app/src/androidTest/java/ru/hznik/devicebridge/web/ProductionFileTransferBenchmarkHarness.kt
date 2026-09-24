@@ -46,12 +46,12 @@ import ru.hznik.devicebridge.data.session.ChallengeCreationResult
 import ru.hznik.devicebridge.data.session.SessionConfirmationResult
 import ru.hznik.devicebridge.data.session.security.CryptographicRandom
 import ru.hznik.devicebridge.data.session.security.SessionSecretGenerator
-import ru.hznik.devicebridge.diagnostics.metrics.AndroidStreamingMemorySampler
-import ru.hznik.devicebridge.diagnostics.metrics.StreamingMetricRecord
-import ru.hznik.devicebridge.diagnostics.stream.DEFAULT_DIAGNOSTIC_CHUNK_BYTES
-import ru.hznik.devicebridge.diagnostics.stream.DEFAULT_DIAGNOSTIC_PAYLOAD_BYTES
-import ru.hznik.devicebridge.diagnostics.stream.DiagnosticPayloadGenerator
-import ru.hznik.devicebridge.diagnostics.stream.StreamingSha256
+import ru.hznik.devicebridge.benchmark.AndroidStreamingMemorySampler
+import ru.hznik.devicebridge.benchmark.StreamingMetricRecord
+import ru.hznik.devicebridge.benchmark.BENCHMARK_CHUNK_BYTES
+import ru.hznik.devicebridge.benchmark.BENCHMARK_PAYLOAD_BYTES
+import ru.hznik.devicebridge.benchmark.BenchmarkPayloadGenerator
+import ru.hznik.devicebridge.benchmark.StreamingSha256
 import ru.hznik.devicebridge.domain.file.CreateFileTransfersRequest
 import ru.hznik.devicebridge.domain.file.FileCommandId
 import ru.hznik.devicebridge.domain.file.FileDestinationId
@@ -136,8 +136,8 @@ internal class ProductionFileTransferBenchmarkHarness : Closeable {
     }
 
     suspend fun verifyFiveHundredMiBBothDirections() {
-        val size = DEFAULT_DIAGNOSTIC_PAYLOAD_BYTES
-        val expectedHash = DiagnosticPayloadGenerator(size, CHUNK_BYTES).sha256()
+        val size = BENCHMARK_PAYLOAD_BYTES
+        val expectedHash = BenchmarkPayloadGenerator(size, CHUNK_BYTES).sha256()
         val sampler = AndroidStreamingMemorySampler()
 
         val uploadId = FileTransferId("benchmark-upload")
@@ -245,7 +245,7 @@ internal class ProductionFileTransferBenchmarkHarness : Closeable {
             setRequestProperty("Content-Type", "application/octet-stream")
             setFixedLengthStreamingMode(sizeBytes)
         }
-        val generator = DiagnosticPayloadGenerator(sizeBytes, CHUNK_BYTES)
+        val generator = BenchmarkPayloadGenerator(sizeBytes, CHUNK_BYTES)
         val digest = StreamingSha256()
         val startedAt = SystemClock.elapsedRealtime()
         try {
@@ -375,7 +375,7 @@ internal class ProductionFileTransferBenchmarkHarness : Closeable {
         memory: StreamingMetricRecord,
         expectedHash: String,
     ) {
-        assertEquals(DEFAULT_DIAGNOSTIC_PAYLOAD_BYTES, run.bytes)
+        assertEquals(BENCHMARK_PAYLOAD_BYTES, run.bytes)
         assertEquals(expectedHash, run.sha256)
         assertTrue("Transfer elapsed time was not recorded", run.elapsedMs > 0)
         assertTrue("UI ticker did not advance", run.uiTicks >= 2)
@@ -444,7 +444,7 @@ internal class ProductionFileTransferBenchmarkHarness : Closeable {
     private class GeneratedInputStream(
         private val sizeBytes: Long,
     ) : InputStream() {
-        private val generator = DiagnosticPayloadGenerator(sizeBytes, CHUNK_BYTES)
+        private val generator = BenchmarkPayloadGenerator(sizeBytes, CHUNK_BYTES)
         private var position = 0L
 
         override fun read(): Int {
@@ -489,7 +489,7 @@ internal class ProductionFileTransferBenchmarkHarness : Closeable {
     private fun ByteArray.toHex(): String = joinToString("") { "%02x".format(it) }
 
     private companion object {
-        const val CHUNK_BYTES = DEFAULT_DIAGNOSTIC_CHUNK_BYTES
+        const val CHUNK_BYTES = BENCHMARK_CHUNK_BYTES
         const val NETWORK_TIMEOUT_MILLIS = 10 * 60 * 1_000
         const val MAX_PEAK_DELTA_KB = 128L * 1024L
         const val MAX_RETAINED_DELTA_KB = 32L * 1024L

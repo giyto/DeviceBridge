@@ -62,27 +62,6 @@ class HistoryScreenTest {
     }
 
     @Test
-    fun filtersAreAccessibleActionsAndFilteredEmptyStateIsHonest() {
-        var received: HistoryAction? = null
-        composeRule.setContent {
-            MaterialTheme {
-                HistoryScreen(
-                    uiState = HistoryUiState(
-                        loadState = HistoryLoadState.EMPTY,
-                        filter = HistoryFilter(kinds = setOf(HistoryKind.FILE)),
-                    ),
-                    onAction = { received = it },
-                )
-            }
-        }
-
-        composeRule.onNodeWithTag("history-filter-trigger").performClick()
-        composeRule.onNodeWithText("Файлы").performClick()
-        assertEquals(HistoryAction.ToggleKind(HistoryKind.FILE), received)
-        composeRule.onNodeWithText("По выбранным фильтрам ничего нет").assertIsDisplayed()
-    }
-
-    @Test
     fun fileDetailsShowSafeMetadataWithoutUnavailableOpenAction() {
         val file = record("file", HistoryKind.FILE)
         composeRule.setContent {
@@ -163,7 +142,7 @@ class HistoryScreenTest {
         }
 
         composeRule.onNodeWithText("История временно недоступна").assertIsDisplayed()
-        composeRule.onNodeWithText("Операций пока нет").assertDoesNotExist()
+        composeRule.onNodeWithText("История пока пуста").assertDoesNotExist()
         composeRule.onNodeWithText("Повторить").performClick()
 
         assertEquals(listOf(HistoryAction.RetryLoad), actions)
@@ -275,6 +254,7 @@ class HistoryScreenTest {
             }
         }
 
+        composeRule.onNodeWithText("По выбранным фильтрам ничего нет").assertIsDisplayed()
         composeRule.onNodeWithTag("history-filter-trigger")
             .assertIsDisplayed()
             .performClick()
