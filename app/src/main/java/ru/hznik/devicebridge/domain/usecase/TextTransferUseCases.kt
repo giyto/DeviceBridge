@@ -21,13 +21,6 @@ class SendTextToBrowserUseCase(
         repository.send(request)
 }
 
-class ReceiveTextFromBrowserUseCase(
-    private val repository: TextTransferRepository,
-) {
-    suspend operator fun invoke(request: IncomingTextRequest): TextTransferResult =
-        repository.receive(request)
-}
-
 class RetryTextTransferUseCase(
     private val repository: TextTransferRepository,
 ) {

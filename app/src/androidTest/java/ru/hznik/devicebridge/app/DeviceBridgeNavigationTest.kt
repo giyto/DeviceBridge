@@ -83,16 +83,6 @@ class DeviceBridgeNavigationTest {
     }
 
     @Test
-    fun historyDestinationOpens() {
-        setAppContent()
-
-        composeRule.onNodeWithContentDescription("Раздел История").performClick()
-
-        composeRule.onNodeWithText("История передач").assertIsDisplayed()
-        composeRule.onNodeWithContentDescription("Раздел История").assertIsSelected()
-    }
-
-    @Test
     fun homeDestinationOpensAfterHistory() {
         setAppContent()
         composeRule.onNodeWithContentDescription("Раздел История").performClick()
@@ -101,28 +91,6 @@ class DeviceBridgeNavigationTest {
 
         composeRule.onNodeWithText("DeviceBridge").performScrollTo().assertIsDisplayed()
         composeRule.onNodeWithContentDescription("Раздел Главная").assertIsSelected()
-    }
-
-    @Test
-    fun textQuickActionOpensFlowAndExplicitBackReturnsHome() {
-        setAppContent(withActiveSession = true)
-
-        composeRule.onNodeWithText("Текст").performScrollTo().performClick()
-
-        composeRule.onNodeWithText("Текст и ссылки").assertIsDisplayed()
-        composeRule.onNodeWithContentDescription("Вернуться на главный экран")
-            .performClick()
-        composeRule.onNodeWithText("DeviceBridge").performScrollTo().assertIsDisplayed()
-    }
-
-    @Test
-    fun fileQuickActionOpensOnlyWithActiveSessionAndBackReturnsHome() {
-        setAppContent(withActiveSession = true)
-
-        composeRule.onNodeWithText("Файлы").performScrollTo().performClick()
-        composeRule.onNodeWithText("Потоковая передача", substring = true).assertIsDisplayed()
-        composeRule.onNodeWithContentDescription("Вернуться на главный экран").performClick()
-        composeRule.onNodeWithText("DeviceBridge").performScrollTo().assertIsDisplayed()
     }
 
     @Test

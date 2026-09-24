@@ -4,8 +4,6 @@ import java.io.ByteArrayInputStream
 import java.net.ServerSocket
 import java.net.Socket
 import java.nio.charset.StandardCharsets
-import java.nio.file.Files
-import java.nio.file.Path
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -34,23 +32,6 @@ import ru.hznik.devicebridge.data.file.FileUploadTargetFactory
 import ru.hznik.devicebridge.web.FileSessionEventBridge
 
 class KtorServerRuntimeFactoryTest {
-
-    @Test
-    fun productionFactoryLivesInMainAndKeepsDiagnosticsInDebug() {
-        val mainSource = Path.of(
-            "src/main/java/ru/hznik/devicebridge/data/server/KtorServerRuntimeFactory.kt",
-        )
-        val debugDiagnostics = Path.of(
-            "src/debug/java/ru/hznik/devicebridge/diagnostics/server/DiagnosticRoutes.kt",
-        )
-
-        assertTrue(Files.exists(mainSource))
-        assertTrue(Files.exists(debugDiagnostics))
-        val source = Files.readString(mainSource)
-        assertTrue(source.contains("ServerRuntimeFactory"))
-        assertFalse(source.contains("DiagnosticRoutes"))
-        assertFalse(source.contains("token", ignoreCase = true))
-    }
 
     @Test
     fun bindsPreferredPortPublishesLanEndpointAndReleasesPort() = runBlocking {

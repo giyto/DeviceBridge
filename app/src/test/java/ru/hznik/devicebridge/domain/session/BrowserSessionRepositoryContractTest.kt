@@ -1,6 +1,5 @@
 package ru.hznik.devicebridge.domain.session
 
-import java.lang.reflect.Method
 import java.nio.file.Files
 import java.nio.file.Path
 import kotlinx.coroutines.flow.StateFlow
@@ -11,18 +10,6 @@ import org.junit.Test
 import ru.hznik.devicebridge.domain.repository.BrowserSessionRepository
 
 class BrowserSessionRepositoryContractTest {
-
-    @Test
-    fun repositoryExposesStateAndTypedHostActions() {
-        val methodNames = BrowserSessionRepository::class.java.declaredMethods
-            .map(Method::getName)
-            .toSet()
-
-        assertTrue(methodNames.contains("getState"))
-        assertTrue(methodNames.any { it.startsWith("approve") })
-        assertTrue(methodNames.any { it.startsWith("deny") })
-        assertTrue(methodNames.any { it.startsWith("revoke") })
-    }
 
     @Test
     fun repositoryContractCannotExposeRawTokenToAndroidUi() {

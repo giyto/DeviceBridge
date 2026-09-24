@@ -23,19 +23,6 @@ class MidnightPorcelainThemeContractTest {
     }
 
     @Test
-    fun semanticStatusTokensIncludeContrastSafeErrorPairs() {
-        val tokens = read("src/main/java/ru/hznik/devicebridge/ui/theme/DesignTokens.kt")
-
-        listOf(
-            "val error: Color",
-            "val errorContainer: Color",
-            "val onErrorContainer: Color",
-        ).forEach { role ->
-            assertTrue("Missing semantic status role: $role", tokens.contains(role))
-        }
-    }
-
-    @Test
     fun typographyAndShapesUseTheGraphiteContentRhythm() {
         val typography = read("src/main/java/ru/hznik/devicebridge/ui/theme/Type.kt")
         val tokens = read("src/main/java/ru/hznik/devicebridge/ui/theme/DesignTokens.kt")

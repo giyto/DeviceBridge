@@ -106,18 +106,6 @@ object FileMetadataValidator {
         return FileBatchValidation.Valid(validated)
     }
 
-    fun validateActualSize(
-        metadata: FileTransferMetadata,
-        actualSizeBytes: Long,
-        maxFileBytes: Long = HARD_MAX_FILE_BYTES,
-    ): FileMetadataError? = when {
-        actualSizeBytes < 0 -> FileMetadataError.INVALID_SIZE
-        actualSizeBytes > effectiveFileLimitBytes(maxFileBytes) ->
-            FileMetadataError.FILE_TOO_LARGE
-        actualSizeBytes != metadata.sizeBytes -> FileMetadataError.SIZE_MISMATCH
-        else -> null
-    }
-
     private fun String?.toSafeMimeType(): String =
         this?.takeIf {
             it.isNotBlank() &&

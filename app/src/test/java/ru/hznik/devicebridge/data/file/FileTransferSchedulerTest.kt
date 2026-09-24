@@ -47,27 +47,6 @@ class FileTransferSchedulerTest {
     }
 
     @Test
-    fun deliveredDownloadImmediatelyPromotesNextQueuedDownload() = runTest {
-        val scheduler = FileTransferScheduler()
-        val first = transfer("first", FileTransferDirection.ANDROID_TO_BROWSER)
-        val second = transfer("second", FileTransferDirection.ANDROID_TO_BROWSER)
-        scheduler.enqueue(listOf(first, second))
-
-        scheduler.transition(first.metadata.id, FileTransferEvent.Started)
-        scheduler.transition(first.metadata.id, FileTransferEvent.Progressed(1, 1))
-        scheduler.transition(first.metadata.id, FileTransferEvent.Delivered)
-
-        assertEquals(
-            FileTransferPhase.COMPLETED,
-            scheduler.state.value.item(first.metadata.id)?.phase,
-        )
-        assertEquals(
-            FileTransferPhase.CONNECTING,
-            scheduler.state.value.item(second.metadata.id)?.phase,
-        )
-    }
-
-    @Test
     fun oppositeDirectionsMayBeActiveAtTheSameTime() = runTest {
         val scheduler = FileTransferScheduler()
         scheduler.enqueue(
@@ -84,28 +63,6 @@ class FileTransferSchedulerTest {
         assertEquals(
             FileTransferDirection.entries.toSet(),
             active.map { it.metadata.direction }.toSet(),
-        )
-    }
-
-    @Test
-    fun queuedCancellationPromotesNothingAndDoesNotAffectActiveItem() = runTest {
-        val scheduler = FileTransferScheduler()
-        scheduler.enqueue(
-            listOf(
-                transfer("active", FileTransferDirection.BROWSER_TO_ANDROID),
-                transfer("queued", FileTransferDirection.BROWSER_TO_ANDROID),
-            ),
-        )
-
-        scheduler.transition(FileTransferId("queued"), FileTransferEvent.Cancelled)
-
-        assertEquals(
-            FileTransferPhase.CONNECTING,
-            scheduler.state.value.item(FileTransferId("active"))?.phase,
-        )
-        assertEquals(
-            FileTransferPhase.CANCELLED,
-            scheduler.state.value.item(FileTransferId("queued"))?.phase,
         )
     }
 

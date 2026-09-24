@@ -26,11 +26,6 @@ class FileTransferUseCasesTest {
         val create = createRequest()
         val transferId = FileTransferId("transfer-1")
         val destinationId = FileDestinationId("destination-1")
-        val verification = VerifyFileTransferRequest(
-            transferId = transferId,
-            sizeBytes = 0,
-            sha256 = "a".repeat(64),
-        )
 
         assertSame(repository.state, ObserveFileTransfersUseCase(repository)())
         assertEquals(repository.result, CreateFileTransfersUseCase(repository)(create))
@@ -40,13 +35,11 @@ class FileTransferUseCasesTest {
         )
         assertEquals(repository.result, CancelFileTransferUseCase(repository)(transferId))
         assertEquals(repository.result, RetryFileTransferUseCase(repository)(transferId))
-        assertEquals(repository.result, VerifyFileTransferUseCase(repository)(verification))
 
         assertEquals(listOf(create), repository.created)
         assertEquals(listOf(transferId to destinationId), repository.approved)
         assertEquals(listOf(transferId), repository.cancelled)
         assertEquals(listOf(transferId), repository.retried)
-        assertEquals(listOf(verification), repository.verified)
     }
 
     private class FakeFileTransferRepository : FileTransferRepository {
@@ -56,7 +49,6 @@ class FileTransferUseCasesTest {
         val approved = mutableListOf<Pair<FileTransferId, FileDestinationId?>>()
         val cancelled = mutableListOf<FileTransferId>()
         val retried = mutableListOf<FileTransferId>()
-        val verified = mutableListOf<VerifyFileTransferRequest>()
 
         override suspend fun create(request: CreateFileTransfersRequest) =
             result.also { created += request }
@@ -72,8 +64,7 @@ class FileTransferUseCasesTest {
         override suspend fun retry(transferId: FileTransferId) =
             result.also { retried += transferId }
 
-        override suspend fun verify(request: VerifyFileTransferRequest) =
-            result.also { verified += request }
+        override suspend fun verify(request: VerifyFileTransferRequest) = result
     }
 
     private fun createRequest() = CreateFileTransfersRequest(

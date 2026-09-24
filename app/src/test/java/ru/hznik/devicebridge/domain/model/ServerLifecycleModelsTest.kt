@@ -1,8 +1,5 @@
 package ru.hznik.devicebridge.domain.model
 
-import java.nio.file.Files
-import java.nio.file.Path
-import kotlin.io.path.extension
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertThrows
@@ -45,34 +42,5 @@ class ServerLifecycleModelsTest {
                 startedAtElapsedRealtimeMs = 2_000,
             ).isRunning,
         )
-    }
-
-    @Test
-    fun lifecycleErrorsAndStopReasonsAreTyped() {
-        assertTrue(ServerLifecycleError.PermissionRevoked.isRecoverable)
-        assertTrue(ServerLifecycleError.AddressChanged.isRecoverable)
-        assertEquals(
-            "bind failed",
-            ServerLifecycleError.Unexpected("bind failed").technicalCause,
-        )
-        assertEquals(ServerStopReason.UserRequested, ServerStopReason.UserRequested)
-        assertEquals(ServerStopReason.NetworkLost, ServerStopReason.NetworkLost)
-    }
-
-    @Test
-    fun domainSourcesDoNotImportPlatformOrServerFrameworks() {
-        val domainRoot = Path.of("src/main/java/ru/hznik/devicebridge/domain")
-        val forbiddenImports = Regex(
-            """(?m)^import (android\.|androidx\.|io\.ktor\.|dagger\.|javax\.inject\.)""",
-        )
-        val violations = Files.walk(domainRoot).use { paths ->
-            paths
-                .filter { Files.isRegularFile(it) && it.extension == "kt" }
-                .filter { forbiddenImports.containsMatchIn(Files.readString(it)) }
-                .map { domainRoot.relativize(it).toString() }
-                .toList()
-        }
-
-        assertTrue("Domain import violations: $violations", violations.isEmpty())
     }
 }

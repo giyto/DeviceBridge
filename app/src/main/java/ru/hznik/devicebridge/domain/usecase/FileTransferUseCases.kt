@@ -44,10 +44,3 @@ class RetryFileTransferUseCase(
     suspend operator fun invoke(transferId: FileTransferId): FileTransferOperationResult =
         repository.retry(transferId)
 }
-
-class VerifyFileTransferUseCase(
-    private val repository: FileTransferRepository,
-) {
-    suspend operator fun invoke(request: VerifyFileTransferRequest): FileTransferOperationResult =
-        repository.verify(request)
-}

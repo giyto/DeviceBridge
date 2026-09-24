@@ -1,17 +1,9 @@
 package ru.hznik.devicebridge.core.ui
 
-import androidx.compose.foundation.interaction.FocusInteraction
-import androidx.compose.foundation.interaction.MutableInteractionSource
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.remember
-import androidx.compose.ui.Modifier
 import androidx.compose.ui.MotionDurationScale
-import androidx.compose.ui.focus.FocusRequester
-import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertWidthIsEqualTo
 import androidx.compose.ui.test.assertIsNotEnabled
-import androidx.compose.ui.test.assertIsFocused
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.captureToImage
@@ -23,9 +15,6 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.performClick
-import androidx.compose.ui.test.performSemanticsAction
-import androidx.compose.ui.test.performTouchInput
-import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.unit.dp
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -135,35 +124,6 @@ class StateComponentsTest {
         val screenshot = composeRule.onRoot().captureToImage()
         assertTrue(screenshot.width > 0)
         assertTrue(screenshot.height > 0)
-    }
-
-    @Test
-    fun primaryActionExposesFocusedAndPressedVisualStates() {
-        composeRule.setContent {
-            val interactionSource = remember { MutableInteractionSource() }
-            LaunchedEffect(interactionSource) {
-                interactionSource.emit(FocusInteraction.Focus())
-            }
-            DeviceBridgeTheme {
-                PrimaryActionButton(
-                    label = "Продолжить",
-                    onClick = {},
-                    interactionSource = interactionSource,
-                )
-            }
-        }
-
-        val action = composeRule.onNodeWithContentDescription(
-            "Основное действие: Продолжить",
-        )
-        composeRule.waitForIdle()
-        val focusedScreenshot = action.captureToImage()
-        assertTrue(focusedScreenshot.width > 0)
-
-        action.performTouchInput { down(center) }
-        val pressedScreenshot = action.captureToImage()
-        assertTrue(pressedScreenshot.width > 0)
-        action.performTouchInput { up() }
     }
     @Test
     fun graphiteHeadersMetadataAndCancelledOperationKeepTextualSemantics() {

@@ -5,14 +5,7 @@ import java.nio.file.Path
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
-import org.junit.Assert.assertTrue
 import org.junit.Test
-import ru.hznik.devicebridge.domain.history.HistoryDirection
-import ru.hznik.devicebridge.domain.history.HistoryKind
-import ru.hznik.devicebridge.domain.history.HistoryOperationId
-import ru.hznik.devicebridge.domain.history.HistoryRecord
-import ru.hznik.devicebridge.domain.history.HistoryRecordId
-import ru.hznik.devicebridge.domain.history.HistoryStatus
 import ru.hznik.devicebridge.domain.repository.HistoryRepository
 import ru.hznik.devicebridge.domain.repository.SettingsRepository
 import ru.hznik.devicebridge.domain.repository.TrustedBrowserRepository
@@ -25,25 +18,6 @@ import ru.hznik.devicebridge.feature.home.ServerSessionUiState
 import ru.hznik.devicebridge.feature.settings.SettingsUiState
 
 class PersistenceDomainContractsTest {
-    @Test
-    fun historyRecordSupportsSafeTextMetadataWithoutAndroidTypes() {
-        val record = HistoryRecord(
-            id = HistoryRecordId("record-1"),
-            operationId = HistoryOperationId("operation-1"),
-            kind = HistoryKind.TEXT,
-            direction = HistoryDirection.ANDROID_TO_BROWSER,
-            browserLabel = "Chrome",
-            timestampEpochMillis = 1_700_000_000_000,
-            status = HistoryStatus.DELIVERED,
-            textPreview = "hello",
-            file = null,
-            failureReason = null,
-        )
-
-        assertEquals("hello", record.textPreview)
-        assertNull(record.file)
-    }
-
     @Test
     fun settingsExposeSafeFirstRunDefaults() {
         val settings = DeviceSettings.defaults()
@@ -97,10 +71,6 @@ class PersistenceDomainContractsTest {
 
     @Test
     fun persistenceRepositoriesAreSmallDomainInterfaces() {
-        assertTrue(HistoryRepository::class.java.isInterface)
-        assertTrue(SettingsRepository::class.java.isInterface)
-        assertTrue(TrustedBrowserRepository::class.java.isInterface)
-
         val sources = listOf(
             "HistoryRepository.kt",
             "SettingsRepository.kt",

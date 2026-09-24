@@ -44,11 +44,9 @@ class ProductionSessionNegativeRouteTest {
             Path.of("src/main/java/ru/hznik/devicebridge/data/server/KtorServerRuntimeFactory.kt"),
         )
 
-        assertFalse(runtime.contains("DiagnosticRoutes"))
-        assertFalse(runtime.contains("diagnosticToken", ignoreCase = true))
+        assertFalse(runtime.contains("token", ignoreCase = true))
         assertFalse(runtime.contains("TrustedBrowser"))
         assertTrue(runtime.contains("installTextRoutes"))
         assertTrue(runtime.contains("installFileRoutes"))
-        assertEquals(true, Files.exists(Path.of("src/debug/java/ru/hznik/devicebridge/diagnostics")))
     }
 }

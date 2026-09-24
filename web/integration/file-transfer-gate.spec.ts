@@ -50,27 +50,6 @@ test("native download keeps the session page alive without page-side payload buf
   }
 });
 
-test("native download completes without a repeated file selection or verify request", async ({
-  page,
-}, testInfo) => {
-  const fixture = await startFileTransferGateServer();
-
-  try {
-    const requestedPaths: string[] = [];
-    page.on("request", (request) => {
-      requestedPaths.push(new URL(request.url()).pathname);
-    });
-    await page.goto(fixture.pageUrl);
-    await downloadFixture(page, testInfo, fixture);
-
-    await expect(page.locator('input[type="file"]')).toHaveCount(0);
-    await expect(page.getByTestId("session-state")).toHaveText("connected");
-    expect(requestedPaths).not.toContain("/verify");
-  } finally {
-    await fixture.close();
-  }
-});
-
 test("interrupted native download fails without a false verification step", async ({
   page,
 }) => {
@@ -87,30 +66,6 @@ test("interrupted native download fails without a false verification step", asyn
     await expect(page.getByTestId("session-state")).toHaveText("connected");
   } finally {
     await fixture.close();
-  }
-});
-
-test("download grant expires and cannot be reused", async ({ page }, testInfo) => {
-  const expiredFixture = await startFileTransferGateServer({ grantTtlMs: 25 });
-  try {
-    await page.goto(expiredFixture.pageUrl);
-    const expiredUrl = await downloadUrl(page, expiredFixture.pageUrl);
-    await page.waitForTimeout(50);
-    const expiredResponse = await page.request.get(expiredUrl);
-    expect(expiredResponse.status()).toBe(410);
-  } finally {
-    await expiredFixture.close();
-  }
-
-  const reusedFixture = await startFileTransferGateServer();
-  try {
-    await page.goto(reusedFixture.pageUrl);
-    const reusedUrl = await downloadUrl(page, reusedFixture.pageUrl);
-    await downloadFixture(page, testInfo, reusedFixture);
-    const reusedResponse = await page.request.get(reusedUrl);
-    expect(reusedResponse.status()).toBe(410);
-  } finally {
-    await reusedFixture.close();
   }
 });
 

@@ -1,9 +1,6 @@
-package ru.hznik.devicebridge.diagnostics.metrics
+package ru.hznik.devicebridge.benchmark
 
-import android.os.Bundle
 import android.os.Debug
-import android.util.Log
-import androidx.test.platform.app.InstrumentationRegistry
 import java.util.concurrent.atomic.AtomicLong
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.cancelAndJoin
@@ -49,7 +46,6 @@ class AndroidStreamingMemorySampler {
             retainedPssKb = retained.totalPssKb,
             javaHeapPeakBytes = peakJavaHeapBytes.get(),
         )
-        emitMetric(record)
         result to record
     }
 
@@ -68,16 +64,6 @@ class AndroidStreamingMemorySampler {
         )
     }
 
-    private fun emitMetric(record: StreamingMetricRecord) {
-        val line = medianMetricRecords(listOf(record)).toMachineReadableLine()
-        Log.i(LOG_TAG, line)
-        InstrumentationRegistry.getInstrumentation().sendStatus(
-            STATUS_CODE,
-            Bundle().apply {
-                putString(STATUS_KEY, line)
-            },
-        )
-    }
 
     private fun AtomicLong.updateMax(candidate: Long) {
         updateAndGet { current -> max(current, candidate) }
@@ -89,11 +75,17 @@ class AndroidStreamingMemorySampler {
     )
 
     private companion object {
-        const val LOG_TAG = "DeviceBridgeSpike"
-        const val STATUS_KEY = "deviceBridgeStreamingMetric"
-        const val STATUS_CODE = 2
         const val SAMPLE_INTERVAL_MILLIS = 250L
         const val BASELINE_WAIT_MILLIS = 1_000L
         const val RETAINED_WAIT_MILLIS = 30_000L
     }
 }
+
+data class StreamingMetricRecord(
+    val operation: String,
+    val run: Int,
+    val baselinePssKb: Long,
+    val peakPssKb: Long,
+    val retainedPssKb: Long,
+    val javaHeapPeakBytes: Long,
+)

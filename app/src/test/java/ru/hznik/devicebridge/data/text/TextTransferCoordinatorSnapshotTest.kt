@@ -41,7 +41,7 @@ class TextTransferCoordinatorSnapshotTest {
         val second = coordinator.snapshotFor(generationId, chrome)
 
         assertEquals(first, second)
-        assertEquals(1, second.map { it.id }.distinct().size)
+        assertEquals(listOf("chrome-1"), second.map { it.id.value })
     }
 
     @Test
