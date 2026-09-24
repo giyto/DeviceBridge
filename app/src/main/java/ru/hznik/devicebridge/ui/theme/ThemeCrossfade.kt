@@ -18,8 +18,12 @@ import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.layer.drawLayer
 import androidx.compose.ui.graphics.rememberGraphicsLayer
+import kotlinx.coroutines.delay
 
 private const val THEME_TRANSITION_MILLIS = 180
+
+/** Long enough for a theme switch to finish moving before the screen is captured. */
+private const val CONTROL_SETTLE_MILLIS = 250L
 
 /**
  * Switches the theme in a single recomposition and hides the jump behind a fading
@@ -39,6 +43,10 @@ fun ThemeCrossfade(
 
     LaunchedEffect(darkTheme) {
         if (darkTheme == appliedDarkTheme) return@LaunchedEffect
+        // Let the control that changed the theme finish its own animation first; capturing
+        // it mid-move freezes it under the snapshot and makes the switch look stuck.
+        // Another change within this time restarts the effect, so only the last one applies.
+        delay(CONTROL_SETTLE_MILLIS)
         snapshot = runCatching { contentLayer.toImageBitmap() }.getOrNull()
         snapshotAlpha.snapTo(1f)
         appliedDarkTheme = darkTheme
