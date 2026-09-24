@@ -6,6 +6,7 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import ru.hznik.devicebridge.domain.file.FileTransferDirection
+import ru.hznik.devicebridge.domain.file.FileTransferFailure
 import ru.hznik.devicebridge.domain.file.FileTransferId
 import ru.hznik.devicebridge.domain.file.FileTransferPhase
 
@@ -23,6 +24,33 @@ class FileUiStateTest {
         assertNull(verifying.progressPercent)
         assertFalse(completed.hasActiveProgress)
         assertNull(completed.progressPercent)
+    }
+
+    @Test
+    fun keptPartsTurnRetryIntoContinueAndExplainWhatWasKept() {
+        val mb = 1024L * 1024
+        val upload = item(FileTransferPhase.FAILED, bytesTransferred = 0).copy(
+            sizeBytes = 20 * mb,
+            bytesTransferred = 5 * mb,
+            failure = FileTransferFailure.StreamFailed,
+            resumableBytes = 5 * mb,
+        )
+        assertTrue(upload.continuesUpload)
+        assertEquals(
+            "Передача прервалась. Сохранено ${formatBytes(5 * mb)} из ${formatBytes(20 * mb)}, её можно продолжить.",
+            upload.failureMessage,
+        )
+        val noSpace = upload.copy(failure = FileTransferFailure.InsufficientSpace)
+        assertTrue(noSpace.failureMessage!!.startsWith("На устройстве недостаточно свободного места. Сохранено"))
+
+        val download = upload.copy(direction = FileTransferDirection.ANDROID_TO_BROWSER)
+        assertFalse(download.continuesUpload)
+        assertTrue(download.failureMessage!!.contains("возобновить её в течение 15 минут"))
+
+        val fromScratch = upload.copy(resumableBytes = null)
+        assertFalse(fromScratch.continuesUpload)
+        assertTrue(fromScratch.failureMessage!!.startsWith("Передача прервалась. Незавершённый файл удалён"))
+
     }
 
     private fun item(

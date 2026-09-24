@@ -157,9 +157,12 @@ data class FileTransferState private constructor(
     val bytesTransferred: Long,
     val speedBytesPerSecond: Long,
     val failure: FileTransferFailure?,
+    /** Bytes the current attempt did not have to send again because an earlier one did. */
+    val resumedFromBytes: Long = 0,
 ) {
     init {
         require(bytesTransferred in 0..metadata.sizeBytes)
+        require(resumedFromBytes in 0..bytesTransferred)
         require(speedBytesPerSecond >= 0)
         require((phase == FileTransferPhase.FAILED) == (failure != null))
         if (phase == FileTransferPhase.COMPLETED) {
@@ -188,6 +191,7 @@ data class FileTransferState private constructor(
         bytesTransferred: Long = this.bytesTransferred,
         speedBytesPerSecond: Long = this.speedBytesPerSecond,
         failure: FileTransferFailure? = this.failure,
+        resumedFromBytes: Long = this.resumedFromBytes,
     ): FileTransferState = FileTransferState(
         generationId = generationId,
         ownerSessionId = ownerSessionId,
@@ -196,5 +200,6 @@ data class FileTransferState private constructor(
         bytesTransferred = bytesTransferred,
         speedBytesPerSecond = speedBytesPerSecond,
         failure = failure,
+        resumedFromBytes = resumedFromBytes,
     )
 }

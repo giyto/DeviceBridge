@@ -5,5 +5,9 @@ interface FileTransferResources {
 
     suspend fun closeStreams()
 
-    suspend fun cleanupPartial()
+    /**
+     * Ends the partial output of an unfinished transfer. With [retain] the written part is kept
+     * for a later resume when the target supports it; otherwise it is deleted.
+     */
+    suspend fun cleanupPartial(retain: Boolean = false)
 }

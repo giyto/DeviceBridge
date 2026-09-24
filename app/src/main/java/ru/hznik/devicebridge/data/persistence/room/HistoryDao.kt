@@ -11,6 +11,10 @@ interface HistoryDao {
     @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun insert(record: HistoryRecordEntity): Long
 
+    /** Replaces the record of the same operation and kind, if there is one. */
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun replace(record: HistoryRecordEntity): Long
+
     @Query("SELECT * FROM history_records ORDER BY timestamp_epoch_millis DESC, record_id DESC")
     fun observeAll(): Flow<List<HistoryRecordEntity>>
 

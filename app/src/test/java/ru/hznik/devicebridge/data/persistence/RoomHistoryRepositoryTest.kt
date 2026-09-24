@@ -45,6 +45,22 @@ class RoomHistoryRepositoryTest {
     }
 
     @Test
+    fun aLaterResultOfTheSameOperationReplacesTheEarlierOne() = runTest {
+        val dao = FakeHistoryDao()
+        val repository = repository(dao)
+        repository.insert(record("record-1", "operation-1", now.toEpochMilli(), HistoryStatus.FAILED))
+
+        assertEquals(
+            HistoryInsertResult.Inserted,
+            repository.replace(record("record-2", "operation-1", now.toEpochMilli() + 1, HistoryStatus.DELIVERED)),
+        )
+
+        val records = repository.observe().first()
+        assertEquals(listOf("record-2"), records.map { it.id.value })
+        assertEquals(HistoryStatus.DELIVERED, records.single().status)
+    }
+
+    @Test
     fun cleanupRunsAtStartAndAfterSuccessfulInsert() = runTest {
         val cutoff = now.minusSeconds(30L * 24 * 60 * 60).toEpochMilli()
         val dao = FakeHistoryDao(
@@ -87,6 +103,7 @@ class RoomHistoryRepositoryTest {
         id: String,
         operationId: String,
         timestamp: Long,
+        status: HistoryStatus = HistoryStatus.DELIVERED,
     ) = HistoryRecord(
         id = HistoryRecordId(id),
         operationId = HistoryOperationId(operationId),
@@ -94,7 +111,7 @@ class RoomHistoryRepositoryTest {
         direction = HistoryDirection.ANDROID_TO_BROWSER,
         browserLabel = "Chrome",
         timestampEpochMillis = timestamp,
-        status = HistoryStatus.DELIVERED,
+        status = status,
         textPreview = "preview",
         file = null,
         failureReason = null,
@@ -126,6 +143,12 @@ class RoomHistoryRepositoryTest {
                 return -1
             }
             rows.value = (rows.value + record).sortedByDescending { it.timestampEpochMillis }
+            return rows.value.size.toLong()
+        }
+
+        override suspend fun replace(record: HistoryRecordEntity): Long {
+            rows.value = (rows.value.filterNot { it.operationId == record.operationId && it.kind == record.kind } + record)
+                .sortedByDescending { it.timestampEpochMillis }
             return rows.value.size.toLong()
         }
 

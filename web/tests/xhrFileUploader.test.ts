@@ -15,12 +15,35 @@ describe("XhrFileUploader", () => {
     expect(xhr.headers.Authorization).toBe("Bearer token");
     expect(xhr.headers["Content-Type"]).toBe("application/octet-stream");
     expect(xhr.body).toBe(file);
+    expect(xhr.headers["X-DeviceBridge-Upload-Offset"]).toBe("0");
     xhr.progress(3, 4);
     xhr.progress(2, 4);
     xhr.complete(200, snapshot("COMPLETED", 4));
 
     await expect(request).resolves.toMatchObject({ type: "file.snapshot" });
     expect(progress.mock.calls.map((call) => call[0])).toEqual([3, 3]);
+  });
+
+  it("sends only the bytes after the kept part and reports progress from the offset", async () => {
+    const xhr = new FakeXhr();
+    const progress = vi.fn();
+    const file = new File(["0123456789"], "movie.bin");
+    const request = new XhrFileUploader(() => xhr).upload(
+      "token", "transfer-1", file, progress, undefined, 6,
+    );
+
+    expect(xhr.headers["X-DeviceBridge-Upload-Offset"]).toBe("6");
+    expect(xhr.body).toBeInstanceOf(Blob);
+    expect(await (xhr.body as Blob).text()).toBe("6789");
+    xhr.progress(3, 4);
+    xhr.progress(9, 4);
+    xhr.complete(200, snapshot("COMPLETED", 4));
+
+    await expect(request).resolves.toMatchObject({ type: "file.snapshot" });
+    expect(progress.mock.calls.map((call) => call[0])).toEqual([9, 10]);
+    expect(() => new XhrFileUploader(() => new FakeXhr()).upload(
+      "token", "transfer-1", file, vi.fn(), undefined, 11,
+    )).toThrow("Invalid upload offset");
   });
 
   it("aborts the network request and never reports a false completion", async () => {

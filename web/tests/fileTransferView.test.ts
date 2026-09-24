@@ -161,6 +161,65 @@ describe("createFileTransferView", () => {
     expect(document.querySelector('[data-role="file-announcer"]')?.textContent)
       .toContain("Ошибка");
   });
+  it("offers to continue an upload the phone kept and explains the stages of continuing", () => {
+    const actions = createActions();
+    const view = createFileTransferView(document, actions);
+    const upload = (status: Parameters<typeof item>[0]) => {
+      const base = item(status);
+      return {
+        ...base,
+        metadata: { ...base.metadata, sizeBytes: 20 * 1024 ** 2, direction: "BROWSER_TO_ANDROID" as const },
+      };
+    };
+    const card = () => document.querySelector('[data-transfer-id="file-1"]')!;
+    const retry = () => document.querySelector<HTMLButtonElement>('[data-action="retry-file"]')!;
+
+    view.render(active({ transfers: [{ ...upload("FAILED"), bytesTransferred: 5 * 1024 ** 2, resumableBytes: 5 * 1024 ** 2 }] }));
+    expect(retry().textContent).toBe("Продолжить");
+    expect(card().querySelector(".file-card__resume")?.textContent)
+      .toBe("Сохранено 5.0 МБ из 20.0 МБ. Передачу можно продолжить с этого места.");
+    retry().click();
+    expect(actions.onRetry).toHaveBeenCalledWith("file-1");
+
+    view.render(active({ transfers: [{ ...upload("TRANSFERRING"), checkingSavedPart: true }] }));
+    expect(card().querySelector(".file-card__progress")?.textContent).toBe("Проверка сохранённой части");
+    expect(card().querySelector("progress")?.hasAttribute("value")).toBe(false);
+    expect(card().querySelector(".file-card__resume")).toBeNull();
+
+    view.render(active({ transfers: [{
+      ...upload("TRANSFERRING"),
+      bytesTransferred: 6 * 1024 ** 2,
+      resumedFromBytes: 5 * 1024 ** 2,
+    }] }));
+    expect(card().querySelector(".file-card__progress")?.textContent)
+      .toContain("продолжение с 5.0 МБ");
+
+    view.render(active({ transfers: [upload("FAILED")] }));
+    expect(retry().textContent).toBe("Повторить");
+    expect(card().querySelector(".file-card__resume")).toBeNull();
+  });
+
+  it("shows the source check before a retry and keeps the retry button disabled meanwhile", () => {
+    const view = createFileTransferView(document, createActions());
+
+    view.render(active({ transfers: [{ ...item("FAILED"), checkingSourcePercent: 40 }] }));
+
+    expect(document.querySelector(".file-card__resume")?.textContent)
+      .toBe("Проверяем исходный файл перед повтором… 40%");
+    expect(document.querySelector<HTMLButtonElement>('[data-action="retry-file"]')?.disabled).toBe(true);
+  });
+
+  it("suggests resuming an interrupted download in the browser download manager", () => {
+    const view = createFileTransferView(document, createActions());
+
+    view.render(active({ transfers: [{ ...item("FAILED"), bytesTransferred: 2, resumableBytes: 2 }] }));
+
+    expect(document.querySelector(".file-card__resume")?.textContent).toBe(
+      "Загрузку можно возобновить в менеджере загрузок браузера в течение 15 минут или повторить с начала.",
+    );
+    expect(document.querySelector('[data-action="retry-file"]')?.textContent).toBe("Повторить");
+  });
+
   it("moves focus from cancel to retry and back to the active transfer action", () => {
     const actions = createActions();
     const view = createFileTransferView(document, actions);

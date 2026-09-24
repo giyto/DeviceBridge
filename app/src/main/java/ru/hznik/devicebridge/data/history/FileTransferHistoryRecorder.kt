@@ -63,7 +63,8 @@ class FileTransferHistoryRecorder(
         )
         applicationScope.launch {
             try {
-                repository.insert(record)
+                // A resumed or retried transfer keeps one record with its latest result.
+                repository.replace(record)
             } catch (failure: CancellationException) {
                 throw failure
             } catch (_: Throwable) {

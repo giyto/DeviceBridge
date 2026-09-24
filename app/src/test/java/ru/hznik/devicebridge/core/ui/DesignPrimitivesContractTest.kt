@@ -61,7 +61,7 @@ class DesignPrimitivesContractTest {
         listOf(
             "ScreenHeader(",
             "SectionHeader(",
-            "OperationalItem(",
+            "TransferRecordCard(",
             "MetadataRow(",
             "SignalFlowIndicator(",
         ).forEach { primitive ->
@@ -93,7 +93,7 @@ class DesignPrimitivesContractTest {
         listOf(
             "ScreenHeader(",
             "SectionHeader(",
-            "OperationalItem(",
+            "TransferRecordCard(",
             "PrimaryActionButton(",
             "SecondaryActionButton(",
         ).forEach { primitive ->

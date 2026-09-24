@@ -43,6 +43,12 @@ class RoomHistoryRepository(
         return HistoryInsertResult.Inserted
     }
 
+    override suspend fun replace(record: HistoryRecord): HistoryInsertResult {
+        dao.replace(record.toEntity())
+        cleanupExpired()
+        return HistoryInsertResult.Inserted
+    }
+
     override suspend fun delete(recordId: HistoryRecordId): Boolean =
         dao.deleteById(recordId.value) > 0
 

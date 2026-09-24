@@ -63,6 +63,25 @@ class FileTransferReducerTest {
     }
 
     @Test
+    fun resumedTransferJumpsToTheKeptOffsetOnlyForward() {
+        val transferring = FileTransferReducer.reduce(
+            FileTransferReducer.reduce(transfer(), FileTransferEvent.Connecting),
+            FileTransferEvent.Started,
+        )
+
+        val resumed = FileTransferReducer.reduce(transferring, FileTransferEvent.Resumed(200))
+
+        assertEquals(200L, resumed.bytesTransferred)
+        assertEquals(200L, resumed.resumedFromBytes)
+        val progressed = FileTransferReducer.reduce(resumed, FileTransferEvent.Progressed(300, 5))
+        assertEquals(200L, progressed.resumedFromBytes)
+        assertSame(progressed, FileTransferReducer.reduce(progressed, FileTransferEvent.Resumed(100)))
+        assertSame(resumed, FileTransferReducer.reduce(resumed, FileTransferEvent.Resumed(512)))
+        val queued = transfer()
+        assertSame(queued, FileTransferReducer.reduce(queued, FileTransferEvent.Resumed(10)))
+    }
+
+    @Test
     fun deliveredCompletesOnlyFullyStreamedAndroidToBrowserTransfer() {
         val queued = transfer(direction = FileTransferDirection.ANDROID_TO_BROWSER)
         val transferring = FileTransferReducer.reduce(

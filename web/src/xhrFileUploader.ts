@@ -24,6 +24,8 @@ export interface XhrLike {
 
 type XhrFactory = () => XhrLike;
 
+const UPLOAD_OFFSET_HEADER = "X-DeviceBridge-Upload-Offset";
+
 export class XhrFileUploader {
   constructor(private readonly createXhr: XhrFactory = () => new XMLHttpRequest()) {}
 
@@ -33,11 +35,15 @@ export class XhrFileUploader {
     file: File,
     onProgress: (bytesTransferred: number, totalBytes: number) => void,
     signal?: AbortSignal,
+    offsetBytes = 0,
   ): Promise<FileSnapshotEvent> {
     requireToken(token);
     requireTransferId(transferId);
+    if (!Number.isSafeInteger(offsetBytes) || offsetBytes < 0 || offsetBytes > file.size) {
+      throw new Error("Invalid upload offset");
+    }
     const xhr = this.createXhr();
-    let lastBytes = 0;
+    let lastBytes = offsetBytes;
 
     return new Promise((resolve, reject) => {
       let settled = false;
@@ -55,8 +61,9 @@ export class XhrFileUploader {
       xhr.open("POST", `/api/v1/files/${encodeURIComponent(transferId)}`);
       xhr.setRequestHeader("Authorization", `Bearer ${token}`);
       xhr.setRequestHeader("Content-Type", "application/octet-stream");
+      xhr.setRequestHeader(UPLOAD_OFFSET_HEADER, String(offsetBytes));
       xhr.upload.onprogress = (event) => {
-        const bounded = Math.min(file.size, Math.max(lastBytes, event.loaded));
+        const bounded = Math.min(file.size, Math.max(lastBytes, offsetBytes + event.loaded));
         lastBytes = bounded;
         onProgress(bounded, file.size);
       };
@@ -84,7 +91,8 @@ export class XhrFileUploader {
         abort();
         return;
       }
-      xhr.send(file);
+      // Only the bytes after the part the server already keeps.
+      xhr.send(offsetBytes > 0 ? file.slice(offsetBytes) : file);
     });
   }
 }

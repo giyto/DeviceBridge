@@ -1,6 +1,7 @@
 import {
   FileApiError,
   HARD_MAX_FILE_BYTES,
+  RESUMABLE_UPLOAD_MIN_BYTES,
   type FileApiClient,
   type FileErrorEvent,
   type FileMetadata,
@@ -15,6 +16,7 @@ import type { XhrFileUploader } from "./xhrFileUploader";
 
 const MAX_BATCH_ITEMS = 32;
 const MAX_TRANSFER_ITEMS = 100;
+const NETWORK_INTERRUPTED_MESSAGE = "Сеть прервала передачу файла.";
 
 export interface FileSelectionPreview {
   readonly key: string;
@@ -37,6 +39,14 @@ export interface FileTransferUiItem {
   readonly bytesTransferred: number;
   readonly speedBytesPerSecond: number;
   readonly localError?: string;
+  /** A failed item can continue from these bytes (server-reported). */
+  readonly resumableBytes?: number;
+  /** The server is reading the part it kept before the upload continues. */
+  readonly checkingSavedPart?: boolean;
+  /** The running upload continues after this many bytes kept on the phone. */
+  readonly resumedFromBytes?: number;
+  /** Percent of the source file re-read before a retry (the source must be unchanged). */
+  readonly checkingSourcePercent?: number;
 }
 
 export type FileTransferUiState =
@@ -55,6 +65,7 @@ export interface FileApi {
   requestDownloadGrant: FileApiClient["requestDownloadGrant"];
   cancel: FileApiClient["cancel"];
   retry: FileApiClient["retry"];
+  requestUploadOffset: FileApiClient["requestUploadOffset"];
 }
 
 export interface FileUploader {
@@ -81,6 +92,8 @@ export class FileTransferController {
   private effectiveFileLimitBytes = HARD_MAX_FILE_BYTES;
   private readonly sourceFiles = new Map<string, File>();
   private readonly operations = new Map<string, AbortController>();
+  /** Progress that arrived before the transfer's card: the phone can approve before the offer answer. */
+  private readonly pendingProgress = new Map<string, FileProgressEvent>();
 
   constructor(
     private readonly api: FileApi,
@@ -128,9 +141,27 @@ export class FileTransferController {
 
   setConnectionAvailable(available: boolean): void {
     if (this.state.kind !== "active" || this.state.connectionAvailable === available) return;
-    if (!available) this.resetOperations();
+    let transfers = this.state.transfers;
+    if (!available) {
+      // Uploads cut by the lost connection end as a network failure, not as a silent abort.
+      transfers = transfers.map((item) =>
+        this.operations.has(item.id) &&
+          item.metadata.direction === "BROWSER_TO_ANDROID" &&
+          item.status === "TRANSFERRING"
+          ? {
+              ...item,
+              status: "FAILED" as const,
+              speedBytesPerSecond: 0,
+              checkingSavedPart: undefined,
+              localError: NETWORK_INTERRUPTED_MESSAGE,
+            }
+          : item,
+      );
+      this.resetOperations();
+    }
     this.emit({
       ...this.state,
+      transfers,
       connectionAvailable: available,
       preparing: available ? this.state.preparing : false,
     });
@@ -242,6 +273,8 @@ export class FileTransferController {
           error: undefined,
         });
       }
+      // Auto-accept may have approved the files before this answer was written.
+      acceptedIds.forEach((transferId) => this.startUploadIfApproved(transferId));
     } catch (error: unknown) {
       if (!this.isCurrent(generation, token) || isAbortError(error)) return;
       this.handleOperationError(error);
@@ -275,7 +308,14 @@ export class FileTransferController {
   receiveProgress(event: FileProgressEvent): void {
     if (this.state.kind !== "active") return;
     const existing = this.state.transfers.find((item) => item.id === event.transferId);
-    if (existing === undefined) return;
+    if (existing === undefined) {
+      this.pendingProgress.delete(event.transferId);
+      this.pendingProgress.set(event.transferId, event);
+      if (this.pendingProgress.size > MAX_TRANSFER_ITEMS) {
+        this.pendingProgress.delete(this.pendingProgress.keys().next().value!);
+      }
+      return;
+    }
     const bytesTransferred = Math.max(existing.bytesTransferred, event.bytesTransferred);
     this.upsert({
       ...existing,
@@ -283,6 +323,7 @@ export class FileTransferController {
       bytesTransferred,
       speedBytesPerSecond: event.speedBytesPerSecond,
       localError: undefined,
+      resumableBytes: event.resumableBytes,
     });
     if (
       event.status === "TRANSFERRING" &&
@@ -296,9 +337,18 @@ export class FileTransferController {
     if (this.state.kind !== "active") return;
     let transfers = this.state.transfers;
     for (const item of event.items) {
+      const existing = transfers.find((candidate) => candidate.id === item.metadata.transferId);
+      // An answer can be older than a socket event already applied (auto-accept approves at once).
+      if (existing !== undefined && isStaleStage(existing.status, item.status)) continue;
       transfers = upsertBounded(transfers, toUiItem(item));
     }
     this.emit({ ...this.state, transfers });
+    for (const item of event.items) {
+      const pending = this.pendingProgress.get(item.metadata.transferId);
+      if (pending === undefined) continue;
+      this.pendingProgress.delete(item.metadata.transferId);
+      this.receiveProgress(pending);
+    }
   }
 
   receiveError(event: FileErrorEvent): void {
@@ -400,11 +450,29 @@ export class FileTransferController {
           );
           return;
         }
-        const currentSha256 = await this.hashFile(
-          sourceFile,
-          undefined,
-          context.controller.signal,
-        );
+        const showCheck = (percent: number | undefined): void => {
+          const current = this.transfer(transferId);
+          if (
+            current !== undefined &&
+            current.checkingSourcePercent !== percent &&
+            this.isCurrent(context.generation, context.token)
+          ) {
+            this.upsert({ ...current, checkingSourcePercent: percent });
+          }
+        };
+        showCheck(0);
+        let currentSha256: string;
+        try {
+          currentSha256 = await this.hashFile(
+            sourceFile,
+            (bytesRead, totalBytes) => showCheck(
+              totalBytes === 0 ? 100 : Math.floor(bytesRead * 100 / totalBytes),
+            ),
+            context.controller.signal,
+          );
+        } finally {
+          showCheck(undefined);
+        }
         if (!this.isCurrent(context.generation, context.token)) return;
         if (currentSha256.toLowerCase() !== item.metadata.sha256.toLowerCase()) {
           this.sourceFiles.delete(transferId);
@@ -428,6 +496,18 @@ export class FileTransferController {
     } finally {
       this.finishOperation(transferId, context.controller);
     }
+    // The approval may have arrived while the retry request still owned this transfer.
+    if (this.isCurrent(context.generation, context.token)) this.startUploadIfApproved(transferId);
+  }
+
+  private startUploadIfApproved(transferId: string): void {
+    const item = this.transfer(transferId);
+    if (
+      item?.metadata.direction === "BROWSER_TO_ANDROID" &&
+      item.status === "TRANSFERRING"
+    ) {
+      this.startUpload(transferId);
+    }
   }
 
   private startUpload(transferId: string): void {
@@ -440,33 +520,65 @@ export class FileTransferController {
     const file = this.sourceFiles.get(transferId);
     if (file === undefined) return;
     const controller = new AbortController();
-    const generation = this.generation;
-    const token = this.token;
-    const startedAt = this.now();
     this.operations.set(transferId, controller);
-    void this.uploader.upload(
-      token,
-      transferId,
-      file,
-      (bytes) => {
-        const item = this.transfer(transferId);
-        if (item === undefined || !this.isCurrent(generation, token)) return;
-        const elapsedSeconds = Math.max(1, (this.now() - startedAt) / 1_000);
-        this.upsert({
-          ...item,
-          status: "TRANSFERRING",
-          bytesTransferred: Math.max(item.bytesTransferred, bytes),
-          speedBytesPerSecond: Math.round(bytes / elapsedSeconds),
-        });
-      },
-      controller.signal,
-    ).then((snapshot) => {
+    void this.runUpload(transferId, file, this.token, this.generation, controller)
+      .finally(() => this.finishOperation(transferId, controller));
+  }
+
+  /** Asks where to continue, then sends only the bytes the phone does not have yet. */
+  private async runUpload(
+    transferId: string,
+    file: File,
+    token: string,
+    generation: number,
+    controller: AbortController,
+  ): Promise<void> {
+    const update = (change: (item: FileTransferUiItem) => FileTransferUiItem): void => {
+      const item = this.transfer(transferId);
+      if (item !== undefined && this.isCurrent(generation, token)) this.upsert(change(item));
+    };
+    try {
+      if (file.size >= RESUMABLE_UPLOAD_MIN_BYTES) {
+        update((item) => ({ ...item, checkingSavedPart: true }));
+      }
+      const { offsetBytes } = await this.api.requestUploadOffset(
+        token,
+        transferId,
+        this.createId(),
+        this.now(),
+        controller.signal,
+      );
+      if (!this.isCurrent(generation, token)) return;
+      update((item) => ({
+        ...item,
+        checkingSavedPart: false,
+        resumedFromBytes: offsetBytes > 0 ? offsetBytes : undefined,
+        bytesTransferred: Math.max(item.bytesTransferred, offsetBytes),
+      }));
+      const startedAt = this.now();
+      const snapshot = await this.uploader.upload(
+        token,
+        transferId,
+        file,
+        (bytes) => update((item) => {
+          const elapsedSeconds = Math.max(1, (this.now() - startedAt) / 1_000);
+          return {
+            ...item,
+            status: "TRANSFERRING",
+            bytesTransferred: Math.max(item.bytesTransferred, bytes),
+            speedBytesPerSecond: Math.round(Math.max(0, bytes - offsetBytes) / elapsedSeconds),
+          };
+        }),
+        controller.signal,
+        offsetBytes,
+      );
       if (this.isCurrent(generation, token)) this.applySnapshot(snapshot);
-    }).catch((error: unknown) => {
+    } catch (error: unknown) {
+      update((item) => ({ ...item, checkingSavedPart: false }));
       if (!isAbortError(error) && this.isCurrent(generation, token)) {
         this.handleOperationError(error, transferId);
       }
-    }).finally(() => this.finishOperation(transferId, controller));
+    }
   }
 
   private operationContext(transferId: string) {
@@ -544,6 +656,7 @@ export class FileTransferController {
   private resetOperations(): void {
     for (const controller of this.operations.values()) controller.abort();
     this.operations.clear();
+    this.pendingProgress.clear();
   }
 }
 
@@ -554,6 +667,7 @@ function toUiItem(item: FileSnapshotItem): FileTransferUiItem {
     status: item.status,
     bytesTransferred: item.bytesTransferred,
     speedBytesPerSecond: item.speedBytesPerSecond,
+    ...(item.resumableBytes === undefined ? {} : { resumableBytes: item.resumableBytes }),
   };
 }
 
@@ -569,11 +683,36 @@ function upsertBounded(
         bytesTransferred: item.status === existing.status
           ? Math.max(existing.bytesTransferred, item.bytesTransferred)
           : item.bytesTransferred,
+        // Local upload stages outlive server updates until the item settles.
+        checkingSavedPart: isSettled(item.status)
+          ? undefined
+          : item.checkingSavedPart ?? existing.checkingSavedPart,
+        resumedFromBytes: isSettled(item.status)
+          ? undefined
+          : item.resumedFromBytes ?? existing.resumedFromBytes,
       };
   const next = existing === undefined
     ? [...items, safeItem]
     : items.map((candidate) => candidate.id === item.id ? safeItem : candidate);
   return next.length <= MAX_TRANSFER_ITEMS ? next : next.slice(next.length - MAX_TRANSFER_ITEMS);
+}
+
+const ACTIVE_STAGE_ORDER: ReadonlyArray<FileTransferStatus> = [
+  "QUEUED",
+  "CONNECTING",
+  "TRANSFERRING",
+  "VERIFYING",
+];
+
+/** Within one attempt an item only moves forward; an older answer must not move it back. */
+function isStaleStage(current: FileTransferStatus, incoming: FileTransferStatus): boolean {
+  const currentIndex = ACTIVE_STAGE_ORDER.indexOf(current);
+  const incomingIndex = ACTIVE_STAGE_ORDER.indexOf(incoming);
+  return currentIndex >= 0 && incomingIndex >= 0 && incomingIndex < currentIndex;
+}
+
+function isSettled(status: FileTransferStatus): boolean {
+  return status === "COMPLETED" || status === "CANCELLED" || status === "FAILED" || status === "QUEUED";
 }
 
 function appendBounded(

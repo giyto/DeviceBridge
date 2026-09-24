@@ -18,7 +18,6 @@ class PartialDocumentManagerTest {
             treeUri = TREE,
             requestedName = "photo.jpg",
             fallbackId = "transfer-1",
-            mimeType = "image/jpeg",
         )
         val result = manager.finalize(handle)
 
@@ -29,6 +28,8 @@ class PartialDocumentManagerTest {
             result,
         )
         assertEquals(listOf(handle.partialDisplayName), provider.createdNames)
+        // Never the file's own type: providers would append ".jpg" and galleries would show it.
+        assertEquals(listOf("application/octet-stream"), provider.createdMimeTypes)
         assertEquals(listOf(handle.documentUri to "photo (2).jpg"), provider.renames)
     }
 
@@ -36,8 +37,8 @@ class PartialDocumentManagerTest {
     fun cancellationAndErrorDeletePartialDocument() = runTest {
         val provider = FakeDocumentProvider()
         val manager = PartialDocumentManager(provider)
-        val cancelled = manager.create(TREE, "cancel.bin", "one", "application/octet-stream")
-        val failed = manager.create(TREE, "failed.bin", "two", "application/octet-stream")
+        val cancelled = manager.create(TREE, "cancel.bin", "one")
+        val failed = manager.create(TREE, "failed.bin", "two")
 
         assertEquals(PartialDocumentCleanup.Deleted, manager.cleanup(cancelled))
         assertEquals(PartialDocumentCleanup.Deleted, manager.cleanup(failed))
@@ -48,7 +49,7 @@ class PartialDocumentManagerTest {
     fun reportsVisiblePartialMarkerWhenProviderCannotRenameOrDelete() = runTest {
         val provider = FakeDocumentProvider(renameSucceeds = false, deleteSucceeds = false)
         val manager = PartialDocumentManager(provider)
-        val handle = manager.create(TREE, "report.pdf", "three", "application/pdf")
+        val handle = manager.create(TREE, "report.pdf", "three")
 
         val finalization = manager.finalize(handle)
         val cleanup = manager.cleanup(handle)
@@ -75,6 +76,7 @@ class PartialDocumentManagerTest {
         private val deleteSucceeds: Boolean = true,
     ) : PartialDocumentProvider {
         val createdNames = mutableListOf<String>()
+        val createdMimeTypes = mutableListOf<String>()
         val renames = mutableListOf<Pair<String, String>>()
         val deleted = mutableListOf<String>()
         private var nextId = 0
@@ -87,6 +89,7 @@ class PartialDocumentManagerTest {
             displayName: String,
         ): String? {
             createdNames += displayName
+            createdMimeTypes += mimeType
             names += displayName
             nextId += 1
             return "content://docs/partial-" + nextId
@@ -101,6 +104,8 @@ class PartialDocumentManagerTest {
             deleted += documentUri
             return deleteSucceeds
         }
+
+        override suspend fun size(documentUri: String): Long? = null
     }
 
     private companion object {

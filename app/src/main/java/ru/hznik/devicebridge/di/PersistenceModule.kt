@@ -20,6 +20,7 @@ import javax.inject.Singleton
 import kotlinx.coroutines.CoroutineScope
 import ru.hznik.devicebridge.data.persistence.datastore.DataStoreSettingsRepository
 import ru.hznik.devicebridge.data.persistence.datastore.DataStoreThemePreferenceRepository
+import ru.hznik.devicebridge.data.persistence.room.DEVICE_BRIDGE_MIGRATIONS
 import ru.hznik.devicebridge.data.persistence.room.DeviceBridgeDatabase
 import ru.hznik.devicebridge.data.persistence.room.HistoryDao
 import ru.hznik.devicebridge.data.persistence.room.RoomHistoryRepository
@@ -69,12 +70,31 @@ object PersistenceModule {
         context,
         DeviceBridgeDatabase::class.java,
         DATABASE_NAME,
-    ).build()
+    ).addMigrations(*DEVICE_BRIDGE_MIGRATIONS).build()
 
     @Provides
     @Singleton
     fun provideHistoryDao(database: DeviceBridgeDatabase): HistoryDao =
         database.historyDao()
+
+    @Provides
+    @Singleton
+    fun providePartialUploadDao(
+        database: DeviceBridgeDatabase,
+    ): ru.hznik.devicebridge.data.persistence.room.PartialUploadDao = database.partialUploadDao()
+
+    @Provides
+    @Singleton
+    fun providePartialUploadStore(
+        dao: ru.hznik.devicebridge.data.persistence.room.PartialUploadDao,
+        @ApplicationContext context: Context,
+    ): ru.hznik.devicebridge.data.file.PartialUploadStore =
+        ru.hznik.devicebridge.data.file.RoomPartialUploadStore(
+            dao = dao,
+            documents = ru.hznik.devicebridge.data.file.ContentResolverPartialDocumentProvider(
+                context.contentResolver,
+            ),
+        )
 
     @Provides
     @Singleton

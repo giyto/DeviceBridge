@@ -53,14 +53,14 @@ import ru.hznik.devicebridge.core.ui.BridgeIcons
 import ru.hznik.devicebridge.core.ui.ConnectionStatusCard
 import ru.hznik.devicebridge.core.ui.QuickActionCard
 import ru.hznik.devicebridge.core.ui.MetadataRow
-import ru.hznik.devicebridge.core.ui.OperationalItem
 import ru.hznik.devicebridge.core.ui.ScreenHeader
 import ru.hznik.devicebridge.core.ui.SectionHeader
 import ru.hznik.devicebridge.core.ui.SignalFlowIndicator
-import ru.hznik.devicebridge.core.ui.StateTone
 import ru.hznik.devicebridge.domain.error.RecoveryAction
 import ru.hznik.devicebridge.ui.theme.BridgeSpacing
 import ru.hznik.devicebridge.ui.theme.DeviceBridgeTheme
+import ru.hznik.devicebridge.feature.file.TransferRecordCard
+import ru.hznik.devicebridge.feature.file.TransferProgress
 
 @Composable
 fun HomeScreen(
@@ -73,7 +73,7 @@ fun HomeScreen(
     val clipboard = LocalClipboard.current
     val coroutineScope = rememberCoroutineScope()
     val statusContent = statusContent(uiState)
-    val hasConnectedBrowser = uiState.activeBrowsers.isNotEmpty()
+    val hasConnectedBrowser = uiState.hasConnectedBrowser
     var connectionGuideExpanded by rememberSaveable {
         mutableStateOf(true)
     }
@@ -159,6 +159,7 @@ fun HomeScreen(
         ) {
             ActiveBrowsersSection(
                 sessions = uiState.activeBrowsers,
+                connectedCount = uiState.connectedBrowserCount,
                 onAction = onAction,
             )
         }
@@ -219,7 +220,7 @@ fun HomeScreen(
         }
 
         Text(
-            text = if (uiState.activeBrowsers.isEmpty()) {
+            text = if (!uiState.hasConnectedBrowser) {
                 "Сначала безопасно подключите браузер по коду выше."
             } else {
                 "Браузер подключён. Передача текста и ссылок доступна."
@@ -291,7 +292,7 @@ private fun ConnectionGuideCard(
                         fontWeight = FontWeight.SemiBold,
                     )
                     Text("Скопируйте актуальный адрес из блока ниже и откройте его в браузере.")
-                    if (uiState.activeBrowsers.isEmpty()) {
+                    if (!uiState.hasConnectedBrowser) {
                         uiState.pairingCode?.let { code ->
                             Text("Введите код $code и подтвердите браузер на телефоне.")
                         }
@@ -317,22 +318,44 @@ private fun ActiveFileTransfersSection(items: List<HomeFileTransferUiState>) {
             supportingText = "Текущий прогресс без скрытых фоновых операций.",
         )
         items.forEach { item ->
-            OperationalItem(
-                statusLabel = "Передаётся",
-                title = item.displayName,
-                metadata = "${item.direction.homeLabel()} · ${item.progressPercent}%" +
-                    if (item.autoAccepted) " · принят автоматически" else "",
-                tone = StateTone.LOADING,
+            // The same card as on the files screen, without its actions.
+            TransferRecordCard(
+                displayName = item.displayName,
+                sizeBytes = item.sizeBytes,
+                mimeType = item.mimeType,
+                direction = item.direction,
+                phase = item.phase,
+                details = {
+                    TransferProgress(
+                        phase = item.phase,
+                        sizeBytes = item.sizeBytes,
+                        bytesTransferred = item.bytesTransferred,
+                        speedBytesPerSecond = item.speedBytesPerSecond,
+                        resumedFromBytes = item.resumedFromBytes,
+                    )
+                },
+                footer = {
+                    val sender = item.senderLabel
+                    if (item.autoAccepted || sender != null) {
+                        Text(
+                            text = when {
+                                item.autoAccepted && sender != null -> "Принят автоматически от $sender"
+                                item.autoAccepted -> "Принят автоматически"
+                                else -> sender.orEmpty()
+                            },
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = if (item.autoAccepted) {
+                                MaterialTheme.colorScheme.primary
+                            } else {
+                                MaterialTheme.colorScheme.onSurfaceVariant
+                            },
+                        )
+                    }
+                },
             )
         }
     }
 }
-private fun ru.hznik.devicebridge.domain.file.FileTransferDirection.homeLabel(): String =
-    if (this == ru.hznik.devicebridge.domain.file.FileTransferDirection.BROWSER_TO_ANDROID) {
-        "На телефон"
-    } else {
-        "На компьютер"
-    }
 
 @Composable
 private fun PairingCodeCard(
@@ -483,11 +506,12 @@ private fun PendingBrowsersSection(
 @Composable
 private fun ActiveBrowsersSection(
     sessions: List<ActiveBrowserUiState>,
+    connectedCount: Int,
     onAction: (HomeAction) -> Unit,
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text(
-            text = "Подключённые браузеры: ${sessions.size}",
+            text = "Подключённые браузеры: $connectedCount",
             style = MaterialTheme.typography.titleLarge,
             fontWeight = FontWeight.SemiBold,
             modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
@@ -504,13 +528,32 @@ private fun ActiveBrowsersSection(
                     modifier = Modifier.padding(18.dp),
                     verticalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
-                    Text(session.browserLabel, fontWeight = FontWeight.SemiBold)
-                    Text(
-                        text = session.sourceIpv4,
-                        style = MaterialTheme.typography.bodyMedium,
-                        fontFamily = FontFamily.Monospace,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
+                    Column(
+                        modifier = if (session.connected) {
+                            Modifier
+                        } else {
+                            Modifier.semantics(mergeDescendants = true) {
+                                contentDescription =
+                                    "${session.browserLabel}, ${session.sourceIpv4}, не в сети"
+                            }
+                        },
+                        verticalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        Text(session.browserLabel, fontWeight = FontWeight.SemiBold)
+                        Text(
+                            text = session.sourceIpv4,
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontFamily = FontFamily.Monospace,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        if (!session.connected) {
+                            Text(
+                                text = "Не в сети",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
                     OutlinedButton(
                         onClick = {
                             onAction(HomeAction.RevokeBrowser(session.id))
@@ -520,7 +563,8 @@ private fun ActiveBrowsersSection(
                             .fillMaxWidth()
                             .semantics {
                                 contentDescription =
-                                    "Отключить ${session.browserLabel} с адреса ${session.sourceIpv4}"
+                                    "Отключить ${session.browserLabel} с адреса ${session.sourceIpv4}" +
+                                    if (session.connected) "" else ", не в сети"
                             },
                     ) { Text("Отключить") }
                 }

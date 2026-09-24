@@ -7,12 +7,15 @@ import androidx.room.RoomDatabase
     entities = [
         HistoryRecordEntity::class,
         TrustedBrowserEntity::class,
+        PartialUploadEntity::class,
     ],
-    version = 1,
+    version = 2,
     exportSchema = true,
 )
 abstract class DeviceBridgeDatabase : RoomDatabase() {
     abstract fun historyDao(): HistoryDao
 
     abstract fun trustedBrowserDao(): TrustedBrowserDao
+
+    abstract fun partialUploadDao(): PartialUploadDao
 }

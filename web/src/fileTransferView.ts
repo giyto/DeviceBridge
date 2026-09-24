@@ -297,7 +297,14 @@ function updateTransferCard(
     const progressText = card.querySelector<HTMLElement>(".file-card__progress") ??
       documentRef.createElement("p");
     progressText.className = "file-card__progress";
-    if (item.status === "VERIFYING") {
+    if (item.status === "TRANSFERRING" && item.checkingSavedPart === true) {
+      progress.removeAttribute("value");
+      progress.setAttribute(
+        "aria-label",
+        "Проверка сохранённой части файла " + item.metadata.displayName,
+      );
+      progressText.textContent = "Проверка сохранённой части";
+    } else if (item.status === "VERIFYING") {
       progress.removeAttribute("value");
       progress.setAttribute(
         "aria-label",
@@ -315,12 +322,26 @@ function updateTransferCard(
         progressPercent(item) + "% · " +
         formatBytes(item.bytesTransferred) + " из " +
         formatBytes(item.metadata.sizeBytes) + " · " +
-        formatBytes(item.speedBytesPerSecond) + "/с";
+        formatBytes(item.speedBytesPerSecond) + "/с" +
+        (item.resumedFromBytes === undefined
+          ? ""
+          : " · продолжение с " + formatBytes(item.resumedFromBytes));
     }
     if (!progress.isConnected) details.after(progress, progressText);
   } else {
     card.querySelector("progress")?.remove();
     card.querySelector(".file-card__progress")?.remove();
+  }
+
+  const resumeHint = resumeHintText(item);
+  if (resumeHint !== undefined) {
+    const hint = card.querySelector<HTMLElement>(".file-card__resume") ??
+      documentRef.createElement("p");
+    hint.className = "file-card__resume";
+    hint.textContent = resumeHint;
+    if (!hint.isConnected) details.after(hint);
+  } else {
+    card.querySelector(".file-card__resume")?.remove();
   }
 
   if (item.localError !== undefined) {
@@ -377,6 +398,7 @@ function updateTransferCard(
       true,
     ),
   );
+  const retryLabel = canContinueUpload(item) ? "Продолжить" : "Повторить";
   syncActionButton(
     documentRef,
     actionsRow,
@@ -384,18 +406,39 @@ function updateTransferCard(
     canRetry,
     () => actionButton(
       documentRef,
-      "Повторить",
+      retryLabel,
       "retry-file",
       () => actions.onRetry(item.id),
       true,
     ),
   );
+  const retryButton = actionsRow?.querySelector<HTMLButtonElement>('[data-action="retry-file"]');
+  if (retryButton !== null && retryButton !== undefined) retryButton.textContent = retryLabel;
   actionsRow?.querySelectorAll<HTMLButtonElement>("button").forEach((button) => {
-    button.disabled = !connectionAvailable;
+    button.disabled = !connectionAvailable || item.checkingSourcePercent !== undefined;
   });
   if (actionsRow !== null && actionsRow.childElementCount === 0) {
     actionsRow.remove();
   }
+}
+
+function canContinueUpload(item: FileTransferUiItem): boolean {
+  return item.status === "FAILED" &&
+    item.metadata.direction === "BROWSER_TO_ANDROID" &&
+    item.resumableBytes !== undefined;
+}
+
+function resumeHintText(item: FileTransferUiItem): string | undefined {
+  if (item.checkingSourcePercent !== undefined) {
+    return "Проверяем исходный файл перед повтором… " + item.checkingSourcePercent + "%";
+  }
+  if (item.status !== "FAILED" || item.resumableBytes === undefined) return undefined;
+  if (item.metadata.direction === "BROWSER_TO_ANDROID") {
+    return "Сохранено " + formatBytes(item.resumableBytes) + " из " +
+      formatBytes(item.metadata.sizeBytes) + ". Передачу можно продолжить с этого места.";
+  }
+  return "Загрузку можно возобновить в менеджере загрузок браузера в течение 15 минут " +
+    "или повторить с начала.";
 }
 
 function syncActionButton(

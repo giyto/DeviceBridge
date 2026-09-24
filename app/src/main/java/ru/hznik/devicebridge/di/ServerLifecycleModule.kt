@@ -44,7 +44,6 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import ru.hznik.devicebridge.domain.usecase.ObserveTextTransfersUseCase
-import ru.hznik.devicebridge.domain.usecase.ReceiveTextFromBrowserUseCase
 import ru.hznik.devicebridge.domain.usecase.RetryTextTransferUseCase
 import ru.hznik.devicebridge.domain.usecase.SendTextToBrowserUseCase
 
@@ -159,6 +158,7 @@ abstract class ServerLifecycleModule {
             browserSessions: BrowserSessionCoordinator,
             observeSettings: ru.hznik.devicebridge.domain.usecase.ObserveSettingsUseCase,
             destinationLeases: FileDestinationLeaseRegistry,
+            partialUploads: ru.hznik.devicebridge.data.file.PartialUploadStore,
             @dagger.hilt.android.qualifiers.ApplicationContext context: android.content.Context,
         ): ru.hznik.devicebridge.data.file.TrustedAutoAcceptController {
             val destinations = ru.hznik.devicebridge.data.file.PersistedDestinationPermissionController(
@@ -174,6 +174,17 @@ abstract class ServerLifecycleModule {
                     destinations::openPersisted,
                 ),
                 leases = destinationLeases,
+                isResumeRetry = coordinator::isResumeRetry,
+                hasRetainedPart = { item, treeUri ->
+                    partialUploads.find(
+                        ru.hznik.devicebridge.data.file.PartialUploadKey(
+                            sha256 = item.metadata.sha256.lowercase(),
+                            sizeBytes = item.metadata.sizeBytes,
+                            displayName = item.metadata.displayName,
+                            treeUri = treeUri,
+                        ),
+                    ) != null
+                },
             )
         }
 
@@ -187,12 +198,17 @@ abstract class ServerLifecycleModule {
         @Singleton
         fun provideAutoAcceptLifecycle(
             controller: ru.hznik.devicebridge.data.file.TrustedAutoAcceptController,
+            partialUploadCleanup: ru.hznik.devicebridge.data.file.PartialUploadCleanup,
             @ApplicationScope applicationScope: CoroutineScope,
         ): ru.hznik.devicebridge.data.file.AutoAcceptLifecycle {
             // SAF permission checks block on the provider, so evaluation runs on the IO pool.
             val ioScope = CoroutineScope(applicationScope.coroutineContext + kotlinx.coroutines.Dispatchers.IO)
             return object : ru.hznik.devicebridge.data.file.AutoAcceptLifecycle {
-                override fun activate() = controller.start(ioScope)
+                override fun activate() {
+                    // A new server generation is also when expired partial uploads go away.
+                    partialUploadCleanup.run()
+                    controller.start(ioScope)
+                }
 
                 override fun deactivate() = controller.stop()
             }
@@ -275,10 +291,6 @@ abstract class ServerLifecycleModule {
             ru.hznik.devicebridge.domain.usecase.RetryFileTransferUseCase(repository)
 
         @Provides
-        fun provideVerifyFileTransferUseCase(repository: FileTransferRepository) =
-            ru.hznik.devicebridge.domain.usecase.VerifyFileTransferUseCase(repository)
-
-        @Provides
         fun provideObserveTextTransfersUseCase(
             repository: TextTransferRepository,
         ): ObserveTextTransfersUseCase = ObserveTextTransfersUseCase(repository)
@@ -287,11 +299,6 @@ abstract class ServerLifecycleModule {
         fun provideSendTextToBrowserUseCase(
             repository: TextTransferRepository,
         ): SendTextToBrowserUseCase = SendTextToBrowserUseCase(repository)
-
-        @Provides
-        fun provideReceiveTextFromBrowserUseCase(
-            repository: TextTransferRepository,
-        ): ReceiveTextFromBrowserUseCase = ReceiveTextFromBrowserUseCase(repository)
 
         @Provides
         fun provideRetryTextTransferUseCase(

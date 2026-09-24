@@ -69,6 +69,35 @@ class FileTransferScheduler {
         items.first { it.metadata.id == transferId }
     }
 
+    /**
+     * Continues an interrupted Android -> Browser download from [bytesTransferred]. Refused
+     * (null) while another item of the same direction is active.
+     */
+    suspend fun resume(
+        transferId: FileTransferId,
+        bytesTransferred: Long,
+    ): FileTransferState? = mutex.withLock {
+        val index = items.indexOfFirst { it.metadata.id == transferId }
+        if (index < 0) return@withLock null
+        val current = items[index]
+        if (current.phase != FileTransferPhase.FAILED) return@withLock null
+        val busy = items.any {
+            it.metadata.id != transferId &&
+                it.metadata.direction == current.metadata.direction &&
+                it.phase in ACTIVE_PHASES
+        }
+        if (busy || bytesTransferred !in 0 until current.metadata.sizeBytes) return@withLock null
+        items[index] = current.evolve(
+            phase = FileTransferPhase.TRANSFERRING,
+            bytesTransferred = bytesTransferred,
+            speedBytesPerSecond = 0,
+            failure = null,
+            resumedFromBytes = bytesTransferred,
+        )
+        publish()
+        items[index]
+    }
+
     suspend fun clear() = mutex.withLock {
         items.clear()
         publish()

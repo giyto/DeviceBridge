@@ -1,5 +1,6 @@
 package ru.hznik.devicebridge.feature.settings
 
+import ru.hznik.devicebridge.data.file.PartialUploadSummary
 import ru.hznik.devicebridge.domain.settings.DeviceSettings
 import ru.hznik.devicebridge.domain.settings.IdleStopTimeout
 import ru.hznik.devicebridge.domain.settings.ThemePreference
@@ -51,6 +52,9 @@ data class SettingsUiState(
     val revokeAllTrustedBrowsersPending: Boolean = false,
     val trustedBrowsersError: String? = null,
     val themePreference: ThemePreference? = null,
+    val partialUploads: PartialUploadSummary = PartialUploadSummary(count = 0, totalBytes = 0),
+    val discardPartialUploadsPending: Boolean = false,
+    val partialUploadsError: String? = null,
 ) {
     val autoAcceptStatus: AutoAcceptStatus
         get() = when {
@@ -87,6 +91,7 @@ sealed interface SettingsAction {
         val isAvailable: Boolean,
     ) : SettingsAction
     data object RevokeAllTrustedBrowsers : SettingsAction
+    data object DiscardPartialUploads : SettingsAction
     data class ThemeSelected(val value: ThemePreference) : SettingsAction
     data class AutoAcceptToggled(val enabled: Boolean) : SettingsAction
     data class IdleStopSelected(val value: IdleStopTimeout) : SettingsAction

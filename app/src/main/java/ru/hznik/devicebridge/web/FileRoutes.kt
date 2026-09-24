@@ -17,12 +17,15 @@ import io.ktor.server.routing.routing
 import java.io.OutputStream
 import java.net.URLEncoder
 import java.nio.charset.StandardCharsets
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.currentCoroutineContext
 import ru.hznik.devicebridge.core.protocol.file.FILE_ERROR_TYPE
 import ru.hznik.devicebridge.core.protocol.file.FILE_DOWNLOAD_GRANT_TYPE
 import ru.hznik.devicebridge.core.protocol.file.FILE_PROTOCOL_VERSION
+import ru.hznik.devicebridge.core.protocol.file.FILE_UPLOAD_OFFSET_HEADER
+import ru.hznik.devicebridge.core.protocol.file.FILE_UPLOAD_OFFSET_TYPE
 import ru.hznik.devicebridge.core.protocol.file.FILE_SNAPSHOT_TYPE
 import ru.hznik.devicebridge.core.protocol.file.FileDirectionDto
 import ru.hznik.devicebridge.core.protocol.file.FileDownloadGrantRequest
@@ -37,12 +40,17 @@ import ru.hznik.devicebridge.core.protocol.file.FileProtocolValidator
 import ru.hznik.devicebridge.core.protocol.file.FileSnapshotEvent
 import ru.hznik.devicebridge.core.protocol.file.FileSnapshotItem
 import ru.hznik.devicebridge.core.protocol.file.FileTransferStatusDto
+import ru.hznik.devicebridge.core.protocol.file.FileUploadOffsetRequest
+import ru.hznik.devicebridge.core.protocol.file.FileUploadOffsetResponse
 import ru.hznik.devicebridge.core.protocol.session.SessionErrorCode
+import ru.hznik.devicebridge.data.file.DownloadResume
 import ru.hznik.devicebridge.data.file.FileTransferCoordinator
 import ru.hznik.devicebridge.data.file.FileDownloadSourceFactory
 import ru.hznik.devicebridge.data.file.FileTransferResources
 import ru.hznik.devicebridge.data.file.FileUploadTarget
 import ru.hznik.devicebridge.data.file.FileUploadTargetFactory
+import ru.hznik.devicebridge.data.file.TransferSpeedMeter
+import ru.hznik.devicebridge.data.file.resumableBytes
 import ru.hznik.devicebridge.data.session.BrowserSessionCoordinator
 import ru.hznik.devicebridge.data.session.SessionGenerationHandle
 import ru.hznik.devicebridge.domain.file.CreateFileTransfersRequest
@@ -73,8 +81,11 @@ fun Application.installFileRoutes(
     uploadTargetFactory: FileUploadTargetFactory? = null,
     uploadProcessor: RawFileUploadProcessor = RawFileUploadProcessor(),
     downloadSourceFactory: FileDownloadSourceFactory? = null,
+    monotonicMs: () -> Long = { System.nanoTime() / 1_000_000 },
     effectiveFileLimitBytes: () -> Long = { HARD_MAX_FILE_BYTES },
 ) {
+    // Outputs prepared by upload-offset wait here for their body; they live with this server.
+    val preparedUploads = ConcurrentHashMap<FileTransferId, UploadRouteResources>()
     routing {
         post("/api/v1/files") {
             val authorized = call.authorizeSession(
@@ -213,8 +224,21 @@ fun Application.installFileRoutes(
                 call.respondFileError(HttpStatusCode.UnsupportedMediaType, FileProtocolErrorCode.INVALID_PAYLOAD, wallClockMs, transferId.value)
                 return@post
             }
+            val prepared = preparedUploads[transferId]
+            val expectedOffset = prepared?.target?.offsetBytes ?: 0L
+            val requestedOffset = call.request.header(FILE_UPLOAD_OFFSET_HEADER)
+                ?.let { value -> value.toLongOrNull() ?: -1L }
+                ?: 0L
+            if (requestedOffset != expectedOffset) {
+                call.respondFileError(HttpStatusCode.Conflict, FileProtocolErrorCode.MESSAGE_CONFLICT, wallClockMs, transferId.value)
+                return@post
+            }
             val contentLength = call.request.header(HttpHeaders.ContentLength)?.toLongOrNull()
-            if (contentLength == null || contentLength < 0 || contentLength != item.metadata.sizeBytes) {
+            if (
+                contentLength == null ||
+                contentLength < 0 ||
+                contentLength != item.metadata.sizeBytes - expectedOffset
+            ) {
                 val tooLarge = contentLength != null && contentLength > HARD_MAX_FILE_BYTES
                 call.respondFileError(
                     if (tooLarge) HttpStatusCode.PayloadTooLarge else HttpStatusCode.BadRequest,
@@ -224,46 +248,25 @@ fun Application.installFileRoutes(
                 )
                 return@post
             }
-            val destination = fileCoordinator.destinationFor(
-                authorized.handle.generationId,
-                authorized.session.id,
-                transferId,
-            )
-            if (destination == null) {
-                call.respondFileError(HttpStatusCode.Forbidden, FileProtocolErrorCode.NOT_APPROVED, wallClockMs, transferId.value)
-                return@post
-            }
-            val factory = uploadTargetFactory
-            if (factory == null) {
-                fileCoordinator.transition(
-                    transferId,
-                    FileTransferEvent.Failed(FileTransferFailure.StorageUnavailable),
-                )
-                call.respondFileError(HttpStatusCode.ServiceUnavailable, FileProtocolErrorCode.DESTINATION_UNAVAILABLE, wallClockMs, transferId.value)
-                return@post
-            }
-            val target = runCatching { factory.create(destination, item.metadata) }.getOrNull()
-            if (target == null) {
-                fileCoordinator.transition(
-                    transferId,
-                    FileTransferEvent.Failed(FileTransferFailure.StorageUnavailable),
-                )
-                call.respondFileError(HttpStatusCode.ServiceUnavailable, FileProtocolErrorCode.DESTINATION_UNAVAILABLE, wallClockMs, transferId.value)
-                return@post
-            }
-            val managedTarget = ManagedFileUploadTarget(target)
             val uploadJob = checkNotNull(currentCoroutineContext()[Job])
-            val attached = fileCoordinator.attachResources(
-                transferId,
-                UploadRouteResources(uploadJob, managedTarget),
-            )
-            if (!attached) {
-                managedTarget.abort()
-                managedTarget.close()
-                call.respondFileError(HttpStatusCode.Conflict, FileProtocolErrorCode.STREAM_FAILED, wallClockMs, transferId.value)
-                return@post
+            val managedTarget = if (prepared != null && preparedUploads.remove(transferId, prepared)) {
+                prepared.job = uploadJob
+                prepared.target
+            } else {
+                // Upload without a prepared output (older web shell): always from byte 0.
+                val resources = call.prepareUploadResources(
+                    fileCoordinator,
+                    uploadTargetFactory,
+                    authorized,
+                    item,
+                    resume = false,
+                    wallClockMs = wallClockMs,
+                ) ?: return@post
+                resources.job = uploadJob
+                resources.target
             }
 
+            val uploadSpeed = TransferSpeedMeter(monotonicMs)
             val uploadResult = try {
                 uploadProcessor.receive(
                     channel = call.receiveChannel(),
@@ -273,7 +276,7 @@ fun Application.installFileRoutes(
                     onProgress = { bytes ->
                         fileCoordinator.transition(
                             transferId,
-                            FileTransferEvent.Progressed(bytes, speedBytesPerSecond = 0),
+                            FileTransferEvent.Progressed(bytes, uploadSpeed.update(bytes)),
                         )
                     },
                 )
@@ -307,6 +310,62 @@ fun Application.installFileRoutes(
                 )
                 call.respondFileError(HttpStatusCode.BadRequest, failure.toProtocolErrorCode(), wallClockMs, transferId.value)
             }
+        }
+
+        post("/api/v1/files/{transferId}/upload-offset") {
+            val authorized = call.authorizeSession(
+                coordinator = sessionCoordinator,
+                generationHandle = generationHandle,
+                allowedHosts = allowedHosts,
+            ) ?: return@post
+            if (!call.requireFileJsonRequest(allowedHosts(), wallClockMs)) return@post
+            val transferId = call.parameters["transferId"]
+                ?.let { value -> runCatching { FileTransferId(value) }.getOrNull() }
+            val item = transferId?.let {
+                fileCoordinator.ownedTransfer(authorized.handle.generationId, authorized.session.id, it)
+            }
+            if (transferId == null || item == null) {
+                call.respondFileError(HttpStatusCode.NotFound, FileProtocolErrorCode.INVALID_PAYLOAD, wallClockMs)
+                return@post
+            }
+            val request = call.receiveBoundedJson(MAX_FILE_CONTROL_JSON_BYTES)
+                ?.let { body -> runCatching { FileProtocolJson.decode<FileUploadOffsetRequest>(body) }.getOrNull() }
+            if (request == null || FileProtocolValidator.validate(request) != FileProtocolValidationError.NONE) {
+                call.respondFileError(HttpStatusCode.BadRequest, FileProtocolErrorCode.INVALID_PAYLOAD, wallClockMs)
+                return@post
+            }
+            if (
+                item.metadata.direction != FileTransferDirection.BROWSER_TO_ANDROID ||
+                item.phase != FileTransferPhase.TRANSFERRING
+            ) {
+                call.respondFileError(HttpStatusCode.Forbidden, FileProtocolErrorCode.NOT_APPROVED, wallClockMs, request.messageId)
+                return@post
+            }
+            val resources = preparedUploads[transferId] ?: call.prepareUploadResources(
+                fileCoordinator,
+                uploadTargetFactory,
+                authorized,
+                item,
+                resume = true,
+                wallClockMs = wallClockMs,
+            )?.also { prepared -> preparedUploads[transferId] = prepared } ?: return@post
+            val offset = resources.target.offsetBytes
+            if (offset > 0) {
+                fileCoordinator.transition(transferId, FileTransferEvent.Resumed(offset))
+            }
+            call.respondJson(
+                HttpStatusCode.OK,
+                FileProtocolJson.encode(
+                    FileUploadOffsetResponse(
+                        protocolVersion = FILE_PROTOCOL_VERSION,
+                        messageId = request.messageId,
+                        type = FILE_UPLOAD_OFFSET_TYPE,
+                        timestamp = wallClockMs(),
+                        transferId = transferId.value,
+                        offsetBytes = offset,
+                    ),
+                ),
+            )
         }
 
         post("/api/v1/files/{transferId}/download-grant") {
@@ -477,11 +536,57 @@ fun Application.installFileRoutes(
                 call.respondText("Not found", status = HttpStatusCode.NotFound)
                 return@get
             }
-            val scope = fileCoordinator.consumeDownloadGrant(
+            val range = call.request.header(HttpHeaders.Range)?.let(::parseByteRange)
+            // A fresh grant starts the download; the server may ignore Range then (RFC 9110).
+            var offset = 0L
+            var resumed = false
+            var scope = fileCoordinator.consumeDownloadGrant(
                 grantToken,
                 handle.generationId,
                 transferId,
             )
+            if (scope == null && range != null) {
+                val ifRange = call.request.header(HttpHeaders.IfRange)
+                val expectedSha256 = ifRange?.let(::sha256FromEtag)
+                if (ifRange != null && expectedSha256 == null) {
+                    call.respondText("Precondition failed", status = HttpStatusCode.PreconditionFailed)
+                    return@get
+                }
+                val start = (range as? ByteRangeRequest.Single)?.start ?: -1
+                val size = fileCoordinator.state.value.items
+                    .firstOrNull { it.metadata.id == transferId }
+                    ?.metadata
+                    ?.sizeBytes
+                if (size != null && (start < 0 || start >= size)) {
+                    call.response.header(HttpHeaders.ContentRange, "bytes */$size")
+                    call.respondText("Range not satisfiable", status = HttpStatusCode.RequestedRangeNotSatisfiable)
+                    return@get
+                }
+                when (
+                    val resume = fileCoordinator.resumeDownload(
+                        grantToken,
+                        handle.generationId,
+                        transferId,
+                        start,
+                        expectedSha256,
+                    )
+                ) {
+                    is DownloadResume.Allowed -> {
+                        scope = resume.scope
+                        offset = start
+                        resumed = true
+                    }
+                    DownloadResume.Busy -> {
+                        call.respondText("Busy", status = HttpStatusCode.Conflict)
+                        return@get
+                    }
+                    DownloadResume.Stale -> {
+                        call.respondText("Precondition failed", status = HttpStatusCode.PreconditionFailed)
+                        return@get
+                    }
+                    DownloadResume.Rejected -> Unit
+                }
+            }
             if (scope == null) {
                 call.respondText("Not found", status = HttpStatusCode.NotFound)
                 return@get
@@ -502,35 +607,55 @@ fun Application.installFileRoutes(
                 call.respondText("Unavailable", status = HttpStatusCode.ServiceUnavailable)
                 return@get
             }
-            fileCoordinator.transition(transferId, FileTransferEvent.Started)
+            val size = item.metadata.sizeBytes
+            val ranged = resumed
+            // Last byte (inclusive) this response delivers; a bounded range may stop early.
+            val end = (range as? ByteRangeRequest.Single)
+                ?.takeIf { ranged }
+                ?.end
+                ?.coerceAtMost(size - 1)
+                ?: (size - 1)
+            if (!ranged) fileCoordinator.transition(transferId, FileTransferEvent.Started)
             call.response.header("Referrer-Policy", "no-referrer")
             call.response.header(HttpHeaders.CacheControl, "no-store")
+            call.response.header(HttpHeaders.AcceptRanges, "bytes")
+            call.response.header(HttpHeaders.ETag, "\"sha256-" + item.metadata.sha256.lowercase() + "\"")
             call.response.header(HttpHeaders.ContentDisposition, safeAttachmentHeader(item.metadata.displayName, transferId.value))
+            if (ranged) call.response.header(HttpHeaders.ContentRange, "bytes $offset-$end/$size")
             try {
                 call.respondOutputStream(
                     contentType = runCatching { ContentType.parse(item.metadata.mimeType) }
                         .getOrDefault(ContentType.Application.OctetStream),
-                    status = HttpStatusCode.OK,
-                    contentLength = item.metadata.sizeBytes,
+                    status = if (ranged) HttpStatusCode.PartialContent else HttpStatusCode.OK,
+                    contentLength = end - offset + 1,
                 ) {
                     val input = source.inputStream()
+                    input.skipExactly(offset)
+                    val downloadSpeed = TransferSpeedMeter(monotonicMs)
+                    downloadSpeed.update(offset)
                     val buffer = ByteArray(64 * 1024)
-                    var total = 0L
-                    while (true) {
-                        val count = input.read(buffer)
+                    var total = offset
+                    while (total <= end) {
+                        val wanted = minOf(buffer.size.toLong(), end + 1 - total).toInt()
+                        val count = input.read(buffer, 0, wanted)
                         if (count < 0) break
                         if (count == 0) continue
                         total = Math.addExact(total, count.toLong())
-                        if (total > item.metadata.sizeBytes) error("Download source exceeded declared size")
                         write(buffer, 0, count)
                         fileCoordinator.transition(
                             transferId,
-                            FileTransferEvent.Progressed(total, speedBytesPerSecond = 0),
+                            FileTransferEvent.Progressed(total, downloadSpeed.update(total)),
                         )
                     }
-                    if (total != item.metadata.sizeBytes) error("Download source ended before declared size")
+                    if (total != end + 1) error("Download source ended before declared size")
+                    if (end == size - 1 && input.read() >= 0) error("Download source exceeded declared size")
                     flush()
-                    fileCoordinator.transition(transferId, FileTransferEvent.Delivered)
+                    if (end == size - 1) {
+                        fileCoordinator.transition(transferId, FileTransferEvent.Delivered)
+                    } else {
+                        // Only a part was asked for: the rest may be requested later.
+                        fileCoordinator.onNetworkFailure(transferId)
+                    }
                 }
             } catch (failure: Throwable) {
                 fileCoordinator.onNetworkFailure(transferId)
@@ -540,6 +665,49 @@ fun Application.installFileRoutes(
             }
         }
     }
+}
+
+/**
+ * Opens the output of an approved upload and hands it to the coordinator, which cleans it up on
+ * cancel, failure or server stop. Responds with the error itself and returns null on failure.
+ */
+private suspend fun ApplicationCall.prepareUploadResources(
+    fileCoordinator: FileTransferCoordinator,
+    uploadTargetFactory: FileUploadTargetFactory?,
+    authorized: AuthorizedSession,
+    item: FileTransferState,
+    resume: Boolean,
+    wallClockMs: () -> Long,
+): UploadRouteResources? {
+    val transferId = item.metadata.id
+    val destination = fileCoordinator.destinationFor(
+        authorized.handle.generationId,
+        authorized.session.id,
+        transferId,
+    )
+    if (destination == null) {
+        respondFileError(HttpStatusCode.Forbidden, FileProtocolErrorCode.NOT_APPROVED, wallClockMs, transferId.value)
+        return null
+    }
+    val target = uploadTargetFactory?.let { factory ->
+        runCatching { factory.create(destination, item.metadata, resume) }.getOrNull()
+    }
+    if (target == null) {
+        fileCoordinator.transition(
+            transferId,
+            FileTransferEvent.Failed(FileTransferFailure.StorageUnavailable),
+        )
+        respondFileError(HttpStatusCode.ServiceUnavailable, FileProtocolErrorCode.DESTINATION_UNAVAILABLE, wallClockMs, transferId.value)
+        return null
+    }
+    val resources = UploadRouteResources(ManagedFileUploadTarget(target))
+    if (!fileCoordinator.attachResources(transferId, resources)) {
+        resources.target.retain()
+        resources.target.close()
+        respondFileError(HttpStatusCode.Conflict, FileProtocolErrorCode.STREAM_FAILED, wallClockMs, transferId.value)
+        return null
+    }
+    return resources
 }
 
 private suspend fun ApplicationCall.requireFileJsonRequest(
@@ -631,9 +799,22 @@ private class ManagedFileUploadTarget(
 ) : FileUploadTarget {
     private val committed = AtomicBoolean(false)
     private val aborted = AtomicBoolean(false)
+    private val retained = AtomicBoolean(false)
     private val closed = AtomicBoolean(false)
 
     override fun outputStream(): OutputStream = delegate.outputStream()
+
+    override val offsetBytes: Long
+        get() = delegate.offsetBytes
+
+    override fun digest() = delegate.digest()
+
+    /** Keeping the part never overrides a commit or an explicit delete. */
+    override suspend fun retain() {
+        if (!committed.get() && !aborted.get() && retained.compareAndSet(false, true)) {
+            delegate.retain()
+        }
+    }
 
     override suspend fun commit() {
         if (committed.compareAndSet(false, true)) delegate.commit()
@@ -649,19 +830,22 @@ private class ManagedFileUploadTarget(
 }
 
 private class UploadRouteResources(
-    private val job: Job,
-    private val target: ManagedFileUploadTarget,
+    val target: ManagedFileUploadTarget,
 ) : FileTransferResources {
+    /** The request streaming the body; null while the output only waits for it. */
+    @Volatile
+    var job: Job? = null
+
     override suspend fun cancelJob() {
-        job.cancel()
+        job?.cancel()
     }
 
     override suspend fun closeStreams() {
         target.close()
     }
 
-    override suspend fun cleanupPartial() {
-        target.abort()
+    override suspend fun cleanupPartial(retain: Boolean) {
+        if (retain) target.retain() else target.abort()
     }
 }
 
@@ -694,6 +878,7 @@ internal fun FileTransferState.toSnapshotItem() = FileSnapshotItem(
     },
     bytesTransferred = bytesTransferred,
     speedBytesPerSecond = speedBytesPerSecond,
+    resumableBytes = resumableBytes(),
 )
 
 private fun FileTransferFailure.toProtocolErrorCode(): FileProtocolErrorCode = when (this) {
@@ -706,4 +891,39 @@ private fun FileTransferFailure.toProtocolErrorCode(): FileProtocolErrorCode = w
     FileTransferFailure.FileLimitExceeded -> FileProtocolErrorCode.FILE_TOO_LARGE
     FileTransferFailure.SourceUnavailable -> FileProtocolErrorCode.SOURCE_UNAVAILABLE
     FileTransferFailure.ProtocolMismatch -> FileProtocolErrorCode.UNSUPPORTED_VERSION
+}
+
+internal sealed interface ByteRangeRequest {
+    /** `bytes=start-` or `bytes=start-end`; [end] is inclusive. */
+    data class Single(val start: Long, val end: Long?) : ByteRangeRequest
+
+    /** Anything else: suffix and multi ranges, other units, malformed values. */
+    data object Unsupported : ByteRangeRequest
+}
+
+internal fun parseByteRange(header: String): ByteRangeRequest {
+    val match = Regex("^bytes=(\\d{1,18})-(\\d{0,18})$").matchEntire(header.trim())
+        ?: return ByteRangeRequest.Unsupported
+    val start = match.groupValues[1].toLong()
+    val end = match.groupValues[2].takeIf { it.isNotEmpty() }?.toLong()
+    if (end != null && end < start) return ByteRangeRequest.Unsupported
+    return ByteRangeRequest.Single(start, end)
+}
+
+/** The hex digest of a strong `"sha256-<hex>"` validator, or null for anything else. */
+internal fun sha256FromEtag(value: String): String? =
+    Regex("^\"sha256-([0-9a-fA-F]{64})\"$").matchEntire(value.trim())?.groupValues?.get(1)
+
+private fun java.io.InputStream.skipExactly(count: Long) {
+    var remaining = count
+    while (remaining > 0) {
+        val skipped = skip(remaining)
+        if (skipped > 0) {
+            remaining -= skipped
+        } else if (read() >= 0) {
+            remaining -= 1
+        } else {
+            error("Download source ended before the requested offset")
+        }
+    }
 }
