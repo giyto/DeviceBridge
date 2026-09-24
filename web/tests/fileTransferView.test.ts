@@ -276,6 +276,15 @@ describe("createFileTransferView", () => {
     expect(callbacks.onRetry).not.toHaveBeenCalled();
     expect(callbacks.onDownload).not.toHaveBeenCalled();
   });
+  it("says a cancel came from the phone", () => {
+    const view = createFileTransferView(document, createActions());
+
+    view.render(active({ transfers: [{ ...item("CANCELLED"), cancelledOnPhone: true }] }));
+
+    const card = document.querySelector<HTMLElement>('[data-transfer-id="file-1"]')!;
+    expect(card.querySelector(".file-card__status")?.textContent).toBe("Отменено на телефоне");
+  });
+
   it("uses shared file type, direction, stage and action semantics for long names", () => {
     const view = createFileTransferView(document, createActions());
     const longName = `${"очень-длинное-имя-".repeat(8)}video.mp4`;
@@ -292,7 +301,7 @@ describe("createFileTransferView", () => {
     const card = document.querySelector<HTMLElement>('[data-transfer-id="file-1"]')!;
     const actions = card.querySelector<HTMLElement>(".file-card__actions")!;
     expect(card.getAttribute("aria-label")).toContain("С телефона");
-    expect(card.getAttribute("aria-label")).toContain("Ожидает подтверждения");
+    expect(card.getAttribute("aria-label")).toContain("Ожидает скачивания");
     expect(card.querySelector(".file-card__type")?.textContent).toBe("VID");
     expect(actions.getAttribute("role")).toBe("group");
     expect(Array.from(actions.querySelectorAll("button"), (button) => button.textContent)).toEqual([

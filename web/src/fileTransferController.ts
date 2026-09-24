@@ -47,6 +47,8 @@ export interface FileTransferUiItem {
   readonly resumedFromBytes?: number;
   /** Percent of the source file re-read before a retry (the source must be unchanged). */
   readonly checkingSourcePercent?: number;
+  /** Cancelled on the phone rather than in this browser. */
+  readonly cancelledOnPhone?: boolean;
 }
 
 export type FileTransferUiState =
@@ -92,6 +94,10 @@ export class FileTransferController {
   private effectiveFileLimitBytes = HARD_MAX_FILE_BYTES;
   private readonly sourceFiles = new Map<string, File>();
   private readonly operations = new Map<string, AbortController>();
+  /** Transfers this browser asked to cancel; any other cancel came from the phone. */
+  private readonly localCancels = new Set<string>();
+  /** The transfer the section error is about, so a later cancel of it can clear the error. */
+  private errorTransferId: string | undefined;
   /** Progress that arrived before the transfer's card: the phone can approve before the offer answer. */
   private readonly pendingProgress = new Map<string, FileProgressEvent>();
 
@@ -324,7 +330,9 @@ export class FileTransferController {
       speedBytesPerSecond: event.speedBytesPerSecond,
       localError: undefined,
       resumableBytes: event.resumableBytes,
+      ...this.cancelOrigin(existing.id, event.status),
     });
+    this.settleRemotely(existing.id, event.status);
     if (
       event.status === "TRANSFERRING" &&
       existing.metadata.direction === "BROWSER_TO_ANDROID"
@@ -340,9 +348,13 @@ export class FileTransferController {
       const existing = transfers.find((candidate) => candidate.id === item.metadata.transferId);
       // An answer can be older than a socket event already applied (auto-accept approves at once).
       if (existing !== undefined && isStaleStage(existing.status, item.status)) continue;
-      transfers = upsertBounded(transfers, toUiItem(item));
+      transfers = upsertBounded(transfers, {
+        ...toUiItem(item),
+        ...this.cancelOrigin(item.metadata.transferId, item.status),
+      });
     }
     this.emit({ ...this.state, transfers });
+    for (const item of event.items) this.settleRemotely(item.metadata.transferId, item.status);
     for (const item of event.items) {
       const pending = this.pendingProgress.get(item.metadata.transferId);
       if (pending === undefined) continue;
@@ -400,6 +412,7 @@ export class FileTransferController {
       this.token === undefined
     ) return;
     this.operations.get(transferId)?.abort();
+    this.localCancels.add(transferId);
     const controller = new AbortController();
     this.operations.set(transferId, controller);
     const generation = this.generation;
@@ -425,6 +438,7 @@ export class FileTransferController {
       item === undefined ||
       item.status !== "FAILED" && item.status !== "CANCELLED"
     ) return;
+    this.localCancels.delete(transferId);
     const sourceFile = item.metadata.direction === "BROWSER_TO_ANDROID"
       ? this.sourceFiles.get(transferId)
       : undefined;
@@ -535,7 +549,9 @@ export class FileTransferController {
   ): Promise<void> {
     const update = (change: (item: FileTransferUiItem) => FileTransferUiItem): void => {
       const item = this.transfer(transferId);
-      if (item !== undefined && this.isCurrent(generation, token)) this.upsert(change(item));
+      // Progress that was already on its way must not bring a finished card back.
+      if (item === undefined || isTerminalStatus(item.status)) return;
+      if (this.isCurrent(generation, token)) this.upsert(change(item));
     };
     try {
       if (file.size >= RESUMABLE_UPLOAD_MIN_BYTES) {
@@ -612,9 +628,11 @@ export class FileTransferController {
     const item = this.transfer(transferId);
     if (item !== undefined) this.upsert({ ...item, status: "FAILED", localError: message });
     this.emitError(message);
+    this.errorTransferId = transferId;
   }
 
   private emitError(message: string): void {
+    this.errorTransferId = undefined;
     if (this.state.kind === "active") this.emit({ ...this.state, error: message, preparing: false });
   }
 
@@ -639,9 +657,45 @@ export class FileTransferController {
       this.onUnauthorized();
       return;
     }
+    if (transferId !== undefined) {
+      const item = this.transfer(transferId);
+      // The request lost a race with a cancel: the card already says what happened.
+      if (item?.status === "CANCELLED") return;
+      if (error instanceof FileApiError && error.code === "CANCELLED" && item !== undefined) {
+        this.upsert({ ...item, status: "CANCELLED", ...this.cancelOrigin(transferId, "CANCELLED") });
+        return;
+      }
+    }
     const message = safeErrorMessage(error);
     if (transferId === undefined) this.emitError(message);
     else this.failLocal(transferId, message);
+  }
+
+  /** Marks a cancel this browser did not ask for as one made on the phone. */
+  private cancelOrigin(
+    transferId: string,
+    status: FileTransferStatus,
+  ): Pick<FileTransferUiItem, "cancelledOnPhone"> {
+    return status === "CANCELLED" && !this.localCancels.has(transferId)
+      ? { cancelledOnPhone: true }
+      : { cancelledOnPhone: undefined };
+  }
+
+  /**
+   * The phone ended a transfer: stop what this browser still does for it, and drop an error
+   * the lost race left behind.
+   */
+  private settleRemotely(transferId: string, status: FileTransferStatus): void {
+    if (status !== "CANCELLED" && status !== "FAILED") return;
+    const operation = this.operations.get(transferId);
+    if (operation !== undefined) {
+      this.operations.delete(transferId);
+      operation.abort();
+    }
+    if (status === "CANCELLED" && this.errorTransferId === transferId && this.state.kind === "active") {
+      this.errorTransferId = undefined;
+      this.emit({ ...this.state, error: undefined });
+    }
   }
 
   private emit(state: FileTransferUiState): void {
@@ -657,6 +711,7 @@ export class FileTransferController {
     for (const controller of this.operations.values()) controller.abort();
     this.operations.clear();
     this.pendingProgress.clear();
+    this.localCancels.clear();
   }
 }
 
@@ -709,6 +764,10 @@ function isStaleStage(current: FileTransferStatus, incoming: FileTransferStatus)
   const currentIndex = ACTIVE_STAGE_ORDER.indexOf(current);
   const incomingIndex = ACTIVE_STAGE_ORDER.indexOf(incoming);
   return currentIndex >= 0 && incomingIndex >= 0 && incomingIndex < currentIndex;
+}
+
+function isTerminalStatus(status: FileTransferStatus): boolean {
+  return status === "COMPLETED" || status === "CANCELLED" || status === "FAILED";
 }
 
 function isSettled(status: FileTransferStatus): boolean {

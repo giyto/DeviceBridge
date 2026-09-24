@@ -281,10 +281,10 @@ function updateTransferCard(
   const details = card.querySelector<HTMLElement>(".file-card__details")!;
   type.textContent = fileTypeLabel(item.metadata.mimeType, item.metadata.displayName);
   name.textContent = item.metadata.displayName;
-  status.textContent = statusLabel(item.status);
+  status.textContent = statusLabel(item);
   card.setAttribute(
     "aria-label",
-    `${directionLabel(item.metadata.direction)}. ${item.metadata.displayName}. ${statusLabel(item.status)}.`,
+    `${directionLabel(item.metadata.direction)}. ${item.metadata.displayName}. ${statusLabel(item)}.`,
   );
   details.textContent =
     directionLabel(item.metadata.direction) + " · " +
@@ -527,7 +527,7 @@ function announceTerminalChanges(
     const previous = knownStatuses.get(item.id);
     knownStatuses.set(item.id, item.status);
     if (isTerminal(item.status) && previous !== item.status) {
-      messages.push(item.metadata.displayName + ": " + statusLabel(item.status));
+      messages.push(item.metadata.displayName + ": " + statusLabel(item));
     }
   }
   if (messages.length > 0) announcer.textContent = messages.join(". ");
@@ -545,14 +545,16 @@ function isTerminal(status: FileTransferUiItem["status"]): boolean {
   return status === "COMPLETED" || status === "CANCELLED" || status === "FAILED";
 }
 
-function statusLabel(status: FileTransferUiItem["status"]): string {
-  switch (status) {
+function statusLabel(item: FileTransferUiItem): string {
+  switch (item.status) {
     case "QUEUED": return "В очереди";
-    case "CONNECTING": return "Ожидает подтверждения";
+    // A phone offer waits for this browser's download click, not for an approval.
+    case "CONNECTING":
+      return item.metadata.direction === "ANDROID_TO_BROWSER" ? "Ожидает скачивания" : "Ожидает подтверждения";
     case "TRANSFERRING": return "Передаётся";
     case "VERIFYING": return "Проверяется";
     case "COMPLETED": return "Завершено";
-    case "CANCELLED": return "Отменено";
+    case "CANCELLED": return item.cancelledOnPhone === true ? "Отменено на телефоне" : "Отменено";
     case "FAILED": return "Ошибка";
   }
 }
