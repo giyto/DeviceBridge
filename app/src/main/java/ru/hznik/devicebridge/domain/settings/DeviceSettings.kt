@@ -25,6 +25,8 @@ data class DeviceSettings(
     val effectiveFileLimitBytes: Long,
     val autoAcceptTrustedFiles: Boolean = false,
     val idleStopTimeout: IdleStopTimeout = IdleStopTimeout.DEFAULT,
+    /** Serve browsers over HTTPS with the phone's own certificate authority. */
+    val secureModeEnabled: Boolean = false,
 ) {
     init {
         require(deviceName.isNotBlank())

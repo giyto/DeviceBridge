@@ -342,6 +342,9 @@ class FileViewModelTest {
         override suspend fun updateIdleStopTimeout(
             value: ru.hznik.devicebridge.domain.settings.IdleStopTimeout,
         ): SettingsUpdateResult = SettingsUpdateResult.Updated(current.value)
+
+        override suspend fun updateSecureMode(enabled: Boolean): SettingsUpdateResult =
+            SettingsUpdateResult.Updated(current.value)
     }
 
     private class FakeSessions(initial: BrowserSessionState) : BrowserSessionRepository {

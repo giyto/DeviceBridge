@@ -30,6 +30,18 @@ import ru.hznik.devicebridge.data.file.FileSourceRegistry
 import ru.hznik.devicebridge.data.file.FileTransferCoordinator
 import ru.hznik.devicebridge.data.file.FileUploadTargetFactory
 import ru.hznik.devicebridge.web.FileSessionEventBridge
+import java.security.KeyStore
+import java.security.cert.X509Certificate
+import javax.net.ssl.SSLContext
+import javax.net.ssl.SSLSocket
+import javax.net.ssl.TrustManagerFactory
+import ru.hznik.devicebridge.data.tls.LocalCertificateAuthority
+import ru.hznik.devicebridge.data.tls.LocalCertificateSecureTransport
+import ru.hznik.devicebridge.data.tls.SecureTransport
+import ru.hznik.devicebridge.data.tls.ServerTlsMaterial
+import ru.hznik.devicebridge.data.tls.SoftwareTlsKeyStore
+import ru.hznik.devicebridge.data.tls.TlsMaterialException
+import ru.hznik.devicebridge.domain.model.ServerLifecycleError
 
 class KtorServerRuntimeFactoryTest {
 
@@ -118,7 +130,60 @@ class KtorServerRuntimeFactoryTest {
         }
     }
 
-    private fun factory(preferredPort: Int = findFreePort()): KtorServerRuntimeFactory {
+    @Test
+    fun secureModePublishesHttpsAndServesSetupOverPlainHttp() = runBlocking {
+        val authority = LocalCertificateAuthority(SoftwareTlsKeyStore(), createTempDir())
+        val runtime = factory(
+            secureTransport = LocalCertificateSecureTransport({ true }, authority),
+        ).create()
+
+        val endpoint = runtime.start()
+        try {
+            assertTrue(endpoint.secure)
+            assertEquals("http://$LAN_HOST:${endpoint.port}", endpoint.url)
+            val root = authority.rootOrNull()!!
+            val app = tlsGet(endpoint.port, endpoint.authority, "/", root)
+            assertTrue(app, app.startsWith("HTTP/1.1 200"))
+            assertTrue(app.contains("<title>DeviceBridge</title>"))
+
+            val setup = rawGet(endpoint.port, endpoint.authority, "/")
+            assertTrue(setup.startsWith("HTTP/1.1 200"))
+            assertTrue(setup.contains("<title>Setup</title>"))
+            assertTrue(setup.contains("connect-src 'self' https://${endpoint.authority};"))
+            assertTrue(rawGet(endpoint.port, endpoint.authority, "/api/v1/status").startsWith("HTTP/1.1 403"))
+        } finally {
+            runtime.stop()
+        }
+
+        ServerSocket(endpoint.port).use { rebound ->
+            assertTrue(rebound.isBound)
+        }
+    }
+
+    @Test
+    fun unusableCertificateFailsTheStartInsteadOfFallingBackToHttp() = runBlocking {
+        val broken = object : SecureTransport {
+            override fun isEnabled() = true
+            override fun serverMaterial(address: java.net.Inet4Address): ServerTlsMaterial =
+                throw TlsMaterialException("key is gone")
+        }
+        val port = findFreePort()
+        val runtime = factory(port, secureTransport = broken).create()
+
+        val failure = runCatching { runtime.start() }.exceptionOrNull()
+
+        assertTrue(failure is ServerRuntimeStartException)
+        assertEquals(
+            ServerLifecycleError.SecureCertificateUnavailable,
+            (failure as ServerRuntimeStartException).lifecycleError,
+        )
+        ServerSocket(port).use { assertTrue(it.isBound) }
+    }
+
+    private fun factory(
+        preferredPort: Int = findFreePort(),
+        secureTransport: SecureTransport = SecureTransport.Disabled,
+    ): KtorServerRuntimeFactory {
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
         val browserSessions = BrowserSessionCoordinator(
             clock = MonotonicClock { 1_000 },
@@ -175,7 +240,29 @@ class KtorServerRuntimeFactoryTest {
             ),
             monotonicClock = MonotonicClock { 1_000 },
             preferredPort = preferredPort,
+            secureTransport = secureTransport,
         )
+    }
+
+    private fun createTempDir(): java.io.File =
+        java.nio.file.Files.createTempDirectory("devicebridge-runtime-tls").toFile()
+
+    /** A GET over TLS that trusts only [root]; the certificate names the LAN address, not 127.0.0.1. */
+    private fun tlsGet(port: Int, hostHeader: String, path: String, root: X509Certificate): String {
+        val trust = KeyStore.getInstance(KeyStore.getDefaultType()).apply {
+            load(null)
+            setCertificateEntry("root", root)
+        }
+        val context = SSLContext.getInstance("TLS").apply {
+            init(null, TrustManagerFactory.getInstance("PKIX").apply { init(trust) }.trustManagers, null)
+        }
+        return (context.socketFactory.createSocket("127.0.0.1", port) as SSLSocket).use { socket ->
+            socket.soTimeout = 5_000
+            val writer = socket.outputStream.bufferedWriter(StandardCharsets.US_ASCII)
+            writer.write("GET $path HTTP/1.1\r\nHost: $hostHeader\r\nConnection: close\r\n\r\n")
+            writer.flush()
+            socket.inputStream.readBytes().toString(StandardCharsets.UTF_8)
+        }
     }
 
     private fun findFreePort(): Int = ServerSocket(0).use { it.localPort }
@@ -204,6 +291,7 @@ class KtorServerRuntimeFactoryTest {
         const val LAN_HOST = "192.168.1.24"
         val FILES = mapOf(
             "index.html" to "<!doctype html><title>DeviceBridge</title>".encodeToByteArray(),
+            "setup.html" to "<!doctype html><title>Setup</title>".encodeToByteArray(),
             "asset-manifest.json" to "{}".encodeToByteArray(),
             "web-manifest.json" to
                 "{\"protocolVersion\":1,\"webAssetVersion\":\"sha256-test\"}"

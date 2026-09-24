@@ -272,6 +272,12 @@ fun SettingsScreen(
             }
 
             item {
+                SettingsCard(title = "Защищённое соединение") {
+                    SecureModeSection(uiState = uiState, onAction = onAction)
+                }
+            }
+
+            item {
                 SettingsCard(title = "Доверенные браузеры", showDivider = false) {
                     if (uiState.trustedBrowsers.isEmpty()) {
                         Text(

@@ -23,6 +23,7 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.unit.Density
@@ -140,6 +141,62 @@ class HomeScreenTest {
             .performClick()
         composeRule.runOnIdle {
             assertEquals(HomeAction.StartAgainClicked, received)
+        }
+    }
+
+    @Test
+    fun secureModeKeepsThePlainAddressAndExplainsTheSwitchToHttps() {
+        var state by mutableStateOf(
+            ServerSessionUiState(
+                status = HomeServerStatus.Running,
+                localAddress = "http://192.168.1.24:8787",
+                secureMode = false,
+            ),
+        )
+        composeRule.setContent {
+            DeviceBridgeTheme {
+                HomeScreen(uiState = state)
+            }
+        }
+
+        composeRule.onNodeWithTag("secure-mode-address-hint").assertDoesNotExist()
+        composeRule.runOnIdle { state = state.copy(secureMode = true) }
+        composeRule.onNodeWithText("http://192.168.1.24:8787").performScrollTo().assertIsDisplayed()
+        composeRule.onNodeWithTag("secure-mode-address-hint").performScrollTo().assertIsDisplayed()
+    }
+
+    @Test
+    fun unusableCertificateLeadsToTheHttpsSettings() {
+        var openedSettings = 0
+        var received: HomeAction? = null
+        composeRule.setContent {
+            DeviceBridgeTheme {
+                HomeScreen(
+                    uiState = ServerSessionUiState(
+                        status = HomeServerStatus.Error,
+                        errorMessage = "Сертификат защищённого режима недоступен. Сбросьте его в настройках.",
+                        failure = ru.hznik.devicebridge.domain.error.UserFacingFailure(
+                            code = ru.hznik.devicebridge.domain.error.FailureCode.SECURE_CERTIFICATE_UNAVAILABLE,
+                            severity = ru.hznik.devicebridge.domain.error.FailureSeverity.RECOVERABLE,
+                            recoveryActions = setOf(
+                                ru.hznik.devicebridge.domain.error.RecoveryAction.RESET_CERTIFICATE,
+                            ),
+                        ),
+                    ),
+                    onAction = { received = it },
+                    onOpenSettings = { openedSettings += 1 },
+                )
+            }
+        }
+
+        composeRule.onNodeWithText("Сертификат защищённого режима недоступен.", substring = true)
+            .assertIsDisplayed()
+        composeRule.onNodeWithText("Открыть настройки HTTPS")
+            .assertIsDisplayed()
+            .performClick()
+        composeRule.runOnIdle {
+            assertEquals(1, openedSettings)
+            assertEquals(null, received)
         }
     }
 
@@ -468,6 +525,13 @@ class HomeScreenTest {
             }
         }
 
+        // Collapsed on a fresh install until asked for.
+        composeRule.onNodeWithText(
+            "Подключите телефон и компьютер к одной доверенной Wi-Fi сети.",
+        ).assertDoesNotExist()
+        composeRule.onNodeWithContentDescription("Показать инструкцию подключения")
+            .assertIsDisplayed()
+            .performClick()
         composeRule.onNodeWithText(
             "Подключите телефон и компьютер к одной доверенной Wi-Fi сети.",
         ).assertIsDisplayed()
@@ -523,7 +587,7 @@ class HomeScreenTest {
     }
 
     @Test
-    fun collapsedConnectionGuideSurvivesSavedStateRestoration() {
+    fun openedConnectionGuideSurvivesSavedStateRestoration() {
         val restorationTester = StateRestorationTester(composeRule)
         restorationTester.setContent {
             DeviceBridgeTheme {
@@ -531,15 +595,32 @@ class HomeScreenTest {
             }
         }
 
-        composeRule.onNodeWithContentDescription("Скрыть инструкцию подключения")
+        composeRule.onNodeWithContentDescription("Показать инструкцию подключения")
             .performClick()
         restorationTester.emulateSavedInstanceStateRestore()
 
-        composeRule.onNodeWithContentDescription("Показать инструкцию подключения")
+        composeRule.onNodeWithContentDescription("Скрыть инструкцию подключения")
             .assertIsDisplayed()
         composeRule.onNodeWithText(
             "Подключите телефон и компьютер к одной доверенной Wi-Fi сети.",
-        ).assertDoesNotExist()
+        ).assertIsDisplayed()
+    }
+
+    @Test
+    fun connectionGuideStartsCollapsedWhenTheServerIsRunning() {
+        setScreen(
+            ServerSessionUiState(
+                status = HomeServerStatus.Running,
+                localAddress = "http://192.168.1.24:8787",
+                pairingCode = "123456",
+                pairingExpiresInSeconds = 120,
+            ),
+        )
+
+        composeRule.onNodeWithContentDescription("Показать инструкцию подключения")
+            .performScrollTo()
+            .assertIsDisplayed()
+        composeRule.onNodeWithText("Откройте адрес на компьютере").assertDoesNotExist()
     }
 
     @Test
@@ -635,7 +716,7 @@ class HomeScreenTest {
         composeRule.onNodeWithText("DeviceBridge").assertIsDisplayed()
         composeRule.onNodeWithText("Локальная связь").assertDoesNotExist()
         composeRule.onNodeWithText(
-            "Телефон и компьютер — рядом, без облака и внешнего сервера.",
+            "Телефон и компьютер - рядом, без облака и внешнего сервера.",
         ).assertDoesNotExist()
     }
 }

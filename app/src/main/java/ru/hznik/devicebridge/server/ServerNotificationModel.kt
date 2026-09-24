@@ -80,7 +80,7 @@ class ServerNotificationModelFactory @Inject constructor() {
                 .toInt()
                 .coerceIn(0, 100)
         }
-        return "$directionLabel: ${displayName.safeNotificationName()} — $progress%"
+        return "$directionLabel: ${displayName.safeNotificationName()} - $progress%"
     }
 
     private fun String.safeNotificationName(): String {

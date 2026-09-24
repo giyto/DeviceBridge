@@ -411,4 +411,5 @@ private fun RecoveryAction.label(): String = when (this) {
     RecoveryAction.SELECT_DESTINATION -> "Выбрать папку"
     RecoveryAction.REDUCE_SELECTION -> "Уменьшить выбор"
     RecoveryAction.EDIT_SETTING -> "Изменить настройку"
+    RecoveryAction.RESET_CERTIFICATE -> "Сбросить сертификат"
 }

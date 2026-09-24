@@ -379,5 +379,50 @@ abstract class ServerLifecycleModule {
         @Provides
         fun provideRevokeAllTrustedBrowsersUseCase(repository: BrowserSessionRepository) =
             ru.hznik.devicebridge.domain.usecase.RevokeAllTrustedBrowsersUseCase(repository)
+
+        @Provides
+        @Singleton
+        fun provideLocalCertificateAuthority(
+            @dagger.hilt.android.qualifiers.ApplicationContext context: android.content.Context,
+        ): ru.hznik.devicebridge.data.tls.LocalCertificateAuthority =
+            // noBackupFilesDir: the keys cannot leave the phone, so neither should their certificates.
+            ru.hznik.devicebridge.data.tls.LocalCertificateAuthority(
+                keyStore = ru.hznik.devicebridge.data.tls.AndroidTlsKeyStore(),
+                directory = java.io.File(context.noBackupFilesDir, "tls"),
+            )
+
+        @Provides
+        @Singleton
+        fun provideSecureTransport(
+            settings: ru.hznik.devicebridge.data.server.EffectiveFileLimitProvider,
+            authority: ru.hznik.devicebridge.data.tls.LocalCertificateAuthority,
+        ): ru.hznik.devicebridge.data.tls.SecureTransport =
+            ru.hznik.devicebridge.data.tls.LocalCertificateSecureTransport(
+                enabled = settings::secureModeEnabled,
+                authority = authority,
+            )
+
+        @Provides
+        @Singleton
+        fun provideRootCertificateExporter(
+            @dagger.hilt.android.qualifiers.ApplicationContext context: android.content.Context,
+            authority: ru.hznik.devicebridge.data.tls.LocalCertificateAuthority,
+        ): ru.hznik.devicebridge.data.tls.RootCertificateExporter =
+            ru.hznik.devicebridge.data.tls.FileProviderRootCertificateExporter(context, authority)
+
+        @Provides
+        @Singleton
+        fun provideSecureModeController(
+            settingsRepository: ru.hznik.devicebridge.domain.repository.SettingsRepository,
+            settings: ru.hznik.devicebridge.data.server.EffectiveFileLimitProvider,
+            lifecycle: ServerLifecycleRepository,
+            authority: ru.hznik.devicebridge.data.tls.LocalCertificateAuthority,
+        ): ru.hznik.devicebridge.data.tls.SecureModeController =
+            ru.hznik.devicebridge.data.tls.SecureModeController(
+                updateSetting = settingsRepository::updateSecureMode,
+                awaitSettingApplied = settings::awaitSecureMode,
+                lifecycle = lifecycle,
+                authority = authority,
+            )
     }
 }

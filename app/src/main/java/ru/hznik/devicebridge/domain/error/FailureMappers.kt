@@ -55,6 +55,11 @@ fun ServerLifecycleError.toUserFacingFailure(): UserFacingFailure = when (this) 
         FailureSeverity.RECOVERABLE,
         RecoveryAction.RETRY,
     )
+    ServerLifecycleError.SecureCertificateUnavailable -> failure(
+        FailureCode.SECURE_CERTIFICATE_UNAVAILABLE,
+        FailureSeverity.RECOVERABLE,
+        RecoveryAction.RESET_CERTIFICATE,
+    )
     is ServerLifecycleError.Unexpected -> unknownFailure()
 }
 

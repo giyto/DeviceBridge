@@ -20,9 +20,10 @@ object SessionRequestSecurityPolicy {
         allowedHosts: Set<String>,
         maxBodyBytes: Long = MAX_SESSION_JSON_BYTES.toLong(),
         bodyTooLargeStatus: HttpStatusCode = HttpStatusCode.BadRequest,
+        originScheme: String = DEFAULT_ORIGIN_SCHEME,
     ): RequestGuardResult {
         require(maxBodyBytes > 0)
-        val originResult = validateSameOrigin(host, origin, allowedHosts)
+        val originResult = validateSameOrigin(host, origin, allowedHosts, originScheme)
         if (originResult != RequestGuardResult.Allowed) return originResult
         val parsedContentType = contentType
             ?.let { runCatching { ContentType.parse(it) }.getOrNull() }
@@ -39,17 +40,19 @@ object SessionRequestSecurityPolicy {
         host: String?,
         origin: String?,
         allowedHosts: Set<String>,
-    ): RequestGuardResult = validateSameOrigin(host, origin, allowedHosts)
+        originScheme: String = DEFAULT_ORIGIN_SCHEME,
+    ): RequestGuardResult = validateSameOrigin(host, origin, allowedHosts, originScheme)
 
     fun validateProtectedHttp(
         host: String?,
         origin: String?,
         allowedHosts: Set<String>,
         allowMissingOrigin: Boolean = false,
+        originScheme: String = DEFAULT_ORIGIN_SCHEME,
     ): RequestGuardResult = if (origin == null && allowMissingOrigin) {
         validateAllowedHost(host, allowedHosts)
     } else {
-        validateSameOrigin(host, origin, allowedHosts)
+        validateSameOrigin(host, origin, allowedHosts, originScheme)
     }
 
     private fun validateAllowedHost(
@@ -72,6 +75,7 @@ object SessionRequestSecurityPolicy {
         host: String?,
         origin: String?,
         allowedHosts: Set<String>,
+        originScheme: String,
     ): RequestGuardResult {
         val normalizedHost = host?.lowercase(Locale.ROOT)
             ?: return RequestGuardResult.Rejected(HttpStatusCode.Forbidden)
@@ -84,7 +88,7 @@ object SessionRequestSecurityPolicy {
         val originUri = origin
             ?.let { runCatching { URI(it) }.getOrNull() }
             ?: return RequestGuardResult.Rejected(HttpStatusCode.Forbidden)
-        val matches = originUri.scheme?.lowercase(Locale.ROOT) == "http" &&
+        val matches = originUri.scheme?.lowercase(Locale.ROOT) == originScheme &&
             originUri.rawAuthority?.lowercase(Locale.ROOT) == normalizedHost &&
             originUri.userInfo == null &&
             originUri.rawQuery == null &&

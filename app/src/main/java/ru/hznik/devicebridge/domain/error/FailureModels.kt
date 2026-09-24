@@ -21,6 +21,7 @@ enum class RecoveryAction {
     SELECT_DESTINATION,
     REDUCE_SELECTION,
     EDIT_SETTING,
+    RESET_CERTIFICATE,
 }
 
 enum class FailureCode(val wireValue: String) {
@@ -34,6 +35,7 @@ enum class FailureCode(val wireValue: String) {
     FOREGROUND_START_NOT_ALLOWED("foreground_start_not_allowed"),
     SERVER_START_FAILED("server_start_failed"),
     SERVER_STOP_TIMEOUT("server_stop_timeout"),
+    SECURE_CERTIFICATE_UNAVAILABLE("secure_certificate_unavailable"),
     SESSION_CAPACITY_REACHED("session_capacity_reached"),
     SERVER_GENERATION_CLOSED("server_generation_closed"),
     PAIRING_REQUEST_EXPIRED("pairing_request_expired"),

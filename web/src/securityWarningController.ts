@@ -1,4 +1,14 @@
 import type { BrowserSecurityWarningPreferenceStore } from "./browserSecurityWarningPreferenceStore";
+import type { CertificateTrust } from "./certificateTrustProbe";
+
+/** How a page served over HTTPS in secure mode checks that the browser trusts the phone. */
+export interface SecureConnection {
+  probeTrust(): Promise<CertificateTrust>;
+  /** Where the certificate setup page is, for a browser that does not trust the phone. */
+  readonly setupUrl: string;
+}
+
+const TRUST_PROBE_TIMEOUT_MS = 3_000;
 
 export interface SecurityWarningController {
   start(): void;
@@ -10,9 +20,16 @@ const EXPANDED_LABEL =
 const COLLAPSED_LABEL =
   "Используйте только в доверенной сети. Развернуть предупреждение";
 
+/**
+ * Over plain HTTP the page warns that traffic is not encrypted. Over HTTPS, in the phone's
+ * secure mode, a short note says the connection is encrypted, unless the browser only got
+ * here by clicking through a certificate warning: then it warns that the phone's certificate
+ * is missing and links to the setup page.
+ */
 export function createSecurityWarningController(
   documentRef: Document,
   store: BrowserSecurityWarningPreferenceStore,
+  secureConnection: SecureConnection | null = null,
 ): SecurityWarningController {
   const warning = required<HTMLButtonElement>(
     documentRef,
@@ -51,6 +68,11 @@ export function createSecurityWarningController(
     start(): void {
       if (started) return;
       started = true;
+      if (secureConnection !== null) {
+        warning.hidden = true;
+        void showSecureConnection(documentRef, secureConnection);
+        return;
+      }
       warning.addEventListener("click", onToggle);
       render(!store.isDismissed());
     },
@@ -60,6 +82,23 @@ export function createSecurityWarningController(
       warning.removeEventListener("click", onToggle);
     },
   };
+}
+
+async function showSecureConnection(
+  documentRef: Document,
+  connection: SecureConnection,
+): Promise<void> {
+  const trust = await Promise.race([
+    connection.probeTrust().catch((): CertificateTrust => "unknown"),
+    new Promise<CertificateTrust>((resolve) => setTimeout(() => resolve("unknown"), TRUST_PROBE_TIMEOUT_MS)),
+  ]);
+  if (trust === "untrusted") {
+    required<HTMLAnchorElement>(documentRef, '[data-role="install-certificate-link"]').href =
+      connection.setupUrl;
+    required<HTMLElement>(documentRef, '[data-role="untrusted-certificate-note"]').hidden = false;
+  } else {
+    required<HTMLElement>(documentRef, '[data-role="secure-connection-note"]').hidden = false;
+  }
 }
 
 function required<T extends Element>(documentRef: Document, selector: string): T {

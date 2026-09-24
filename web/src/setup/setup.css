@@ -1,0 +1,102 @@
+/* The certificate setup page reuses the app's tokens and cards; only its layout lives here. */
+.setup {
+  display: grid;
+  gap: var(--space-6);
+  max-width: 46rem;
+  padding-block: var(--space-8);
+  overflow-wrap: anywhere;
+}
+
+.setup__status {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.setup__status h2,
+.setup__status p {
+  margin: 0;
+}
+
+.setup__status[data-state="trusted"] {
+  border-color: var(--color-status-success);
+}
+
+.setup__steps {
+  display: grid;
+  gap: var(--space-6);
+  margin: 0;
+  padding-left: var(--space-6);
+}
+
+.setup__step {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.setup__step h2 {
+  margin: 0;
+  font-size: var(--font-size-title);
+}
+
+.setup__download {
+  justify-self: start;
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  text-decoration: none;
+}
+
+.setup__note {
+  margin: 0;
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--shape-medium);
+}
+
+.setup__note--safe {
+  background: var(--color-status-success-container);
+  color: var(--color-status-success-content);
+}
+
+.setup__note--danger {
+  background: var(--color-status-error-container);
+  color: var(--color-status-error-content);
+}
+
+.setup__tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.setup__tabs [role="tab"] {
+  min-height: 44px;
+  padding: 0 var(--space-4);
+  border: var(--border-width-subtle) solid var(--color-border-strong);
+  border-radius: var(--shape-pill);
+  background: var(--color-bg-surface);
+  color: var(--color-fg-primary);
+  font: inherit;
+  cursor: pointer;
+}
+
+.setup__tabs [role="tab"][aria-selected="true"] {
+  border-color: var(--color-action-primary);
+  background: var(--color-action-primary-container);
+  font-weight: var(--font-weight-semibold);
+}
+
+.setup__tabs [role="tab"]:focus-visible {
+  outline: var(--border-width-focus) solid var(--color-focus-ring);
+  outline-offset: var(--focus-offset);
+}
+
+.setup__guide ol {
+  display: grid;
+  gap: var(--space-2);
+  margin: 0;
+  padding-left: var(--space-6);
+}
+
+.setup__guide p {
+  margin: 0 0 var(--space-2);
+}

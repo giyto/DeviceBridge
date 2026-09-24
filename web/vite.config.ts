@@ -4,6 +4,8 @@ import { resolve } from "node:path";
 import { defineConfig, type Plugin } from "vite";
 
 const webRoot = import.meta.dirname;
+/** Styles that belong to one page; any other stylesheet is shared by both. */
+const ENTRY_STYLE_NAMES = new Set(["index.css", "setup.css"]);
 
 export default defineConfig({
   base: "/",
@@ -14,6 +16,22 @@ export default defineConfig({
     manifest: "asset-manifest.json",
     outDir: resolve(webRoot, "../app/src/main/assets/web"),
     sourcemap: false,
+    rolldownOptions: {
+      // The app, and the page plain HTTP gets in secure mode to install the phone's certificate.
+      input: {
+        index: resolve(webRoot, "index.html"),
+        setup: resolve(webRoot, "setup.html"),
+      },
+      output: {
+        // Code and styles both pages use, such as the design tokens and theme handling.
+        chunkFileNames: "assets/shared-[hash].js",
+        assetFileNames: (asset) =>
+          asset.names.some((name) => name.endsWith(".css")) &&
+          !asset.names.some((name) => ENTRY_STYLE_NAMES.has(name))
+            ? "assets/shared-[hash][extname]"
+            : "assets/[name]-[hash][extname]",
+      },
+    },
   },
 });
 
@@ -47,6 +65,7 @@ function computeWebAssetVersion(): string {
   const hash = createHash("sha256");
   const inputPaths = [
     "index.html",
+    "setup.html",
     "package-lock.json",
     "package.json",
     "src",

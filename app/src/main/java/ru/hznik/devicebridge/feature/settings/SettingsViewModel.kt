@@ -1,6 +1,7 @@
 package ru.hznik.devicebridge.feature.settings
 
 import ru.hznik.devicebridge.data.file.PartialUploadStore
+import ru.hznik.devicebridge.data.tls.SecureModeController
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -49,6 +50,8 @@ class SettingsViewModel @Inject constructor(
     private val revokeAllTrustedBrowsers: RevokeAllTrustedBrowsersUseCase,
     private val themePreferenceRepository: ThemePreferenceRepository,
     private val partialUploads: PartialUploadStore,
+    private val secureMode: SecureModeController,
+    private val certificateExporter: ru.hznik.devicebridge.data.tls.RootCertificateExporter,
 ) : ViewModel() {
     private sealed interface LoadResult {
         data object Loading : LoadResult
@@ -80,6 +83,7 @@ class SettingsViewModel @Inject constructor(
                 .catch { /* The card keeps showing the last known summary. */ }
                 .collect { summary -> mutableUiState.update { it.copy(partialUploads = summary) } }
         }
+        refreshRootCertificate()
         viewModelScope.launch {
             themePreferenceRepository.themePreference.collect { preference ->
                 mutableUiState.update { it.copy(themePreference = preference) }
@@ -214,6 +218,86 @@ class SettingsViewModel @Inject constructor(
             SettingsAction.DiscardPartialUploads -> discardPartialUploads()
             is SettingsAction.AutoAcceptToggled -> toggleAutoAccept(action.enabled)
             is SettingsAction.IdleStopSelected -> selectIdleStop(action.value)
+            is SettingsAction.SecureModeToggled -> requestSecureModeChange(
+                SecureModeChange.Toggle(action.enabled),
+            )
+            SettingsAction.ResetCertificateClicked ->
+                mutableUiState.update { it.copy(pendingSecureModeChange = SecureModeChange.ResetCertificate) }
+            SettingsAction.SecureModeChangeConfirmed -> {
+                val change = mutableUiState.value.pendingSecureModeChange ?: return
+                mutableUiState.update { it.copy(pendingSecureModeChange = null) }
+                applySecureModeChange(change)
+            }
+            SettingsAction.SecureModeChangeDismissed ->
+                mutableUiState.update { it.copy(pendingSecureModeChange = null) }
+            SettingsAction.CertificateResetNoticeDismissed ->
+                mutableUiState.update { it.copy(certificateWasReset = false) }
+            SettingsAction.ShareCertificateClicked -> shareCertificate()
+        }
+    }
+
+    /** A toggle restarts a running server, so it asks first; otherwise it applies at once. */
+    private fun requestSecureModeChange(change: SecureModeChange.Toggle) {
+        val state = mutableUiState.value
+        if (state.secureModeState.isSaving || state.settings.secureModeEnabled == change.enabled) return
+        if (secureMode.changeRestartsServer()) {
+            mutableUiState.update { it.copy(pendingSecureModeChange = change) }
+        } else {
+            applySecureModeChange(change)
+        }
+    }
+
+    private fun applySecureModeChange(change: SecureModeChange) {
+        when (change) {
+            is SecureModeChange.Toggle -> {
+                updateField(field = SettingField.SECURE_MODE) {
+                    secureMode.setEnabled(change.enabled).also {
+                        // Turning the mode on creates the root, whose fingerprint is shown next.
+                        if (change.enabled) {
+                            val status = secureMode.rootStatus()
+                            mutableUiState.update { it.copy(rootCertificate = status) }
+                        }
+                    }
+                }
+            }
+            SecureModeChange.ResetCertificate -> {
+                if (mutableUiState.value.certificateResetPending) return
+                mutableUiState.update { it.copy(certificateResetPending = true) }
+                viewModelScope.launch {
+                    val status = runCatching { secureMode.resetCertificate() }
+                        .getOrDefault(ru.hznik.devicebridge.data.tls.RootCertificateStatus.Unusable)
+                    mutableUiState.update {
+                        it.copy(
+                            rootCertificate = status,
+                            certificateResetPending = false,
+                            certificateWasReset =
+                                status is ru.hznik.devicebridge.data.tls.RootCertificateStatus.Ready,
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    private fun shareCertificate() {
+        mutableUiState.update { it.copy(certificateShareError = null) }
+        viewModelScope.launch {
+            val uri = runCatching { certificateExporter.export() }.getOrNull()
+            if (uri != null) {
+                effectChannel.send(SettingsEffect.ShareCertificate(uri))
+            } else {
+                mutableUiState.update {
+                    it.copy(certificateShareError = "Не удалось подготовить файл сертификата.")
+                }
+            }
+        }
+    }
+
+    private fun refreshRootCertificate() {
+        viewModelScope.launch {
+            val status = runCatching { secureMode.rootStatus() }
+                .getOrDefault(ru.hznik.devicebridge.data.tls.RootCertificateStatus.Unusable)
+            mutableUiState.update { it.copy(rootCertificate = status) }
         }
     }
 
@@ -418,7 +502,11 @@ class SettingsViewModel @Inject constructor(
                 SettingField.DEVICE_NAME -> current.deviceNameInput
                 SettingField.RETENTION -> current.retentionInput
                 SettingField.FILE_LIMIT -> current.fileLimitMiBInput
-                SettingField.DESTINATION, SettingField.AUTO_ACCEPT, SettingField.IDLE_STOP -> null
+                SettingField.DESTINATION,
+                SettingField.AUTO_ACCEPT,
+                SettingField.IDLE_STOP,
+                SettingField.SECURE_MODE,
+                -> null
             }
             val hasNewerDraft = submittedDraft != null && currentDraft != submittedDraft
             val base = current.copy(
@@ -460,6 +548,9 @@ class SettingsViewModel @Inject constructor(
                 SettingField.IDLE_STOP -> base.copy(
                     idleStopState = SettingsFieldState(),
                 )
+                SettingField.SECURE_MODE -> base.copy(
+                    secureModeState = SettingsFieldState(),
+                )
             }
         }
     }
@@ -488,6 +579,8 @@ class SettingsViewModel @Inject constructor(
                     current.copy(autoAcceptState = transform(current.autoAcceptState))
                 SettingField.IDLE_STOP ->
                     current.copy(idleStopState = transform(current.idleStopState))
+                SettingField.SECURE_MODE ->
+                    current.copy(secureModeState = transform(current.secureModeState))
             }
         }
     }
@@ -500,6 +593,7 @@ private enum class SettingField {
     FILE_LIMIT,
     AUTO_ACCEPT,
     IDLE_STOP,
+    SECURE_MODE,
 }
 
 private fun SettingsValidationError.message(): String = when (this) {

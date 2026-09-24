@@ -37,6 +37,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.platform.LocalClipboard
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.platform.toClipEntry
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.Role
@@ -69,13 +70,15 @@ fun HomeScreen(
     onAction: (HomeAction) -> Unit = {},
     onOpenText: () -> Unit = {},
     onOpenFiles: () -> Unit = {},
+    onOpenSettings: () -> Unit = {},
 ) {
     val clipboard = LocalClipboard.current
     val coroutineScope = rememberCoroutineScope()
     val statusContent = statusContent(uiState)
     val hasConnectedBrowser = uiState.hasConnectedBrowser
+    // Collapsed until asked for: the pairing code has its own card once the server runs.
     var connectionGuideExpanded by rememberSaveable {
-        mutableStateOf(true)
+        mutableStateOf(false)
     }
 
     Column(
@@ -118,6 +121,7 @@ fun HomeScreen(
         ) {
             ServerDetailsCard(
                 address = uiState.localAddress,
+                secureMode = uiState.secureMode,
                 uptimeSeconds = uiState.uptimeSeconds,
                 onCopy = {
                     coroutineScope.launch {
@@ -196,7 +200,7 @@ fun HomeScreen(
             )
         }
 
-        LifecycleButton(uiState = uiState, onAction = onAction)
+        LifecycleButton(uiState = uiState, onAction = onAction, onOpenSettings = onOpenSettings)
 
         Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
             SectionHeader(
@@ -577,6 +581,7 @@ private fun ActiveBrowsersSection(
 private fun LifecycleButton(
     uiState: ServerSessionUiState,
     onAction: (HomeAction) -> Unit,
+    onOpenSettings: () -> Unit,
 ) {
     when (uiState.status) {
         HomeServerStatus.Running -> OutlinedButton(
@@ -604,6 +609,9 @@ private fun LifecycleButton(
                     RecoveryAction.OPEN_SETTINGS in
                         uiState.failure?.recoveryActions.orEmpty() ->
                         onAction(HomeAction.OpenSettingsClicked)
+                    RecoveryAction.RESET_CERTIFICATE in
+                        uiState.failure?.recoveryActions.orEmpty() ->
+                        onOpenSettings()
                     else -> onAction(HomeAction.StartAgainClicked)
                 }
             },
@@ -621,6 +629,9 @@ private fun LifecycleButton(
                         RecoveryAction.OPEN_SETTINGS in
                             uiState.failure?.recoveryActions.orEmpty() ->
                             "Открыть настройки"
+                        RecoveryAction.RESET_CERTIFICATE in
+                            uiState.failure?.recoveryActions.orEmpty() ->
+                            "Открыть настройки HTTPS"
                         uiState.failure != null -> "Запустить снова"
                         else -> "Повторить запуск"
                     }
@@ -634,6 +645,7 @@ private fun LifecycleButton(
 @Composable
 private fun ServerDetailsCard(
     address: String,
+    secureMode: Boolean,
     uptimeSeconds: Long,
     onCopy: () -> Unit,
 ) {
@@ -648,6 +660,15 @@ private fun ServerDetailsCard(
             supportingText = "Доступен только в текущей сети.",
         )
         MetadataRow(label = "Адрес", value = address, monospace = true)
+        if (secureMode) {
+            Text(
+                text = "Защищённый режим: браузер сам откроет зашифрованное соединение, " +
+                    "а без сертификата покажет, как его установить.",
+                modifier = Modifier.testTag("secure-mode-address-hint"),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
         MetadataRow(label = "Время работы", value = formatUptime(uptimeSeconds))
         FilledTonalButton(
             onClick = onCopy,
@@ -775,7 +796,7 @@ private fun HomeTextTransferStatus.supportingText(): String = when (this) {
     HomeTextTransferStatus.Failed -> "Последняя передача завершилась ошибкой"
 }
 
-@Preview(name = "Главная — светлая", showBackground = true)
+@Preview(name = "Главная - светлая", showBackground = true)
 @Composable
 private fun HomeScreenLightPreview() {
     DeviceBridgeTheme(darkTheme = false) {
@@ -784,7 +805,7 @@ private fun HomeScreenLightPreview() {
 }
 
 @Preview(
-    name = "Главная — тёмная, сервер запущен",
+    name = "Главная - тёмная, сервер запущен",
     showBackground = true,
     uiMode = Configuration.UI_MODE_NIGHT_YES,
 )

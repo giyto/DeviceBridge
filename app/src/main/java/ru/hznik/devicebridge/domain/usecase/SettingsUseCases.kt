@@ -53,6 +53,12 @@ class UpdateIdleStopTimeoutUseCase(
         repository.updateIdleStopTimeout(value)
 }
 
+class UpdateSecureModeUseCase(
+    private val repository: SettingsRepository,
+) {
+    suspend operator fun invoke(enabled: Boolean) = repository.updateSecureMode(enabled)
+}
+
 class ObserveTrustedBrowsersUseCase(
     private val repository: TrustedBrowserRepository,
 ) {

@@ -50,6 +50,7 @@ import ru.hznik.devicebridge.domain.usecase.UpdateDeviceNameUseCase
 import ru.hznik.devicebridge.domain.usecase.UpdateFileLimitUseCase
 import ru.hznik.devicebridge.domain.usecase.UpdateAutoAcceptTrustedFilesUseCase
 import ru.hznik.devicebridge.domain.usecase.UpdateIdleStopTimeoutUseCase
+import ru.hznik.devicebridge.domain.usecase.UpdateSecureModeUseCase
 import ru.hznik.devicebridge.domain.usecase.UpdateRetentionDaysUseCase
 
 private const val DATABASE_NAME = "devicebridge.db"
@@ -258,6 +259,11 @@ object PersistenceModule {
     fun provideUpdateIdleStopTimeoutUseCase(
         repository: SettingsRepository,
     ): UpdateIdleStopTimeoutUseCase = UpdateIdleStopTimeoutUseCase(repository)
+
+    @Provides
+    fun provideUpdateSecureModeUseCase(
+        repository: SettingsRepository,
+    ): UpdateSecureModeUseCase = UpdateSecureModeUseCase(repository)
 }
 
 @EntryPoint

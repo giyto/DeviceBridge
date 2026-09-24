@@ -627,6 +627,7 @@ fun Application.installSessionRoutes(
                 host = call.request.header(HttpHeaders.Host),
                 origin = call.request.header(HttpHeaders.Origin),
                 allowedHosts = allowedHosts(),
+                originScheme = call.originScheme(),
             )
             if (security is RequestGuardResult.Rejected) {
                 closeSessionPolicy("Origin or Host rejected")
@@ -804,6 +805,7 @@ internal suspend fun ApplicationCall.authorizeSession(
         origin = request.header(HttpHeaders.Origin),
         allowedHosts = allowedHosts(),
         allowMissingOrigin = allowMissingOrigin,
+        originScheme = originScheme(),
     )
     if (security is RequestGuardResult.Rejected) {
         respondSessionError(
@@ -844,6 +846,7 @@ private suspend fun ApplicationCall.requireJsonApiRequest(allowedHosts: Set<Stri
         contentType = request.header(HttpHeaders.ContentType),
         contentLength = request.header(HttpHeaders.ContentLength)?.toLongOrNull(),
         allowedHosts = allowedHosts,
+        originScheme = originScheme(),
     )
     if (result is RequestGuardResult.Rejected) {
         respondSessionError(

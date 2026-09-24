@@ -14,6 +14,9 @@ sealed interface ServerLifecycleError {
     data object ServerStartFailed : ServerLifecycleError
     data object StopTimedOut : ServerLifecycleError
 
+    /** Secure mode is on but the phone's certificate or its key cannot be used. */
+    data object SecureCertificateUnavailable : ServerLifecycleError
+
     data class Unexpected(
         val technicalCause: String? = null,
     ) : ServerLifecycleError

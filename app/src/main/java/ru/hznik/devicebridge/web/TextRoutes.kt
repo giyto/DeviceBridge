@@ -142,6 +142,7 @@ private suspend fun ApplicationCall.requireTextJsonRequest(
         allowedHosts = allowedHosts,
         maxBodyBytes = MAX_TEXT_JSON_BYTES.toLong(),
         bodyTooLargeStatus = HttpStatusCode.PayloadTooLarge,
+        originScheme = originScheme(),
     )
     if (result is RequestGuardResult.Rejected) {
         if (result.status == HttpStatusCode.PayloadTooLarge) {

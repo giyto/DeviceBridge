@@ -21,6 +21,7 @@ class AssetManagerWebAssetProvider(
         fun readAllowedPaths(assetManager: AssetManager): Set<String> {
             val paths = mutableSetOf(
                 "index.html",
+                "setup.html",
                 "asset-manifest.json",
                 "web-manifest.json",
             )

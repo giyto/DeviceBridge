@@ -25,6 +25,7 @@ import {
 import { createThemeControl } from "./themeControl";
 import { BrowserSecurityWarningPreferenceStore } from "./browserSecurityWarningPreferenceStore";
 import { createSecurityWarningController } from "./securityWarningController";
+import { certificateSetupUrl, probeCertificateTrust } from "./certificateTrustProbe";
 
 let controller: SessionController;
 let textController: TextTransferController;
@@ -47,6 +48,12 @@ themeController.start();
 const securityWarningController = createSecurityWarningController(
   document,
   new BrowserSecurityWarningPreferenceStore(),
+  window.location.protocol === "https:"
+    ? {
+        probeTrust: () => probeCertificateTrust(navigator.serviceWorker),
+        setupUrl: certificateSetupUrl(window.location),
+      }
+    : null,
 );
 securityWarningController.start();
 const view = createShellView(document, {

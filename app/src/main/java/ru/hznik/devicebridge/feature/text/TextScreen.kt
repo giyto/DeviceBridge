@@ -537,7 +537,7 @@ private fun TextTransferStatus.label(): String = when (this) {
     TextTransferStatus.FAILED -> "Ошибка"
 }
 
-@Preview(name = "Текст — светлая", showBackground = true)
+@Preview(name = "Текст - светлая", showBackground = true)
 @Composable
 private fun TextScreenLightPreview() {
     DeviceBridgeTheme(darkTheme = false) {
@@ -564,7 +564,7 @@ private fun TextScreenLightPreview() {
 }
 
 @Preview(
-    name = "Текст — тёмная",
+    name = "Текст - тёмная",
     showBackground = true,
     uiMode = Configuration.UI_MODE_NIGHT_YES,
 )

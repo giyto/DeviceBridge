@@ -5,6 +5,7 @@ import java.nio.file.Files
 import java.nio.file.Path
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class SessionRequestSecurityPolicyTest {
@@ -85,6 +86,22 @@ class SessionRequestSecurityPolicyTest {
                 allowedHosts = allowed,
             ),
         )
+    }
+
+    @Test
+    fun originSchemeMustMatchTheConnection() {
+        val allowed = setOf("192.168.1.20:8787")
+        fun check(origin: String, scheme: String) = SessionRequestSecurityPolicy.validateWebSocket(
+            host = "192.168.1.20:8787",
+            origin = origin,
+            allowedHosts = allowed,
+            originScheme = scheme,
+        )
+
+        assertEquals(RequestGuardResult.Allowed, check("https://192.168.1.20:8787", "https"))
+        assertEquals(RequestGuardResult.Allowed, check("http://192.168.1.20:8787", "http"))
+        assertTrue(check("https://192.168.1.20:8787", "http") is RequestGuardResult.Rejected)
+        assertTrue(check("http://192.168.1.20:8787", "https") is RequestGuardResult.Rejected)
     }
 
     @Test
