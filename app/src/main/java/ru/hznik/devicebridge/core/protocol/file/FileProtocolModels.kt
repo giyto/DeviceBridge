@@ -17,6 +17,11 @@ const val FILE_VERIFY_TYPE = "file.verify"
 const val FILE_CANCEL_TYPE = "file.cancel"
 const val FILE_SNAPSHOT_TYPE = "file.snapshot"
 const val FILE_ERROR_TYPE = "file.error"
+const val FILE_UPLOAD_OFFSET_REQUEST_TYPE = "file.upload_offset.request"
+const val FILE_UPLOAD_OFFSET_TYPE = "file.upload_offset"
+
+/** Header carrying the byte offset a resumed Browser -> Android upload body starts at. */
+const val FILE_UPLOAD_OFFSET_HEADER = "X-DeviceBridge-Upload-Offset"
 const val MAX_FILE_BATCH_ITEMS = 32
 const val MAX_FILE_SNAPSHOT_ITEMS = 100
 
@@ -100,6 +105,8 @@ data class FileProgressEvent(
     val bytesTransferred: Long,
     val totalBytes: Long,
     val speedBytesPerSecond: Long,
+    /** Same as [FileSnapshotItem.resumableBytes]. */
+    val resumableBytes: Long? = null,
 )
 
 @Serializable
@@ -119,6 +126,25 @@ data class FileDownloadGrantRequest(
     val messageId: String,
     val type: String,
     val timestamp: Long,
+)
+
+/** Asks the server to prepare the output of an approved upload and report where to resume. */
+@Serializable
+data class FileUploadOffsetRequest(
+    val protocolVersion: Int,
+    val messageId: String,
+    val type: String,
+    val timestamp: Long,
+)
+
+@Serializable
+data class FileUploadOffsetResponse(
+    val protocolVersion: Int,
+    val messageId: String,
+    val type: String,
+    val timestamp: Long,
+    val transferId: String,
+    val offsetBytes: Long,
 )
 
 @Serializable
@@ -147,6 +173,8 @@ data class FileSnapshotItem(
     val status: FileTransferStatusDto,
     val bytesTransferred: Long,
     val speedBytesPerSecond: Long,
+    /** Set for a failed item that can continue from these bytes instead of starting over. */
+    val resumableBytes: Long? = null,
 )
 
 @Serializable
@@ -197,6 +225,7 @@ enum class FileProtocolValidationError {
     INVALID_CHECKSUM,
     INVALID_SNAPSHOT,
     INVALID_RELATED_MESSAGE_ID,
+    INVALID_OFFSET,
 }
 
 object FileProtocolValidator {
@@ -250,6 +279,20 @@ object FileProtocolValidator {
 
     fun validate(message: FileDownloadGrantRequest): FileProtocolValidationError =
         validateEnvelope(message, FILE_DOWNLOAD_GRANT_REQUEST_TYPE)
+
+    fun validate(message: FileUploadOffsetRequest): FileProtocolValidationError =
+        validateEnvelope(message, FILE_UPLOAD_OFFSET_REQUEST_TYPE)
+
+    fun validate(message: FileUploadOffsetResponse): FileProtocolValidationError =
+        validateEnvelope(message, FILE_UPLOAD_OFFSET_TYPE)
+            .orElse { validateTransferId(message.transferId) }
+            .orElse {
+                if (message.offsetBytes >= 0) {
+                    FileProtocolValidationError.NONE
+                } else {
+                    FileProtocolValidationError.INVALID_OFFSET
+                }
+            }
 
     fun validate(message: FileVerificationMessage): FileProtocolValidationError =
         validateEnvelope(message, FILE_VERIFY_TYPE)
@@ -313,6 +356,10 @@ object FileProtocolValidator {
             is FileDownloadGrantResponse ->
                 Envelope(message.protocolVersion, message.messageId, message.type, message.timestamp)
             is FileDownloadGrantRequest ->
+                Envelope(message.protocolVersion, message.messageId, message.type, message.timestamp)
+            is FileUploadOffsetRequest ->
+                Envelope(message.protocolVersion, message.messageId, message.type, message.timestamp)
+            is FileUploadOffsetResponse ->
                 Envelope(message.protocolVersion, message.messageId, message.type, message.timestamp)
             is FileVerificationMessage ->
                 Envelope(message.protocolVersion, message.messageId, message.type, message.timestamp)

@@ -9,6 +9,7 @@ export async function hashFileStreaming(
   const digest = createStreamingSha256();
   const reader = file.stream().getReader();
   let bytesRead = 0;
+  let sinceYield = 0;
   try {
     while (true) {
       throwIfAborted(signal);
@@ -16,7 +17,13 @@ export async function hashFileStreaming(
       if (result.done) break;
       digest.update(result.value);
       bytesRead += result.value.byteLength;
+      sinceYield += result.value.byteLength;
       onProgress(bytesRead, file.size);
+      if (sinceYield >= YIELD_EVERY_BYTES) {
+        // Chunks arrive as microtasks; without a macrotask pause the page would not repaint.
+        sinceYield = 0;
+        await new Promise<void>((resolve) => setTimeout(resolve, 0));
+      }
     }
     throwIfAborted(signal);
     if (bytesRead !== file.size) {
@@ -29,6 +36,8 @@ export async function hashFileStreaming(
     reader.releaseLock();
   }
 }
+
+const YIELD_EVERY_BYTES = 4 * 1024 * 1024;
 
 function throwIfAborted(signal?: AbortSignal): void {
   if (signal?.aborted === true) {

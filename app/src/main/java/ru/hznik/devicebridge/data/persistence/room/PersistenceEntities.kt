@@ -63,3 +63,35 @@ data class TrustedBrowserEntity(
     @ColumnInfo(name = "credential_verifier", typeAffinity = ColumnInfo.BLOB)
     val credentialVerifier: ByteArray,
 )
+
+/**
+ * A partially received Browser -> Android upload kept in the user's folder so that the same file
+ * can continue from [bytesRetained] later. Never part of history and excluded from backup together
+ * with the rest of this database.
+ */
+@Entity(
+    tableName = "partial_uploads",
+    indices = [
+        Index(value = ["sha256", "size_bytes", "display_name", "tree_uri"], unique = true),
+        Index(value = ["updated_at_epoch_millis"]),
+    ],
+)
+data class PartialUploadEntity(
+    @PrimaryKey
+    @ColumnInfo(name = "partial_document_uri")
+    val partialDocumentUri: String,
+    @ColumnInfo(name = "sha256")
+    val sha256: String,
+    @ColumnInfo(name = "size_bytes")
+    val sizeBytes: Long,
+    @ColumnInfo(name = "display_name")
+    val displayName: String,
+    @ColumnInfo(name = "mime_type")
+    val mimeType: String,
+    @ColumnInfo(name = "tree_uri")
+    val treeUri: String,
+    @ColumnInfo(name = "bytes_retained")
+    val bytesRetained: Long,
+    @ColumnInfo(name = "updated_at_epoch_millis")
+    val updatedAtEpochMillis: Long,
+)

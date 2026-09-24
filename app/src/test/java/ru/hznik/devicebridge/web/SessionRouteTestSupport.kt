@@ -176,6 +176,15 @@ internal class SessionRouteTestServer(
         return client.send(builder.build(), HttpResponse.BodyHandlers.ofString())
     }
 
+    fun download(
+        path: String,
+        headers: Map<String, String> = emptyMap(),
+    ): HttpResponse<ByteArray> {
+        val builder = HttpRequest.newBuilder().uri(URI("http://127.0.0.1:$port$path")).GET()
+        headers.forEach(builder::header)
+        return client.send(builder.build(), HttpResponse.BodyHandlers.ofByteArray())
+    }
+
     fun advanceClockTo(value: Long) {
         clock.value = value
     }

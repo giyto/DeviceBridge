@@ -1,5 +1,7 @@
 package ru.hznik.devicebridge.feature.settings
 
+import ru.hznik.devicebridge.data.file.PartialUploadSummary
+import ru.hznik.devicebridge.feature.file.formatBytes
 import android.app.StatusBarManager
 import android.content.Context
 import android.graphics.drawable.Icon
@@ -259,6 +261,13 @@ fun SettingsScreen(
                         fieldState = uiState.autoAcceptState,
                         onCheckedChange = { onAction(SettingsAction.AutoAcceptToggled(it)) },
                     )
+
+                    PartialUploadsRow(
+                        summary = uiState.partialUploads,
+                        pending = uiState.discardPartialUploadsPending,
+                        error = uiState.partialUploadsError,
+                        onDiscard = { onAction(SettingsAction.DiscardPartialUploads) },
+                    )
                 }
             }
 
@@ -506,6 +515,53 @@ private fun IdleStopTimeout.label(): String = when (this) {
     IdleStopTimeout.MIN_30 -> "Через 30 минут"
     IdleStopTimeout.MIN_60 -> "Через 1 час"
     IdleStopTimeout.DEBUG_1 -> "Через 1 минуту (отладка)"
+}
+
+@Composable
+private fun PartialUploadsRow(
+    summary: PartialUploadSummary,
+    pending: Boolean,
+    error: String?,
+    onDiscard: () -> Unit,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(
+            text = "Незавершённые файлы",
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.SemiBold,
+        )
+        Text(
+            text = if (summary.count == 0) {
+                "Нет. Прерванная передача файла от 8 МиБ сохраняется на 24 часа, чтобы её можно было продолжить."
+            } else {
+                "${partialUploadCountLabel(summary.count)}, ${formatBytes(summary.totalBytes)}. " +
+                    "Хранятся 24 часа, чтобы передачу можно было продолжить."
+            },
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            style = MaterialTheme.typography.bodyMedium,
+            modifier = Modifier.testTag("partial-uploads-summary"),
+        )
+        error?.let { FieldError(it) }
+        if (summary.count > 0) {
+            DestructiveActionButton(
+                label = if (pending) "Удаление…" else "Удалить незавершённые",
+                onClick = onDiscard,
+                enabled = !pending,
+                contentDescription = "Удалить незавершённые файлы",
+            )
+        }
+    }
+}
+
+internal fun partialUploadCountLabel(count: Int): String {
+    val lastTwo = count % 100
+    val word = when {
+        lastTwo in 11..14 -> "файлов"
+        count % 10 == 1 -> "файл"
+        count % 10 in 2..4 -> "файла"
+        else -> "файлов"
+    }
+    return "$count $word"
 }
 
 @Composable

@@ -96,6 +96,44 @@ class FileProtocolModelsTest {
     }
 
     @Test
+    fun uploadOffsetMessagesRoundTripAndValidate() {
+        val request = FileUploadOffsetRequest(
+            protocolVersion = FILE_PROTOCOL_VERSION,
+            messageId = "offset-1",
+            type = FILE_UPLOAD_OFFSET_REQUEST_TYPE,
+            timestamp = 1_000,
+        )
+        val response = FileUploadOffsetResponse(
+            protocolVersion = FILE_PROTOCOL_VERSION,
+            messageId = "offset-1",
+            type = FILE_UPLOAD_OFFSET_TYPE,
+            timestamp = 1_100,
+            transferId = "transfer-1",
+            offsetBytes = 8_388_608,
+        )
+        assertRoundTrip(request)
+        assertRoundTrip(response)
+        assertEquals(FileProtocolValidationError.NONE, FileProtocolValidator.validate(request))
+        assertEquals(FileProtocolValidationError.NONE, FileProtocolValidator.validate(response))
+        assertEquals(
+            FileProtocolValidationError.UNSUPPORTED_VERSION,
+            FileProtocolValidator.validate(request.copy(protocolVersion = 2)),
+        )
+        assertEquals(
+            FileProtocolValidationError.INVALID_TYPE,
+            FileProtocolValidator.validate(request.copy(type = FILE_UPLOAD_OFFSET_TYPE)),
+        )
+        assertEquals(
+            FileProtocolValidationError.INVALID_OFFSET,
+            FileProtocolValidator.validate(response.copy(offsetBytes = -1)),
+        )
+        assertEquals(
+            FileProtocolValidationError.INVALID_TRANSFER_ID,
+            FileProtocolValidator.validate(response.copy(transferId = "../x")),
+        )
+    }
+
+    @Test
     fun strictJsonRejectsUnknownFields() {
         val payload = """{
             "protocolVersion":1,

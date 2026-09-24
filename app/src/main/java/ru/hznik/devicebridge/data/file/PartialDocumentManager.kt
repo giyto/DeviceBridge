@@ -16,6 +16,9 @@ interface PartialDocumentProvider {
     suspend fun rename(documentUri: String, displayName: String): String?
 
     suspend fun delete(documentUri: String): Boolean
+
+    /** Current size of the document, or null when it no longer exists or is unreadable. */
+    suspend fun size(documentUri: String): Long?
 }
 
 data class PartialDocumentHandle(
@@ -49,17 +52,38 @@ class PartialDocumentManager(
         treeUri: String,
         requestedName: String,
         fallbackId: String,
-        mimeType: String,
     ): PartialDocumentHandle {
         val existingNames = provider.listDisplayNames(treeUri)
         val normalized = SafeFilenameResolver.normalize(requestedName, fallbackId)
         val finalName = SafeFilenameResolver.resolveCollision(normalized, existingNames)
         val partialName = resolvePartialName(finalName, existingNames)
-        val documentUri = provider.create(treeUri, mimeType, partialName)
+        // A neutral type: providers append an extension for known types ("….partial.mp4"),
+        // and media indexers would then show an unfinished file as a video or photo.
+        val documentUri = provider.create(treeUri, PARTIAL_MIME_TYPE, partialName)
             ?: error("Destination provider did not create a partial document")
         return PartialDocumentHandle(
             documentUri = documentUri,
             partialDisplayName = partialName,
+            finalDisplayName = finalName,
+        )
+    }
+
+    /**
+     * Takes over an existing partial document for a resumed upload. The final name is resolved
+     * again because the folder may have changed since the partial was created.
+     */
+    suspend fun adopt(
+        treeUri: String,
+        documentUri: String,
+        requestedName: String,
+        fallbackId: String,
+    ): PartialDocumentHandle {
+        val existingNames = provider.listDisplayNames(treeUri)
+        val normalized = SafeFilenameResolver.normalize(requestedName, fallbackId)
+        val finalName = SafeFilenameResolver.resolveCollision(normalized, existingNames)
+        return PartialDocumentHandle(
+            documentUri = documentUri,
+            partialDisplayName = normalized + PARTIAL_SUFFIX,
             finalDisplayName = finalName,
         )
     }
@@ -110,5 +134,6 @@ class PartialDocumentManager(
 
     private companion object {
         const val PARTIAL_SUFFIX = ".devicebridge-partial"
+        const val PARTIAL_MIME_TYPE = "application/octet-stream"
     }
 }

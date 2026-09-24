@@ -61,6 +61,46 @@ class SettingsViewModelTest {
     fun tearDown() = Dispatchers.resetMain()
 
     @Test
+    fun partialUploadsAreSummarizedAndDiscardedOnceOnRequest() = runTest(dispatcher) {
+        val store = FakePartialUploadStore(count = 2, totalBytes = 30L * 1024 * 1024)
+        val viewModel = viewModel(FakeSettingsRepository(), partialUploads = store)
+        runCurrent()
+        assertEquals(2, viewModel.uiState.value.partialUploads.count)
+        assertEquals(30L * 1024 * 1024, viewModel.uiState.value.partialUploads.totalBytes)
+
+        viewModel.onAction(SettingsAction.DiscardPartialUploads)
+        assertTrue(viewModel.uiState.value.discardPartialUploadsPending)
+        viewModel.onAction(SettingsAction.DiscardPartialUploads)
+        runCurrent()
+
+        assertEquals(1, store.discards)
+        assertEquals(0, viewModel.uiState.value.partialUploads.count)
+        assertFalse(viewModel.uiState.value.discardPartialUploadsPending)
+        viewModel.onAction(SettingsAction.DiscardPartialUploads)
+        runCurrent()
+        assertEquals(1, store.discards)
+
+        val failing = FakePartialUploadStore(count = 1, totalBytes = 10, failing = true)
+        val failingViewModel = viewModel(FakeSettingsRepository(), partialUploads = failing)
+        runCurrent()
+        failingViewModel.onAction(SettingsAction.DiscardPartialUploads)
+        runCurrent()
+        assertEquals(
+            "Не удалось удалить незавершённые файлы.",
+            failingViewModel.uiState.value.partialUploadsError,
+        )
+        assertEquals(1, failingViewModel.uiState.value.partialUploads.count)
+    }
+
+    @Test
+    fun partialUploadCountUsesRussianPluralForms() {
+        assertEquals(
+            listOf("1 файл", "2 файла", "5 файлов", "11 файлов", "21 файл", "104 файла"),
+            listOf(1, 2, 5, 11, 21, 104).map(::partialUploadCountLabel),
+        )
+    }
+
+    @Test
     fun repositoryStateSurvivesViewModelRecreation() = runTest(dispatcher) {
         val repository = FakeSettingsRepository()
         val first = viewModel(repository)
@@ -363,6 +403,7 @@ class SettingsViewModelTest {
         trustedRepository: FakeTrustedBrowserRepository = FakeTrustedBrowserRepository(),
         sessionRepository: BrowserSessionRepository = FakeBrowserSessionRepository(trustedRepository),
         themeRepository: ThemePreferenceRepository = FakeThemePreferenceRepository(),
+        partialUploads: ru.hznik.devicebridge.data.file.PartialUploadStore = FakePartialUploadStore(),
     ) = SettingsViewModel(
         observeSettings = ObserveSettingsUseCase(repository),
         updateDeviceName = UpdateDeviceNameUseCase(repository),
@@ -375,7 +416,32 @@ class SettingsViewModelTest {
         revokeTrustedBrowser = RevokeTrustedBrowserUseCase(sessionRepository),
         revokeAllTrustedBrowsers = RevokeAllTrustedBrowsersUseCase(sessionRepository),
         themePreferenceRepository = themeRepository,
+        partialUploads = partialUploads,
     )
+
+    private class FakePartialUploadStore(
+        count: Int = 0,
+        totalBytes: Long = 0,
+        private val failing: Boolean = false,
+    ) : ru.hznik.devicebridge.data.file.PartialUploadStore {
+        val summaryState = MutableStateFlow(
+            ru.hznik.devicebridge.data.file.PartialUploadSummary(count, totalBytes),
+        )
+        var discards = 0
+        override val summary: Flow<ru.hznik.devicebridge.data.file.PartialUploadSummary> = summaryState
+        override suspend fun find(key: ru.hznik.devicebridge.data.file.PartialUploadKey) = null
+        override suspend fun save(record: ru.hznik.devicebridge.data.file.PartialUploadRecord) = Unit
+        override suspend fun forget(documentUri: String) = Unit
+        override suspend fun discard(documentUri: String) = Unit
+        override suspend fun cleanup(nowEpochMillis: Long) = 0
+        override suspend fun discardAll(): Int {
+            discards += 1
+            if (failing) error("provider unavailable")
+            val count = summaryState.value.count
+            summaryState.value = ru.hznik.devicebridge.data.file.PartialUploadSummary(0, 0)
+            return count
+        }
+    }
 
     private class FakeThemePreferenceRepository : ThemePreferenceRepository {
         val stored = MutableStateFlow<ThemePreference?>(null)
@@ -422,6 +488,8 @@ class SettingsViewModelTest {
     ) : BrowserSessionRepository {
         override val state: StateFlow<BrowserSessionState> =
             MutableStateFlow(BrowserSessionState.inactive())
+        override val connectedSessionIds: StateFlow<Set<BrowserSessionId>> =
+            MutableStateFlow(emptySet())
         val revokedTrusted = mutableListOf<TrustedBrowserId>()
         override suspend fun approve(requestId: PairingRequestId) = Unit
         override suspend fun deny(requestId: PairingRequestId) = Unit

@@ -14,7 +14,6 @@ import androidx.compose.ui.test.assertIsFocused
 import androidx.compose.ui.test.assertIsNotFocused
 import androidx.compose.ui.test.assertTextContains
 import androidx.compose.ui.test.click
-import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsNotSelected
 import androidx.compose.ui.test.assertIsSelected
@@ -46,6 +45,38 @@ import ru.hznik.devicebridge.domain.trust.TrustedBrowserId
 class SettingsScreenTest {
     @get:Rule
     val composeRule = createComposeRule()
+
+    @Test
+    fun partialUploadsShowCountAndSizeAndOfferToDeleteThem() {
+        val actions = mutableListOf<SettingsAction>()
+        var state by mutableStateOf(SettingsUiState(loadState = SettingsLoadState.CONTENT))
+        composeRule.setContent {
+            MaterialTheme {
+                SettingsScreen(uiState = state, onAction = { actions += it })
+            }
+        }
+
+        scrollToTag("partial-uploads-summary").assertTextContains("Нет.", substring = true)
+        composeRule.onNodeWithContentDescription("Удалить незавершённые файлы").assertDoesNotExist()
+
+        state = state.copy(
+            partialUploads = ru.hznik.devicebridge.data.file.PartialUploadSummary(
+                count = 3,
+                totalBytes = 30L * 1024 * 1024,
+            ),
+        )
+        scrollToTag("partial-uploads-summary").assertTextContains("3 файла", substring = true)
+        composeRule.onNodeWithContentDescription("Удалить незавершённые файлы")
+            .performScrollTo()
+            .assertIsEnabled()
+            .performClick()
+        assertEquals(listOf<SettingsAction>(SettingsAction.DiscardPartialUploads), actions)
+
+        state = state.copy(discardPartialUploadsPending = true)
+        composeRule.onNodeWithContentDescription("Удалить незавершённые файлы")
+            .performScrollTo()
+            .assertIsNotEnabled()
+    }
 
     @Test
     fun autoAcceptToggleReflectsDestinationAndDispatchesAction() {
@@ -262,6 +293,7 @@ class SettingsScreenTest {
         scrollToText("Edge на Windows").assertIsDisplayed()
         composeRule.onNodeWithText("trusted-edge", substring = true).assertDoesNotExist()
         composeRule.onNodeWithContentDescription("Отозвать доступ Edge на Windows")
+            .performScrollTo()
             .performClick()
 
         assertEquals(listOf(SettingsAction.RevokeTrustedBrowser(browserId)), actions)
@@ -369,7 +401,6 @@ class SettingsScreenTest {
         composeRule.onNodeWithContentDescription("Сохранить имя телефона")
             .assertTextEquals("Сохранить")
             .assertIsEnabled()
-        composeRule.onNodeWithTag("settings-list").captureToImage()
     }
 
     @Test

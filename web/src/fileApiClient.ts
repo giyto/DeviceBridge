@@ -1,5 +1,7 @@
 export const FILE_PROTOCOL_VERSION = 1;
 export const HARD_MAX_FILE_BYTES = 1_073_741_824;
+/** Smaller uploads always start over; the server keeps no part of them. */
+export const RESUMABLE_UPLOAD_MIN_BYTES = 8 * 1024 * 1024;
 
 export type FileDirection = "ANDROID_TO_BROWSER" | "BROWSER_TO_ANDROID";
 export type FileTransferStatus =
@@ -39,6 +41,8 @@ export interface FileSnapshotItem {
   readonly status: FileTransferStatus;
   readonly bytesTransferred: number;
   readonly speedBytesPerSecond: number;
+  /** Set for a failed item that can continue from these bytes instead of starting over. */
+  readonly resumableBytes?: number;
 }
 
 export interface FileSnapshotEvent {
@@ -66,6 +70,15 @@ export interface FileDownloadGrant {
   readonly expiresAt: number;
 }
 
+export interface FileUploadOffset {
+  readonly protocolVersion: 1;
+  readonly messageId: string;
+  readonly type: "file.upload_offset";
+  readonly timestamp: number;
+  readonly transferId: string;
+  readonly offsetBytes: number;
+}
+
 export interface FileProgressEvent {
   readonly protocolVersion: 1;
   readonly messageId: string;
@@ -76,6 +89,7 @@ export interface FileProgressEvent {
   readonly bytesTransferred: number;
   readonly totalBytes: number;
   readonly speedBytesPerSecond: number;
+  readonly resumableBytes?: number;
 }
 
 export interface FileOfferEvent {
@@ -142,6 +156,29 @@ export class FileApiClient {
         signal,
       },
     ));
+  }
+
+  /** Lets the phone prepare the output and tell how many bytes of the file it already has. */
+  async requestUploadOffset(
+    token: string,
+    transferId: string,
+    messageId: string,
+    timestamp: number,
+    signal?: AbortSignal,
+  ): Promise<FileUploadOffset> {
+    requireProtocolId(transferId);
+    return parseUploadOffset(await this.requestJson(
+      `/api/v1/files/${encodeURIComponent(transferId)}/upload-offset`, token, {
+        method: "POST",
+        body: JSON.stringify({
+          protocolVersion: FILE_PROTOCOL_VERSION,
+          messageId,
+          type: "file.upload_offset.request",
+          timestamp,
+        }),
+        signal,
+      },
+    ), transferId);
   }
 
   async cancel(token: string, transferId: string, signal?: AbortSignal): Promise<FileSnapshotEvent> {
@@ -212,6 +249,7 @@ export function parseFileProgress(value: unknown): FileProgressEvent {
   const bytes = requireSafeNonNegativeInteger(record.bytesTransferred);
   const speed = requireSafeNonNegativeInteger(record.speedBytesPerSecond);
   if (bytes > total) invalid();
+  const resumable = parseResumableBytes(record.resumableBytes, total);
   return {
     protocolVersion: 1,
     messageId: record.messageId as string,
@@ -222,6 +260,7 @@ export function parseFileProgress(value: unknown): FileProgressEvent {
     bytesTransferred: bytes,
     totalBytes: total,
     speedBytesPerSecond: speed,
+    ...(resumable === undefined ? {} : { resumableBytes: resumable }),
   };
 }
 
@@ -258,13 +297,42 @@ function parseDownloadGrant(value: unknown): FileDownloadGrant {
   };
 }
 
+export function parseUploadOffset(value: unknown, expectedTransferId: string): FileUploadOffset {
+  const record = requireEnvelope(value, "file.upload_offset");
+  if (record.transferId !== expectedTransferId) invalid();
+  const offsetBytes = requireFileSize(record.offsetBytes);
+  return {
+    protocolVersion: 1,
+    messageId: record.messageId as string,
+    type: "file.upload_offset",
+    timestamp: record.timestamp as number,
+    transferId: expectedTransferId,
+    offsetBytes,
+  };
+}
+
 function parseSnapshotItem(value: unknown): FileSnapshotItem {
   if (!isRecord(value) || !isTransferStatus(value.status)) invalid();
   const metadata = parseMetadata(value.metadata);
   const bytes = requireSafeNonNegativeInteger(value.bytesTransferred);
   const speed = requireSafeNonNegativeInteger(value.speedBytesPerSecond);
   if (bytes > metadata.sizeBytes) invalid();
-  return { metadata, status: value.status, bytesTransferred: bytes, speedBytesPerSecond: speed };
+  const resumable = parseResumableBytes(value.resumableBytes, metadata.sizeBytes);
+  return {
+    metadata,
+    status: value.status,
+    bytesTransferred: bytes,
+    speedBytesPerSecond: speed,
+    ...(resumable === undefined ? {} : { resumableBytes: resumable }),
+  };
+}
+
+/** Optional: servers before resumable transfers never send it. */
+function parseResumableBytes(value: unknown, totalBytes: number): number | undefined {
+  if (value === undefined || value === null) return undefined;
+  const bytes = requireSafeNonNegativeInteger(value);
+  if (bytes < 1 || bytes >= totalBytes) invalid();
+  return bytes;
 }
 
 function parseMetadata(value: unknown): FileMetadata {

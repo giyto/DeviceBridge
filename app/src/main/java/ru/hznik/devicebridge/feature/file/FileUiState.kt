@@ -45,6 +45,10 @@ data class FileTransferItemUiState(
     val senderLabel: String? = null,
     val autoAccepted: Boolean = false,
     val autoAcceptPaused: Boolean = false,
+    /** A failed item can continue from these bytes instead of starting over. */
+    val resumableBytes: Long? = null,
+    /** The running attempt continues after this many bytes kept by an earlier one. */
+    val resumedFromBytes: Long = 0,
 ) {
     val progress: Float
         get() = if (sizeBytes == 0L) {
@@ -62,9 +66,14 @@ data class FileTransferItemUiState(
     val progressPercent: Int?
         get() = progress.takeIf { hasDeterminateProgress }?.times(100)?.roundToInt()
     val canRetry: Boolean get() = phase == FileTransferPhase.FAILED || phase == FileTransferPhase.CANCELLED
+    /** Retry continues an upload from the part kept on the phone. */
+    val continuesUpload: Boolean
+        get() = phase == FileTransferPhase.FAILED &&
+            direction == FileTransferDirection.BROWSER_TO_ANDROID &&
+            resumableBytes != null
     val canOpen: Boolean get() = phase == FileTransferPhase.COMPLETED && direction == FileTransferDirection.BROWSER_TO_ANDROID
     val awaitsApproval: Boolean get() = direction == FileTransferDirection.BROWSER_TO_ANDROID && phase == FileTransferPhase.CONNECTING
-    val failureMessage: String? get() = when (failure) {
+    val failureMessage: String? get() = resumableFailureMessage() ?: when (failure) {
         FileTransferFailure.ChecksumMismatch ->
             "Контрольная сумма не совпала. Повторите передачу."
         FileTransferFailure.StreamFailed ->
@@ -84,6 +93,18 @@ data class FileTransferItemUiState(
         FileTransferFailure.ProtocolMismatch ->
             "Версия протокола не поддерживается. Обновите DeviceBridge."
         null -> null
+    }
+}
+
+private fun FileTransferItemUiState.resumableFailureMessage(): String? {
+    val kept = resumableBytes ?: return null
+    if (phase != FileTransferPhase.FAILED) return null
+    return if (direction == FileTransferDirection.ANDROID_TO_BROWSER) {
+        "Загрузка прервалась. Браузер может возобновить её в течение 15 минут, иначе повторите с начала."
+    } else if (failure == FileTransferFailure.InsufficientSpace) {
+        "На устройстве недостаточно свободного места. Сохранено ${formatBytes(kept)} — освободите место и продолжите."
+    } else {
+        "Передача прервалась. Сохранено ${formatBytes(kept)} из ${formatBytes(sizeBytes)}, её можно продолжить."
     }
 }
 

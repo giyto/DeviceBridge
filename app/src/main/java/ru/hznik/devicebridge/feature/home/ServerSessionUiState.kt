@@ -48,11 +48,18 @@ data class ServerSessionUiState(
     val canStop: Boolean
         get() = !commandPending && status == HomeServerStatus.Running
 
+    /** Browsers whose tab holds a live connection now; offline sessions are listed but not counted. */
+    val connectedBrowserCount: Int
+        get() = activeBrowsers.count { it.connected }
+
+    val hasConnectedBrowser: Boolean
+        get() = activeBrowsers.any { it.connected }
+
     val canSendText: Boolean
-        get() = status == HomeServerStatus.Running && activeBrowsers.isNotEmpty()
+        get() = status == HomeServerStatus.Running && hasConnectedBrowser
 
     val canSendFiles: Boolean
-        get() = status == HomeServerStatus.Running && activeBrowsers.isNotEmpty()
+        get() = status == HomeServerStatus.Running && hasConnectedBrowser
 }
 
 data class HomeFileTransferUiState(
@@ -63,14 +70,12 @@ data class HomeFileTransferUiState(
     val phase: FileTransferPhase,
     val bytesTransferred: Long,
     val autoAccepted: Boolean = false,
-) {
-    val progressPercent: Int
-        get() = if (sizeBytes == 0L) {
-            if (phase == FileTransferPhase.COMPLETED) 100 else 0
-        } else {
-            ((bytesTransferred * 100.0) / sizeBytes).toInt().coerceIn(0, 100)
-        }
-}
+    /** The upload continues after this many bytes kept by an earlier attempt. */
+    val resumedFromBytes: Long = 0,
+    val mimeType: String = "application/octet-stream",
+    val speedBytesPerSecond: Long = 0,
+    val senderLabel: String? = null,
+)
 
 data class PendingBrowserUiState(
     val id: PairingRequestId,
@@ -86,6 +91,8 @@ data class ActiveBrowserUiState(
     val browserLabel: String,
     val sourceIpv4: String,
     val actionPending: Boolean = false,
+    /** False when the session survives but its tab has no live connection («Не в сети»). */
+    val connected: Boolean = true,
 )
 
 sealed interface HomeAction {

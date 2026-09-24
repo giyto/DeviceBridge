@@ -1,5 +1,6 @@
 package ru.hznik.devicebridge.feature.settings
 
+import ru.hznik.devicebridge.data.file.PartialUploadStore
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -47,6 +48,7 @@ class SettingsViewModel @Inject constructor(
     private val revokeTrustedBrowser: RevokeTrustedBrowserUseCase,
     private val revokeAllTrustedBrowsers: RevokeAllTrustedBrowsersUseCase,
     private val themePreferenceRepository: ThemePreferenceRepository,
+    private val partialUploads: PartialUploadStore,
 ) : ViewModel() {
     private sealed interface LoadResult {
         data object Loading : LoadResult
@@ -72,6 +74,11 @@ class SettingsViewModel @Inject constructor(
                         .catch { emit(LoadResult.Failed) }
                 }
                 .collect(::applyLoadResult)
+        }
+        viewModelScope.launch {
+            partialUploads.summary
+                .catch { /* The card keeps showing the last known summary. */ }
+                .collect { summary -> mutableUiState.update { it.copy(partialUploads = summary) } }
         }
         viewModelScope.launch {
             themePreferenceRepository.themePreference.collect { preference ->
@@ -204,6 +211,7 @@ class SettingsViewModel @Inject constructor(
             )
             is SettingsAction.RevokeTrustedBrowser -> revokeTrusted(action.browserId)
             SettingsAction.RevokeAllTrustedBrowsers -> revokeAllTrusted()
+            SettingsAction.DiscardPartialUploads -> discardPartialUploads()
             is SettingsAction.AutoAcceptToggled -> toggleAutoAccept(action.enabled)
             is SettingsAction.IdleStopSelected -> selectIdleStop(action.value)
         }
@@ -333,6 +341,25 @@ class SettingsViewModel @Inject constructor(
                         null
                     } else {
                         "Не удалось отозвать доступ браузера."
+                    },
+                )
+            }
+        }
+    }
+
+    private fun discardPartialUploads() {
+        val state = mutableUiState.value
+        if (state.partialUploads.count == 0 || state.discardPartialUploadsPending) return
+        mutableUiState.update {
+            it.copy(discardPartialUploadsPending = true, partialUploadsError = null)
+        }
+        viewModelScope.launch {
+            val result = runCatching { partialUploads.discardAll() }
+            mutableUiState.update {
+                it.copy(
+                    discardPartialUploadsPending = false,
+                    partialUploadsError = result.exceptionOrNull()?.let {
+                        "Не удалось удалить незавершённые файлы."
                     },
                 )
             }

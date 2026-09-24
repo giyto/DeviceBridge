@@ -15,6 +15,7 @@ import ru.hznik.devicebridge.core.protocol.file.FileProtocolJson
 import ru.hznik.devicebridge.data.file.FileTransferCoordinator
 import ru.hznik.devicebridge.data.file.FileDestinationLeaseRegistry
 import ru.hznik.devicebridge.data.file.FileSourceRegistry
+import ru.hznik.devicebridge.data.file.resumableBytes
 import ru.hznik.devicebridge.data.session.SessionEventDispatcher
 import ru.hznik.devicebridge.data.session.SessionOutboundEvent
 import ru.hznik.devicebridge.domain.file.FileTransferId
@@ -119,6 +120,7 @@ class FileSessionEventBridge(
                 bytesTransferred = item.bytesTransferred,
                 totalBytes = item.metadata.sizeBytes,
                 speedBytesPerSecond = item.speedBytesPerSecond,
+                resumableBytes = item.resumableBytes(),
             ),
         )
         val event = if (item.phase.isTerminal) {

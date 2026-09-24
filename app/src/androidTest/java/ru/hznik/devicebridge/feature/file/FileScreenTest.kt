@@ -184,6 +184,32 @@ class FileScreenTest {
     }
 
     @Test
+    fun keptUploadPartOffersContinueAndRunningResumeShowsWhereItContinued() {
+        val actions = mutableListOf<FileAction>()
+        setScreen(
+            FileUiState(
+                transfers = listOf(
+                    item("kept", FileTransferPhase.FAILED, 40, 100)
+                        .copy(failure = FileTransferFailure.StreamFailed, resumableBytes = 40),
+                    item("running", FileTransferPhase.TRANSFERRING, 60, 100)
+                        .copy(resumedFromBytes = 40),
+                ),
+            ),
+            onAction = actions::add,
+        )
+
+        composeRule.onNodeWithContentDescription("Продолжить передачу kept.bin")
+            .performScrollTo()
+            .assertIsDisplayed()
+            .performClick()
+        composeRule.onNodeWithText("Передача прервалась. Сохранено 40 Б из 100 Б, её можно продолжить.")
+            .performScrollTo()
+            .assertIsDisplayed()
+        composeRule.onNodeWithText("Продолжение с 40 Б").performScrollTo().assertIsDisplayed()
+        assertEquals(listOf<FileAction>(FileAction.Retry(FileTransferId("kept"))), actions)
+    }
+
+    @Test
     fun incomingOfferLetsUserUseSavedFolderOrChooseAnother() {
         val actions = mutableListOf<FileAction>()
         val incoming = item("incoming", FileTransferPhase.CONNECTING, 0, 100)
@@ -206,8 +232,13 @@ class FileScreenTest {
             .performScrollTo()
             .performClick()
 
-        assert(actions.contains(FileAction.ApproveIncoming(incoming.id)))
-        assert(actions.contains(FileAction.ChangeIncomingDestination(incoming.id)))
+        assertEquals(
+            listOf(
+                FileAction.ApproveIncoming(incoming.id),
+                FileAction.ChangeIncomingDestination(incoming.id),
+            ),
+            actions,
+        )
     }
 
     @Test

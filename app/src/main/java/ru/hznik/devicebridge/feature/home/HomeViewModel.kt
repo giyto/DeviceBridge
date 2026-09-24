@@ -58,6 +58,7 @@ class HomeViewModel @Inject constructor(
     private val lifecycleState = observeServerLifecycle()
     private val lastStopReason = observeServerLifecycle.lastStopReason()
     private val browserSessionState = observeBrowserSessions()
+    private val connectedSessionIds = observeBrowserSessions.connectedSessionIds()
     private val textTransferState = observeTextTransfers()
     private val fileTransferState = observeFileTransfers()
     private val decidingRequestIds = mutableSetOf<PairingRequestId>()
@@ -65,6 +66,7 @@ class HomeViewModel @Inject constructor(
     private val mutableUiState = kotlinx.coroutines.flow.MutableStateFlow(
         lifecycleState.value.toUiState(
             browserSessionState.value,
+            connectedSessionIds.value,
             textTransferState.value,
             fileTransferState.value,
             monotonicClock.nowMs(),
@@ -89,17 +91,18 @@ class HomeViewModel @Inject constructor(
         viewModelScope.launch {
             combine(
                 lifecycleState,
-                browserSessionState,
+                combine(browserSessionState, connectedSessionIds, ::Pair),
                 textTransferState,
                 fileTransferState,
                 autoAcceptStatus.autoAccepted,
-            ) { lifecycle, sessions, textTransfers, fileTransfers, _ ->
-                HomeSourceState(lifecycle, sessions, textTransfers, fileTransfers)
+            ) { lifecycle, (sessions, connectedIds), textTransfers, fileTransfers, _ ->
+                HomeSourceState(lifecycle, sessions, connectedIds, textTransfers, fileTransfers)
             }.collectLatest { source ->
                 val state = source.lifecycle
                 mutableUiState.update { previous ->
                     state.toUiState(
                         source.sessions,
+                        source.connectedSessionIds,
                         source.textTransfers,
                         source.fileTransfers,
                         monotonicClock.nowMs(),
@@ -111,6 +114,7 @@ class HomeViewModel @Inject constructor(
                         mutableUiState.update { previous ->
                             state.toUiState(
                                 source.sessions,
+                                source.connectedSessionIds,
                                 source.textTransfers,
                                 source.fileTransfers,
                                 monotonicClock.nowMs(),
@@ -193,6 +197,7 @@ class HomeViewModel @Inject constructor(
         mutableUiState.update { previous ->
             lifecycleState.value.toUiState(
                 browserSessionState.value,
+                connectedSessionIds.value,
                 textTransferState.value,
                 fileTransferState.value,
                 monotonicClock.nowMs(),
@@ -263,6 +268,7 @@ class HomeViewModel @Inject constructor(
 
     private fun ServerLifecycleState.toUiState(
         sessions: BrowserSessionState,
+        connectedSessionIds: Set<BrowserSessionId>,
         transfers: TextTransferState,
         fileTransfers: FileTransferSnapshot,
         nowMs: Long,
@@ -321,6 +327,8 @@ class HomeViewModel @Inject constructor(
             } else {
                 emptyList()
             },
+            // A session whose tab was closed stays listed (it can reconnect or be revoked) but is
+            // offline; connected browsers come first.
             activeBrowsers = if (showSessions) {
                 sessions.sessions.map { session ->
                     ActiveBrowserUiState(
@@ -328,8 +336,9 @@ class HomeViewModel @Inject constructor(
                         browserLabel = session.browserLabel,
                         sourceIpv4 = session.sourceIpv4,
                         actionPending = session.id in revokingSessionIds,
+                        connected = session.id in connectedSessionIds,
                     )
-                }
+                }.sortedByDescending { it.connected }
             } else {
                 emptyList()
             },
@@ -348,6 +357,12 @@ class HomeViewModel @Inject constructor(
                         phase = item.phase,
                         bytesTransferred = item.bytesTransferred,
                         autoAccepted = item.metadata.id in autoAcceptStatus.autoAccepted.value,
+                        resumedFromBytes = item.resumedFromBytes,
+                        mimeType = item.metadata.mimeType,
+                        speedBytesPerSecond = item.speedBytesPerSecond,
+                        senderLabel = sessions.sessions
+                            .firstOrNull { it.id == item.ownerSessionId }
+                            ?.browserLabel,
                     )
                 }
             } else {
@@ -397,6 +412,7 @@ class HomeViewModel @Inject constructor(
 private data class HomeSourceState(
     val lifecycle: ServerLifecycleState,
     val sessions: BrowserSessionState,
+    val connectedSessionIds: Set<BrowserSessionId>,
     val textTransfers: TextTransferState,
     val fileTransfers: FileTransferSnapshot,
 )

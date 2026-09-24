@@ -10,7 +10,7 @@
 - Итоговая проверка SHA-256 по-прежнему охватывает весь файл. При несовпадении сохранённая часть удаляется, а ошибка предлагает начать заново.
 - Незавершённые части хранятся не дольше 24 часов. Они удаляются при отмене, успешном завершении, истечении срока или по команде пользователя в Settings. Settings показывает их количество и общий размер.
 - Android → Browser: download endpoint поддерживает HTTP Range с сильным validator. Прерванную загрузку можно продолжить кнопкой браузера «Возобновить» в пределах того же server generation и окна продолжения 15 минут.
-- **BREAKING** (внутренний протокол): `FILE_PROTOCOL_VERSION` повышается до 2. Web shell поставляется в том же APK, поэтому несовместимость возможна только у вкладки, открытой до обновления приложения. Такая вкладка получает существующую ошибку версии и просьбу обновить страницу.
+- Внутренний файловый протокол расширяется совместимо, без смены версии: новый запрос offset продолжения и необязательный заголовок offset в upload. Вкладка, открытая до обновления приложения, продолжает работать и просто отправляет файл с начала.
 - Руководство пользователя больше не указывает отсутствие продолжения с середины среди ограничений.
 
 ## Capabilities
@@ -26,7 +26,7 @@
 ## Impact
 
 - Android: `FileTransferCoordinator` и `FileTransferScheduler` (retry с offset), `RawFileUploadProcessor` (приём с offset и восстановление SHA-256 по сохранённой части), `PartialDocumentManager` и `AndroidFileStreamFactories` (запись с позиции вместо усечения, сохранение partial вместо удаления), новое локальное хранилище записей о незавершённых частях, `FileRoutes` (offer и retry возвращают offset; ranged GET), `DownloadGrantRegistry` (grant для продолжения), Settings UI.
-- Web: `fileApiClient.ts` (protocol 2, offset в ответах), `xhrFileUploader.ts` (`File.slice(offset)` и заголовок offset), `fileTransferController.ts` и `fileTransferView.ts` («Продолжить», показ продолжения с N МБ).
-- Протокол: `FILE_PROTOCOL_VERSION` 1 → 2 в Kotlin и TS.
+- Web: `fileApiClient.ts` (запрос offset продолжения), `xhrFileUploader.ts` (`File.slice(offset)` и заголовок offset), `fileTransferController.ts` и `fileTransferView.ts` («Продолжить», показ продолжения с N МБ).
+- Протокол: новые сообщения `file.upload_offset.request` / `file.upload_offset` и заголовок `X-DeviceBridge-Upload-Offset`; `FILE_PROTOCOL_VERSION` остаётся 1.
 - Данные: новая app-private запись о незавершённых частях. Она исключается из Android backup и не попадает в историю.
 - Документация: `docs/user-guide.md`, `docs/technical-specification.md`.

@@ -36,7 +36,9 @@ Offer уже содержит SHA-256 всего файла, поэтому бр
 
 ### D2. Без новой фазы state machine
 
-Прерванный item остаётся `FAILED` с существующей причиной (network, session unavailable, server stop). Число сохранённых байтов передаётся как поле `resumableBytes`. Retry такого item ставит его в QUEUED с `bytes = resumableBytes` и сохраняет destination lease. Поэтому повторный approve внутри generation не нужен.
+Прерванный item остаётся `FAILED` с существующей причиной (network, session unavailable, server stop). `bytesTransferred` при переходе в FAILED сохраняется, и web по нему показывает «Продолжить» с уже переданным объёмом. Retry ставит item в QUEUED с нулевым progress, как и сейчас. После подготовки сохранённой части server поднимает progress до offset событием `Progressed`.
+
+Чтобы «Продолжить» внутри generation не требовал повторного approve, coordinator помечает retry item, у которого сохранена часть. Контроллер автоприёма (`TrustedAutoAcceptController`) подтверждает такой item в папку по умолчанию независимо от trust и настройки автоприёма, если сохранённая часть лежит именно в ней. Во всех остальных случаях работает обычное подтверждение.
 
 Для A→B ranged-запрос браузера в окне продолжения считается явной командой retry и переводит item `FAILED → TRANSFERRING` с progress от offset.
 
@@ -44,10 +46,10 @@ Offer уже содержит SHA-256 всего файла, поэтому бр
 
 ### D3. Протокол upload с offset
 
-- В событии `file.progress`, которое переводит item в TRANSFERRING, появляется поле `resumeOffsetBytes`.
+- Когда item переходит в TRANSFERRING, браузер вызывает `POST /api/v1/files/{id}/upload-offset` (`file.upload_offset.request`). Server готовит output: находит сохранённую часть, восстанавливает SHA-256 по префиксу или создаёт новый partial. Затем отвечает `file.upload_offset` с `offsetBytes`. Подготовленный output хранится до POST payload.
 - Браузер отправляет `file.slice(offset)` с заголовком `X-DeviceBridge-Upload-Offset: <offset>` и `Content-Length = size − offset`.
 - Server отклоняет несовпадающий offset кодом `409` с ожидаемым offset, не открывая output.
-- `FILE_PROTOCOL_VERSION` становится 2 на обеих сторонах. Старая вкладка получает существующую ошибку версии.
+- Изменение совместимое, поэтому `FILE_PROTOCOL_VERSION` остаётся 1. Upload без заголовка offset считается загрузкой с нуля, так что вкладка, открытая до обновления приложения, продолжает работать.
 
 *Альтернатива:* стандартный `Content-Range` в запросе. Отклонена: его семантика в запросах не стандартизована. Собственный заголовок проще валидировать.
 
@@ -101,5 +103,5 @@ Offer уже содержит SHA-256 всего файла, поэтому бр
 ## Migration Plan
 
 1. Room-миграция добавляет таблицу `partial_uploads`. Существующие данные истории не меняются.
-2. Протокол 2 выкатывается одновременно в Kotlin и в web assets того же APK.
+2. Новые сообщения протокола выкатываются одновременно в Kotlin и в web assets того же APK. Старые клиенты без offset работают как раньше.
 3. Откат на предыдущую версию APK не поддерживается штатно: downgrade Room. Оставшиеся `*.devicebridge-partial` пользователь при необходимости удалит сам. Руководство это упоминает.

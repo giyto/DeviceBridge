@@ -1170,7 +1170,8 @@ h2 {
 
 .file-selection__item span,
 .file-card__details,
-.file-card__progress {
+.file-card__progress,
+.file-card__resume {
   color: var(--text-muted);
   font-size: 0.8rem;
 }
@@ -1228,6 +1229,7 @@ h2 {
 
 .file-card__details,
 .file-card__progress,
+.file-card__resume,
 .file-card__error {
   margin: 0 !important;
   overflow-wrap: anywhere;

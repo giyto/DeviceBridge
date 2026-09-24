@@ -50,6 +50,54 @@ class TrustedAutoAcceptControllerTest {
     }
 
     @Test
+    fun resumeRetryOfOrdinarySessionIsApprovedIntoTheFolderHoldingItsPart() = runTest(
+        UnconfinedTestDispatcher(),
+    ) {
+        val fixture = Fixture(this, settings = ENABLED.copy(autoAcceptTrustedFiles = false))
+        fixture.resumeIds += "t1"
+        fixture.retainedTrees += TREE.value
+        fixture.offer("t1", ORDINARY_SESSION)
+
+        assertEquals(listOf(FileTransferId("t1")), fixture.transfers.approved.map { it.first })
+        // Continuing a kept part is not an automatic acceptance of a new file.
+        assertTrue(fixture.controller.autoAccepted.value.isEmpty())
+        fixture.controller.stop()
+    }
+
+    @Test
+    fun resumeRetryWithoutAPartInTheDefaultFolderWaitsForManualApproval() = runTest(
+        UnconfinedTestDispatcher(),
+    ) {
+        val fixture = Fixture(this, settings = ENABLED.copy(autoAcceptTrustedFiles = false))
+        fixture.resumeIds += "t1"
+        fixture.offer("t1", ORDINARY_SESSION)
+
+        assertTrue(fixture.transfers.approved.isEmpty())
+        fixture.controller.stop()
+    }
+
+    @Test
+    fun retriedTransferIsDecidedAgain() = runTest(UnconfinedTestDispatcher()) {
+        val fixture = Fixture(this)
+        fixture.offer("t1", TRUSTED_SESSION)
+        fixture.transfers.update(FileTransferId("t1")) {
+            FileTransferReducer.reduce(
+                FileTransferReducer.reduce(it, FileTransferEvent.Started),
+                FileTransferEvent.Failed(ru.hznik.devicebridge.domain.file.FileTransferFailure.StreamFailed),
+            )
+        }
+        fixture.transfers.update(FileTransferId("t1")) {
+            FileTransferReducer.reduce(
+                FileTransferState.queued(it.generationId, it.ownerSessionId, it.metadata),
+                FileTransferEvent.Connecting,
+            )
+        }
+
+        assertEquals(2, fixture.transfers.approved.count { it.first == FileTransferId("t1") })
+        fixture.controller.stop()
+    }
+
+    @Test
     fun ordinarySessionWaitsForManualApproval() = runTest(UnconfinedTestDispatcher()) {
         val fixture = Fixture(this)
         fixture.offer("t1", ORDINARY_SESSION)
@@ -159,6 +207,8 @@ class TrustedAutoAcceptControllerTest {
         settings: DeviceSettings = ENABLED,
         var destinationAvailable: Boolean = true,
     ) {
+        val resumeIds = mutableSetOf<String>()
+        val retainedTrees = mutableSetOf<String>()
         val transfers = FakeTransfers()
         val sessions = MutableStateFlow(sessionState(TRUSTED_SESSION, ORDINARY_SESSION))
         val settings = MutableStateFlow(settings)
@@ -180,6 +230,8 @@ class TrustedAutoAcceptControllerTest {
                 }
             },
             leases = leases,
+            isResumeRetry = { id -> id.value in resumeIds },
+            hasRetainedPart = { _, treeUri -> treeUri in retainedTrees },
         )
 
         init {

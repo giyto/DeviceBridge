@@ -2,6 +2,7 @@ package ru.hznik.devicebridge.data.file
 
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -52,6 +53,74 @@ class FileTransferCoordinatorCleanupTest {
         assertEquals(FileTransferPhase.CANCELLED, phase(coordinator, "first"))
         assertEquals(FileTransferPhase.CONNECTING, phase(coordinator, "next"))
     }
+
+    @Test
+    fun sessionLossAndServerStopKeepThePartWhileCancelDeletesIt() = runTest {
+        val coordinator = coordinator()
+        coordinator.activate(generation)
+        coordinator.create(request("batch", "lost", "stopped", "cancelled"))
+        coordinator.approve(FileTransferId("lost"), FileDestinationId("folder"))
+        val lost = RecordingResources()
+        coordinator.attachResources(FileTransferId("lost"), lost)
+        coordinator.onSessionDisconnected(generation, session.id)
+        assertEquals(listOf("cancel-job", "close-streams", "retain-partial"), lost.events)
+
+        val stopCoordinator = coordinator()
+        stopCoordinator.activate(generation)
+        stopCoordinator.create(request("batch", "stopped"))
+        stopCoordinator.approve(FileTransferId("stopped"), FileDestinationId("folder"))
+        val stopped = RecordingResources()
+        stopCoordinator.attachResources(FileTransferId("stopped"), stopped)
+        stopCoordinator.close(generation)
+        assertEquals(listOf("cancel-job", "close-streams", "retain-partial"), stopped.events)
+
+        val cancelCoordinator = coordinator()
+        cancelCoordinator.activate(generation)
+        cancelCoordinator.create(request("batch", "cancelled"))
+        cancelCoordinator.approve(FileTransferId("cancelled"), FileDestinationId("folder"))
+        val cancelled = RecordingResources()
+        cancelCoordinator.attachResources(FileTransferId("cancelled"), cancelled)
+        cancelCoordinator.cancel(FileTransferId("cancelled"))
+        assertEquals(listOf("cancel-job", "close-streams", "cleanup-partial"), cancelled.events)
+    }
+
+    @Test
+    fun interruptedLargeUploadIsRetriedAsAResumeUntilApproved() = runTest {
+        val coordinator = coordinator()
+        coordinator.activate(generation)
+        val big = FileTransferId("big")
+        coordinator.create(request("batch", "big", sizeBytes = RESUMABLE_UPLOAD_MIN_BYTES))
+        coordinator.approve(big, FileDestinationId("folder"))
+        coordinator.transition(big, FileTransferEvent.Progressed(1_000, speedBytesPerSecond = 0))
+        coordinator.onNetworkFailure(big)
+        assertEquals(1_000L, coordinator.state.value.item(big)?.bytesTransferred)
+
+        coordinator.retry(big)
+        assertTrue(coordinator.isResumeRetry(big))
+
+        coordinator.approve(big, FileDestinationId("folder"))
+        assertFalse(coordinator.isResumeRetry(big))
+    }
+
+    @Test
+    fun smallOrUnstartedUploadRetriesFromScratch() = runTest {
+        val coordinator = coordinator()
+        coordinator.activate(generation)
+        coordinator.create(request("small", "small"))
+        coordinator.create(request("fresh", "fresh", sizeBytes = RESUMABLE_UPLOAD_MIN_BYTES))
+        val small = FileTransferId("small")
+        coordinator.approve(small, FileDestinationId("folder"))
+        coordinator.transition(small, FileTransferEvent.Progressed(1, speedBytesPerSecond = 0))
+        coordinator.onNetworkFailure(small)
+        coordinator.retry(small)
+        assertFalse(coordinator.isResumeRetry(small))
+
+        val fresh = FileTransferId("fresh")
+        coordinator.cancel(fresh)
+        coordinator.retry(fresh)
+        assertFalse(coordinator.isResumeRetry(fresh))
+    }
+
     @Test
     fun disconnectAndRevokeCancelOnlyOwnedItemsAndInvalidateGrants() = runTest {
         val grants = grantRegistry()
@@ -110,7 +179,8 @@ class FileTransferCoordinatorCleanupTest {
 
         coordinator.onNetworkFailure(FileTransferId("first"))
 
-        assertEquals(listOf("cancel-job", "close-streams", "cleanup-partial"), resources.events)
+        // A network drop keeps the written part so the same file can continue later.
+        assertEquals(listOf("cancel-job", "close-streams", "retain-partial"), resources.events)
         assertEquals(FileTransferPhase.FAILED, phase(coordinator, "first"))
         assertEquals(
             FileTransferFailure.StreamFailed,
@@ -138,6 +208,27 @@ class FileTransferCoordinatorCleanupTest {
         )
         assertEquals(FileTransferPhase.FAILED, phase(coordinator, "first"))
         assertEquals(FileTransferPhase.CONNECTING, phase(coordinator, "next"))
+    }
+
+    @Test
+    fun runningOutOfSpaceKeepsTheLargePartAndReportsItAsResumable() = runTest {
+        val coordinator = coordinator()
+        coordinator.activate(generation)
+        coordinator.create(request("batch", "large", sizeBytes = RESUMABLE_UPLOAD_MIN_BYTES))
+        coordinator.approve(FileTransferId("large"), FileDestinationId("folder"))
+        val resources = RecordingResources()
+        coordinator.attachResources(FileTransferId("large"), resources)
+        coordinator.transition(FileTransferId("large"), FileTransferEvent.Progressed(4096, speedBytesPerSecond = 0))
+
+        coordinator.transition(
+            FileTransferId("large"),
+            FileTransferEvent.Failed(FileTransferFailure.InsufficientSpace),
+        )
+
+        assertEquals(listOf("cancel-job", "close-streams", "retain-partial"), resources.events)
+        assertEquals(4096L, coordinator.state.value.item(FileTransferId("large"))?.resumableBytes())
+        coordinator.retry(FileTransferId("large"))
+        assertTrue(coordinator.isResumeRetry(FileTransferId("large")))
     }
 
     @Test
@@ -192,6 +283,118 @@ class FileTransferCoordinatorCleanupTest {
         assertEquals(FileTransferPhase.FAILED, phase(coordinator, "source-file"))
     }
 
+
+    @Test
+    fun interruptedDownloadResumesFromTheOffsetWithTheUsedGrantWithinTheWindow() = runTest {
+        var now = 0L
+        val coordinator = coordinator(nowEpochMillis = { now })
+        val grant = interruptedDownload(coordinator, delivered = 40)
+        val id = FileTransferId("download")
+
+        assertEquals(DownloadResume.Rejected, coordinator.resumeDownload("unknown", generation, id, 40))
+        assertEquals(
+            DownloadResume.Stale,
+            coordinator.resumeDownload(grant, generation, id, 40, expectedSha256 = "b".repeat(64)),
+        )
+        now = DOWNLOAD_RESUME_WINDOW_MILLIS
+        val resumed = coordinator.resumeDownload(grant, generation, id, 40, expectedSha256 = "A".repeat(64))
+
+        assertEquals(DownloadResume.Allowed(DownloadGrantScope(generation, session.id, id)), resumed)
+        val item = coordinator.state.value.item(id)
+        assertEquals(FileTransferPhase.TRANSFERRING, item?.phase)
+        assertEquals(40L, item?.bytesTransferred)
+        assertNull(item?.failure)
+        coordinator.transition(id, FileTransferEvent.Progressed(100, speedBytesPerSecond = 0))
+        coordinator.transition(id, FileTransferEvent.Delivered)
+        assertEquals(FileTransferPhase.COMPLETED, phase(coordinator, "download"))
+        assertEquals(DownloadResume.Rejected, coordinator.resumeDownload(grant, generation, id, 0))
+    }
+
+    @Test
+    fun downloadResumeIsRefusedAfterTheWindowCancelChangedSourceOrWhileBusy() = runTest {
+        var now = 0L
+        val late = coordinator(nowEpochMillis = { now })
+        val lateGrant = interruptedDownload(late, delivered = 10)
+        now = DOWNLOAD_RESUME_WINDOW_MILLIS + 1
+        assertEquals(
+            DownloadResume.Rejected,
+            late.resumeDownload(lateGrant, generation, FileTransferId("download"), 10),
+        )
+        now = 0
+        // An expired window also forgets the grant.
+        assertEquals(
+            DownloadResume.Rejected,
+            late.resumeDownload(lateGrant, generation, FileTransferId("download"), 10),
+        )
+
+        val changed = coordinator(
+            retrySourceValidator = FileRetrySourceValidator { FileRetrySourceValidation.CHANGED },
+        )
+        val changedGrant = interruptedDownload(changed, delivered = 10)
+        assertEquals(
+            DownloadResume.Stale,
+            changed.resumeDownload(changedGrant, generation, FileTransferId("download"), 10),
+        )
+        assertEquals(FileTransferPhase.FAILED, phase(changed, "download"))
+
+        val busy = coordinator()
+        val busyGrant = interruptedDownload(busy, delivered = 10, "next")
+        // The failed download released the queue, so the next one is active now.
+        assertEquals(FileTransferPhase.CONNECTING, phase(busy, "next"))
+        assertEquals(
+            DownloadResume.Busy,
+            busy.resumeDownload(busyGrant, generation, FileTransferId("download"), 10),
+        )
+        busy.cancel(FileTransferId("next"))
+        assertTrue(
+            busy.resumeDownload(busyGrant, generation, FileTransferId("download"), 10) is DownloadResume.Allowed,
+        )
+
+        val cancelled = coordinator()
+        val cancelledGrant = interruptedDownload(cancelled, delivered = 10)
+        cancelled.retry(FileTransferId("download"))
+        cancelled.cancel(FileTransferId("download"))
+        assertEquals(
+            DownloadResume.Rejected,
+            cancelled.resumeDownload(cancelledGrant, generation, FileTransferId("download"), 10),
+        )
+    }
+
+    @Test
+    fun downloadCutWithItsSessionStaysResumableUnlessTheBrowserIsRevoked() = runTest {
+        suspend fun startedDownload(coordinator: FileTransferCoordinator): String {
+            coordinator.activate(generation)
+            coordinator.create(
+                request(
+                    "download",
+                    "download",
+                    direction = FileTransferDirection.ANDROID_TO_BROWSER,
+                    sizeBytes = 100,
+                ),
+            )
+            val id = FileTransferId("download")
+            val grant = coordinator.issueDownloadGrant(generation, session.id, id)!!
+            coordinator.consumeDownloadGrant(grant.token, generation, id)!!
+            coordinator.transition(id, FileTransferEvent.Started)
+            coordinator.transition(id, FileTransferEvent.Progressed(30, speedBytesPerSecond = 0))
+            return grant.token
+        }
+        val id = FileTransferId("download")
+
+        val lost = coordinator()
+        val lostGrant = startedDownload(lost)
+        lost.onSessionDisconnected(generation, session.id)
+        assertEquals(FileTransferFailure.StreamFailed, lost.state.value.item(id)?.failure)
+        assertEquals(30L, lost.state.value.item(id)?.resumableBytes())
+        assertTrue(lost.resumeDownload(lostGrant, generation, id, 30) is DownloadResume.Allowed)
+
+        val revoked = coordinator()
+        val revokedGrant = startedDownload(revoked)
+        revoked.onSessionRevoked(generation, session.id)
+        assertEquals(FileTransferFailure.SessionUnavailable, revoked.state.value.item(id)?.failure)
+        assertNull(revoked.state.value.item(id)?.resumableBytes())
+        assertEquals(DownloadResume.Rejected, revoked.resumeDownload(revokedGrant, generation, id, 30))
+    }
 
     @Test
     fun serverStopCleansEveryResourceInvalidatesGrantsAndClearsGeneration() = runTest {
@@ -288,12 +491,40 @@ class FileTransferCoordinatorCleanupTest {
         grants: DownloadGrantRegistry = grantRegistry(),
         wifiLock: FileTransferWifiLock = NoOpFileTransferWifiLock,
         retrySourceValidator: FileRetrySourceValidator = FileRetrySourceValidator.alwaysValid(),
+        nowEpochMillis: () -> Long = { 0L },
     ) = FileTransferCoordinator(
         browserSessionState = { sessions },
         downloadGrantRegistry = grants,
         wifiLock = wifiLock,
         retrySourceValidator = retrySourceValidator,
+        nowEpochMillis = nowEpochMillis,
     )
+
+    /** Starts the download "download" (100 bytes) and cuts it off; returns its used grant. */
+    private suspend fun interruptedDownload(
+        coordinator: FileTransferCoordinator,
+        delivered: Long,
+        vararg queued: String,
+    ): String {
+        coordinator.activate(generation)
+        coordinator.create(
+            request(
+                "download",
+                "download",
+                *queued,
+                direction = FileTransferDirection.ANDROID_TO_BROWSER,
+                sizeBytes = 100,
+            ),
+        )
+        val id = FileTransferId("download")
+        val grant = coordinator.issueDownloadGrant(generation, session.id, id)!!
+        coordinator.consumeDownloadGrant(grant.token, generation, id)!!
+        coordinator.transition(id, FileTransferEvent.Started)
+        coordinator.transition(id, FileTransferEvent.Progressed(delivered, speedBytesPerSecond = 0))
+        coordinator.onNetworkFailure(id)
+        assertEquals(FileTransferPhase.FAILED, phase(coordinator, "download"))
+        return grant.token
+    }
 
     private fun grantRegistry() = DownloadGrantRegistry(
         nowEpochMillis = { 1_000L },
@@ -305,20 +536,22 @@ class FileTransferCoordinatorCleanupTest {
         vararg ids: String,
         owner: BrowserSession = session,
         direction: FileTransferDirection = FileTransferDirection.BROWSER_TO_ANDROID,
+        sizeBytes: Long = 1,
     ) = CreateFileTransfersRequest(
         commandId = FileCommandId(commandId),
         generationId = generation,
         ownerSessionId = owner.id,
-        files = ids.map { id -> metadata(id, direction) },
+        files = ids.map { id -> metadata(id, direction, sizeBytes) },
     )
 
     private fun metadata(
         id: String,
         direction: FileTransferDirection,
+        sizeBytes: Long = 1,
     ) = FileTransferMetadata(
         id = FileTransferId(id),
         displayName = id + ".bin",
-        sizeBytes = 1,
+        sizeBytes = sizeBytes,
         mimeType = "application/octet-stream",
         sha256 = "a".repeat(64),
         direction = direction,
@@ -340,8 +573,8 @@ class FileTransferCoordinatorCleanupTest {
             events += "close-streams"
         }
 
-        override suspend fun cleanupPartial() {
-            events += "cleanup-partial"
+        override suspend fun cleanupPartial(retain: Boolean) {
+            events += if (retain) "retain-partial" else "cleanup-partial"
         }
     }
 

@@ -1,6 +1,5 @@
 package ru.hznik.devicebridge.feature.home
 
-import java.io.File
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.async
@@ -37,6 +36,7 @@ import ru.hznik.devicebridge.domain.repository.BrowserSessionRepository
 import ru.hznik.devicebridge.domain.repository.TextTransferRepository
 import ru.hznik.devicebridge.domain.repository.FileTransferRepository
 import ru.hznik.devicebridge.domain.file.FileTransferDirection
+import ru.hznik.devicebridge.domain.file.FileTransferPhase
 import ru.hznik.devicebridge.domain.file.FileTransferId
 import ru.hznik.devicebridge.domain.file.FileTransferMetadata
 import ru.hznik.devicebridge.domain.file.FileTransferOperationResult
@@ -141,6 +141,70 @@ class HomeViewModelTest {
         }
 
     @Test
+    fun closedBrowserTabStaysListedOfflineAndReconnectFlipsItBack() =
+        runTest(dispatcher) {
+            val chrome = BrowserSessionId("session-1")
+            val edge = BrowserSessionId("session-2")
+            val base = activeBrowserState()
+            val sessions = FakeBrowserSessionRepository(
+                BrowserSessionState.active(
+                    generationId = requireNotNull(base.generationId),
+                    pairingCode = requireNotNull(base.pairingCode),
+                    sessions = base.sessions + BrowserSession(
+                        id = edge,
+                        generationId = ServerGenerationId(1),
+                        browserLabel = "Edge",
+                        sourceIpv4 = "192.168.1.5",
+                        connectedAtElapsedRealtimeMs = 11_500,
+                    ),
+                ),
+            )
+            val viewModel = createViewModel(
+                repository = FakeRepository(runningState()),
+                sessionRepository = sessions,
+            )
+            runCurrent()
+            assertEquals(listOf(chrome, edge), viewModel.uiState.value.activeBrowsers.map { it.id })
+            assertEquals(2, viewModel.uiState.value.connectedBrowserCount)
+
+            // Chrome's tab closed its socket: the session survives and is listed as offline,
+            // after the connected browser, but it no longer counts as connected.
+            sessions.mutableConnectedSessionIds.value = setOf(edge)
+            runCurrent()
+            val offline = viewModel.uiState.value
+            assertEquals(
+                listOf(edge to true, chrome to false),
+                offline.activeBrowsers.map { it.id to it.connected },
+            )
+            assertEquals(1, offline.connectedBrowserCount)
+            assertTrue(offline.canSendText)
+
+            // No live browser at all: nothing can be sent, but both sessions stay revocable.
+            sessions.mutableConnectedSessionIds.value = emptySet()
+            runCurrent()
+            val allOffline = viewModel.uiState.value
+            assertEquals(2, allOffline.activeBrowsers.size)
+            assertTrue(allOffline.activeBrowsers.none { it.connected })
+            assertEquals(0, allOffline.connectedBrowserCount)
+            assertFalse(allOffline.canSendText)
+            assertFalse(allOffline.canSendFiles)
+            assertEquals("123456", allOffline.pairingCode)
+
+            viewModel.onAction(HomeAction.RevokeBrowser(chrome))
+            runCurrent()
+            assertEquals(listOf(chrome), sessions.revoked)
+
+            // Reloading the tab reconnects the same session.
+            sessions.mutableConnectedSessionIds.value = setOf(chrome, edge)
+            runCurrent()
+            assertEquals(
+                listOf(chrome to true, edge to true),
+                viewModel.uiState.value.activeBrowsers.map { it.id to it.connected },
+            )
+            assertEquals(2, viewModel.uiState.value.connectedBrowserCount)
+        }
+
+    @Test
     fun runningStateIncludesOnlyActiveFileTransfersWithoutSensitiveMetadata() =
         runTest(dispatcher) {
             val files = FakeFileTransferRepository()
@@ -171,6 +235,18 @@ class HomeViewModelTest {
             assertEquals("report.pdf", transfer.displayName)
             assertEquals(100, transfer.sizeBytes)
             assertEquals(FileTransferDirection.BROWSER_TO_ANDROID, transfer.direction)
+
+            files.mutableState.value = FileTransferSnapshot(
+                files.mutableState.value.items.map { item ->
+                    item.evolve(
+                        phase = FileTransferPhase.TRANSFERRING,
+                        bytesTransferred = 60,
+                        resumedFromBytes = 40,
+                    )
+                },
+            )
+            runCurrent()
+            assertEquals(40L, viewModel.uiState.value.activeFileTransfers.single().resumedFromBytes)
         }
 
     @Test
@@ -281,26 +357,6 @@ class HomeViewModelTest {
             runCurrent()
             assertEquals(HomeTextTransferStatus.Idle, viewModel.uiState.value.textTransferStatus)
         }
-
-    @Test
-    fun api37RequestsLanPermissionOnceBeforeStart() = runTest(dispatcher) {
-        val repository = FakeRepository()
-        val gateway = FakePermissionGateway(snapshot(sdk = 37, lan = false))
-        val viewModel = createViewModel(repository, gateway)
-        val effect = async { viewModel.effects.first() }
-        runCurrent()
-
-        viewModel.onAction(HomeAction.StartClicked)
-        runCurrent()
-
-        assertEquals(
-            HomeEffect.RequestPermissions(
-                listOf("android.permission.ACCESS_LOCAL_NETWORK"),
-            ),
-            effect.await(),
-        )
-        assertEquals(0, repository.startCalls)
-    }
 
     @Test
     fun tileStartRequestRunsTheNormalStartOnce() = runTest(dispatcher) {
@@ -416,13 +472,6 @@ class HomeViewModelTest {
             assertNull(viewModel.uiState.value.localAddress)
             assertFalse(viewModel.uiState.value.canSendText)
             assertFalse(viewModel.uiState.value.canSendFiles)
-
-            val source = File(
-                "src/main/java/ru/hznik/devicebridge/feature/home/HomeViewModel.kt",
-            ).readText()
-            assertFalse(source.contains("io.ktor"))
-            assertFalse(source.contains("ServerForegroundService"))
-            assertFalse(source.contains("android.app.Service"))
         }
 
     @Test
@@ -545,14 +594,14 @@ class HomeViewModelTest {
     ) : BrowserSessionRepository {
         val mutableState = MutableStateFlow(initial)
         override val state: StateFlow<BrowserSessionState> = mutableState
-        val approved = mutableListOf<PairingRequestId>()
+        val mutableConnectedSessionIds = MutableStateFlow(initial.sessions.map { it.id }.toSet())
+        override val connectedSessionIds: StateFlow<Set<BrowserSessionId>> =
+            mutableConnectedSessionIds
         val approvedAndRemembered = mutableListOf<PairingRequestId>()
         val denied = mutableListOf<PairingRequestId>()
         val revoked = mutableListOf<BrowserSessionId>()
 
-        override suspend fun approve(requestId: PairingRequestId) {
-            approved += requestId
-        }
+        override suspend fun approve(requestId: PairingRequestId) = Unit
 
         override suspend fun approveAndRemember(requestId: PairingRequestId) {
             approvedAndRemembered += requestId

@@ -36,6 +36,7 @@ import ru.hznik.devicebridge.domain.usecase.ObserveBrowserSessionsUseCase
 import ru.hznik.devicebridge.domain.usecase.ObserveFileTransfersUseCase
 import ru.hznik.devicebridge.domain.usecase.ObserveSettingsUseCase
 import ru.hznik.devicebridge.domain.usecase.RetryFileTransferUseCase
+import ru.hznik.devicebridge.data.file.resumableBytes
 
 @HiltViewModel
 class FileViewModel private constructor(
@@ -398,6 +399,8 @@ class FileViewModel private constructor(
                         ?.browserLabel,
                     autoAccepted = item.metadata.id in flags.accepted,
                     autoAcceptPaused = item.metadata.id in flags.paused,
+                    resumableBytes = item.resumableBytes(),
+                    resumedFromBytes = item.resumedFromBytes,
                 )
             },
             isSubmitting = localState.isSubmitting,

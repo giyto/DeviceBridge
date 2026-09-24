@@ -342,6 +342,10 @@ android {
     buildFeatures {
         compose = true
     }
+    sourceSets {
+        // Exported Room schemas let MigrationTestHelper rebuild older database versions.
+        getByName("androidTest").assets.directories.add("$projectDir/schemas")
+    }
 }
 
 val verifyReleaseSigningConfiguration by tasks.registering(

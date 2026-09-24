@@ -44,6 +44,8 @@ class DownloadGrantRegistry(
 
     private val mutex = Mutex()
     private val grants = LinkedHashMap<String, StoredGrant>()
+    /** Grants already used by a download; the browser repeats the same URL to resume it. */
+    private val consumed = LinkedHashMap<String, DownloadGrantScope>()
 
     init {
         require(ttlMillis > 0) { "Download grant TTL must be positive" }
@@ -81,6 +83,7 @@ class DownloadGrantRegistry(
         val stored = grants[token] ?: return@withLock null
         if (stored.scope != expected) return@withLock null
         grants.remove(token)
+        consumed[token] = stored.scope
         stored.scope
     }
 
@@ -99,31 +102,58 @@ class DownloadGrantRegistry(
             return@withLock null
         }
         grants.remove(token)
+        consumed[token] = stored.scope
         stored.scope
     }
 
+    /** Scope of an already used grant of [transferId], for a ranged continuation. */
+    suspend fun resumeScope(
+        token: String,
+        generationId: ServerGenerationId,
+        transferId: FileTransferId,
+    ): DownloadGrantScope? = mutex.withLock {
+        consumed[token]?.takeIf { scope ->
+            scope.generationId == generationId && scope.transferId == transferId
+        }
+    }
+
+    /** Used grants of [keepResumable] transfers still allow continuing those downloads. */
     suspend fun invalidateSession(
         generationId: ServerGenerationId,
         sessionId: BrowserSessionId,
+        keepResumable: Set<FileTransferId> = emptySet(),
     ) = mutex.withLock {
         grants.entries.removeAll { (_, grant) ->
             grant.scope.generationId == generationId &&
                 grant.scope.sessionId == sessionId
         }
+        consumed.entries.removeAll { (_, scope) ->
+            scope.generationId == generationId &&
+                scope.sessionId == sessionId &&
+                scope.transferId !in keepResumable
+        }
     }
 
+    /** With [keepResumable], a used grant still allows continuing the interrupted download. */
     suspend fun invalidateTransfer(
         generationId: ServerGenerationId,
         transferId: FileTransferId,
+        keepResumable: Boolean = false,
     ) = mutex.withLock {
         grants.entries.removeAll { (_, grant) ->
             grant.scope.generationId == generationId &&
                 grant.scope.transferId == transferId
         }
+        if (!keepResumable) {
+            consumed.entries.removeAll { (_, scope) ->
+                scope.generationId == generationId && scope.transferId == transferId
+            }
+        }
     }
 
     suspend fun invalidateGeneration(generationId: ServerGenerationId) = mutex.withLock {
         grants.entries.removeAll { (_, grant) -> grant.scope.generationId == generationId }
+        consumed.entries.removeAll { (_, scope) -> scope.generationId == generationId }
     }
 
     private fun nextUniqueToken(): String {

@@ -9,6 +9,9 @@ sealed interface FileTransferEvent {
         val speedBytesPerSecond: Long,
     ) : FileTransferEvent
 
+    /** The transfer continues after [offsetBytes] kept by an earlier attempt. */
+    data class Resumed(val offsetBytes: Long) : FileTransferEvent
+
     data object Delivered : FileTransferEvent
     data object Verifying : FileTransferEvent
     data object Completed : FileTransferEvent
@@ -40,6 +43,20 @@ object FileTransferReducer {
                     current.evolve(
                         bytesTransferred = event.bytesTransferred,
                         speedBytesPerSecond = event.speedBytesPerSecond,
+                    )
+                } else {
+                    current
+                }
+
+            is FileTransferEvent.Resumed ->
+                if (
+                    current.phase == FileTransferPhase.TRANSFERRING &&
+                    event.offsetBytes in current.bytesTransferred until current.metadata.sizeBytes
+                ) {
+                    current.evolve(
+                        bytesTransferred = event.offsetBytes,
+                        speedBytesPerSecond = 0,
+                        resumedFromBytes = event.offsetBytes,
                     )
                 } else {
                     current

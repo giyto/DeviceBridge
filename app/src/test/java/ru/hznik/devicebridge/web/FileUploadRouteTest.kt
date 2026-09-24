@@ -150,6 +150,82 @@ class FileUploadRouteTest {
         }
     }
 
+    @Test
+    fun uploadOffsetPreparesTheOutputAndTheBodyContinuesFromIt() {
+        val payload = "resume me please".encodeToByteArray()
+        val stored = 5
+        val resuming = ResumingRouteTarget(payload.copyOf(stored))
+        val factory = object : FileUploadTargetFactory {
+            override suspend fun create(
+                destinationId: FileDestinationId,
+                metadata: ru.hznik.devicebridge.domain.file.FileTransferMetadata,
+            ): FileUploadTarget = error("uploads of this web shell always ask for an offset")
+
+            override suspend fun create(
+                destinationId: FileDestinationId,
+                metadata: ru.hznik.devicebridge.domain.file.FileTransferMetadata,
+                resume: Boolean,
+            ): FileUploadTarget {
+                assertTrue(resume)
+                return resuming
+            }
+        }
+        withSessionRouteServer(uploadTargetFactory = factory) { server ->
+            val paired = offerAndApprove(server, payload)
+            val auth = mapOf("Authorization" to "Bearer ${paired.token}")
+
+            val offset = server.request(
+                "POST",
+                "/api/v1/files/upload-1/upload-offset",
+                """{"protocolVersion":1,"messageId":"offset-1","type":"file.upload_offset.request","timestamp":123}""",
+                server.sameOriginJsonHeaders(auth),
+            )
+            assertEquals(200, offset.statusCode())
+            assertTrue(offset.body().contains("\"offsetBytes\":$stored"))
+            assertEquals(
+                stored.toLong(),
+                server.fileCoordinator.state.value.item(FileTransferId("upload-1"))?.bytesTransferred,
+            )
+
+            val wrongOffset = server.requestBytes(
+                "POST",
+                "/api/v1/files/upload-1",
+                payload,
+                server.sameOriginBinaryHeaders(auth),
+            )
+            assertEquals(409, wrongOffset.statusCode())
+            assertEquals(0, resuming.output.size())
+
+            val remaining = payload.copyOfRange(stored, payload.size)
+            val upload = server.requestBytes(
+                "POST",
+                "/api/v1/files/upload-1",
+                remaining,
+                server.sameOriginBinaryHeaders(auth + ("X-DeviceBridge-Upload-Offset" to "$stored")),
+            )
+            assertEquals(200, upload.statusCode())
+            assertArrayEquals(remaining, resuming.output.toByteArray())
+            assertEquals(1, resuming.commits)
+            assertEquals(
+                FileTransferPhase.COMPLETED,
+                server.fileCoordinator.state.value.item(FileTransferId("upload-1"))?.phase,
+            )
+        }
+    }
+
+    private class ResumingRouteTarget(prefix: ByteArray) : FileUploadTarget {
+        val output = ByteArrayOutputStream()
+        private val prefixDigest = java.security.MessageDigest.getInstance("SHA-256")
+            .also { it.update(prefix) }
+        var commits = 0
+        override val offsetBytes: Long = prefix.size.toLong()
+        override fun digest() = prefixDigest
+        override fun outputStream() = output
+        override suspend fun commit() { commits += 1 }
+        override suspend fun abort() = Unit
+        override suspend fun close() = Unit
+    }
+
     private fun offerAndApprove(
         server: SessionRouteTestServer,
         payload: ByteArray,

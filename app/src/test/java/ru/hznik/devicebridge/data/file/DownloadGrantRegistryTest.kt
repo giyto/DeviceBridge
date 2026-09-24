@@ -85,6 +85,44 @@ class DownloadGrantRegistryTest {
     }
 
     @Test
+    fun usedGrantStaysResumableOnlyWhileTheInterruptedTransferKeepsIt() = runTest {
+        val grant = registry.issue(generation, session, transfer)
+        assertNull(registry.resumeScope(grant.token, generation, transfer))
+        registry.consume(grant.token, generation, transfer)
+
+        registry.invalidateTransfer(generation, transfer, keepResumable = true)
+        assertEquals(
+            DownloadGrantScope(generation, session, transfer),
+            registry.resumeScope(grant.token, generation, transfer),
+        )
+        assertNull(registry.resumeScope(grant.token, generation, FileTransferId("other")))
+        assertNull(registry.resumeScope(grant.token, ServerGenerationId(8), transfer))
+        // Still single use for a full download.
+        assertNull(registry.consume(grant.token, generation, transfer))
+
+        registry.invalidateTransfer(generation, transfer)
+        assertNull(registry.resumeScope(grant.token, generation, transfer))
+
+        val disconnected = registry.issue(generation, session, transfer)
+        registry.consume(disconnected.token, generation, transfer)
+        registry.invalidateSession(generation, session, keepResumable = setOf(transfer))
+        assertEquals(
+            DownloadGrantScope(generation, session, transfer),
+            registry.resumeScope(disconnected.token, generation, transfer),
+        )
+
+        val revoked = registry.issue(generation, session, transfer)
+        registry.consume(revoked.token, generation, transfer)
+        registry.invalidateSession(generation, session)
+        assertNull(registry.resumeScope(revoked.token, generation, transfer))
+
+        val stopped = registry.issue(generation, session, transfer)
+        registry.consume(stopped.token, generation, transfer)
+        registry.invalidateGeneration(generation)
+        assertNull(registry.resumeScope(stopped.token, generation, transfer))
+    }
+
+    @Test
     fun transferCancellationInvalidatesOnlyThatTransfersOutstandingGrants() = runTest {
         val cancelled = registry.issue(generation, session, transfer)
         val retainedTransfer = FileTransferId("transfer-2")

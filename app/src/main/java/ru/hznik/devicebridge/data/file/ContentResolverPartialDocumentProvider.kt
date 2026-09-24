@@ -67,6 +67,26 @@ class ContentResolverPartialDocumentProvider(
         }.getOrNull()
     }
 
+    override suspend fun size(documentUri: String): Long? =
+        withContext(ioDispatcher) {
+            runCatching {
+                contentResolver.query(
+                    Uri.parse(documentUri),
+                    arrayOf(DocumentsContract.Document.COLUMN_SIZE),
+                    null,
+                    null,
+                    null,
+                )?.use { cursor ->
+                    val sizeIndex = cursor.getColumnIndex(DocumentsContract.Document.COLUMN_SIZE)
+                    if (sizeIndex >= 0 && cursor.moveToFirst() && !cursor.isNull(sizeIndex)) {
+                        cursor.getLong(sizeIndex)
+                    } else {
+                        null
+                    }
+                }
+            }.getOrNull()
+        }
+
     override suspend fun delete(documentUri: String): Boolean =
         withContext(ioDispatcher) {
             runCatching {

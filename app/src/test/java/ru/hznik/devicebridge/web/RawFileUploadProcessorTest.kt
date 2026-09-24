@@ -85,6 +85,90 @@ class RawFileUploadProcessorTest {
         assertEquals(1, target.aborts)
     }
 
+    @Test
+    fun resumedBodyContinuesTheStoredPrefixAndOnlyAWrongChecksumDeletesIt() = runTest {
+        val bytes = "hello resumable world".encodeToByteArray()
+        val stored = 6
+        val remaining = bytes.copyOfRange(stored, bytes.size)
+        val size = bytes.size.toLong()
+        suspend fun receive(
+            target: ResumingTarget,
+            body: ByteArray = remaining,
+            declared: Long = body.size.toLong(),
+            progress: MutableList<Long> = mutableListOf(),
+        ) = RawFileUploadProcessor(bufferSize = 4).receive(
+            channel = ByteReadChannel(body),
+            metadata = metadata(size, sha256(bytes)),
+            declaredContentLength = declared,
+            target = target,
+            onProgress = progress::add,
+        )
+
+        val resumed = ResumingTarget(bytes.copyOf(stored))
+        val progress = mutableListOf<Long>()
+        assertEquals(RawFileUploadResult.Completed, receive(resumed, progress = progress))
+        assertArrayEquals(remaining, resumed.output.toByteArray())
+        assertEquals(1, resumed.commits)
+        assertTrue(progress.first() > stored)
+        assertEquals(size, progress.last())
+
+        val interrupted = ResumingTarget(bytes.copyOf(stored))
+        assertEquals(
+            RawFileUploadResult.PrematureEof,
+            receive(interrupted, body = remaining.copyOf(3), declared = remaining.size.toLong()),
+        )
+        assertEquals(1, interrupted.retains)
+        assertEquals(0, interrupted.aborts)
+
+        val wrongLength = ResumingTarget(bytes.copyOf(stored))
+        assertEquals(RawFileUploadResult.InvalidContentLength, receive(wrongLength, declared = 1))
+        assertEquals(1, wrongLength.retains)
+        assertEquals(0, wrongLength.aborts)
+
+        // Space runs out while writing the rest: the kept part survives for a later attempt.
+        val noSpace = object : FileUploadTarget by ResumingTarget(bytes.copyOf(stored)) {
+            var retains = 0
+            override fun outputStream(): OutputStream = object : OutputStream() {
+                override fun write(value: Int) = throw IOException("ENOSPC: no space left on device")
+                override fun write(b: ByteArray, off: Int, len: Int) =
+                    throw IOException("ENOSPC: no space left on device")
+            }
+            override suspend fun retain() { retains += 1 }
+        }
+        assertEquals(
+            RawFileUploadResult.InsufficientSpace,
+            RawFileUploadProcessor(bufferSize = 4).receive(
+                channel = ByteReadChannel(remaining),
+                metadata = metadata(size, sha256(bytes)),
+                declaredContentLength = remaining.size.toLong(),
+                target = noSpace,
+            ),
+        )
+        assertEquals(1, noSpace.retains)
+
+        val damaged = ResumingTarget(bytes.copyOf(stored).also { it[0] = 'j'.code.toByte() })
+        assertEquals(RawFileUploadResult.ChecksumMismatch, receive(damaged))
+        assertEquals(0, damaged.retains)
+        assertEquals(1, damaged.aborts)
+    }
+
+    private class ResumingTarget(prefix: ByteArray) : FileUploadTarget {
+        val output = ByteArrayOutputStream()
+        private val prefixDigest = java.security.MessageDigest.getInstance("SHA-256")
+            .also { it.update(prefix) }
+        var commits = 0
+        var aborts = 0
+        var retains = 0
+
+        override val offsetBytes: Long = prefix.size.toLong()
+        override fun digest() = prefixDigest
+        override fun outputStream() = output
+        override suspend fun commit() { commits += 1 }
+        override suspend fun abort() { aborts += 1 }
+        override suspend fun retain() { retains += 1 }
+        override suspend fun close() = Unit
+    }
+
     private class NoSpaceTarget : FileUploadTarget {
         var aborts = 0
         override fun outputStream() = object : OutputStream() {

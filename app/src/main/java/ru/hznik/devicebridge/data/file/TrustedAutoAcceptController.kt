@@ -17,6 +17,7 @@ import ru.hznik.devicebridge.domain.file.FileTransferId
 import ru.hznik.devicebridge.domain.file.FileTransferOperationResult
 import ru.hznik.devicebridge.domain.file.FileTransferPhase
 import ru.hznik.devicebridge.domain.file.FileTransferSnapshot
+import ru.hznik.devicebridge.domain.file.FileTransferState
 import ru.hznik.devicebridge.domain.repository.FileTransferRepository
 import ru.hznik.devicebridge.domain.session.BrowserSessionState
 import ru.hznik.devicebridge.domain.settings.DeviceSettings
@@ -42,6 +43,9 @@ fun interface PersistedDestinationOpener {
  * Accepts Browser → Android offers of trusted sessions into the default destination without UI,
  * using the same coordinator approval as the manual path. Offers of ordinary sessions, a disabled
  * setting or an unusable folder stay in CONNECTING for manual approval.
+ *
+ * A retried upload that kept a part in the default destination is approved there as well, so
+ * «Продолжить» in the browser does not need another tap on the phone.
  */
 class TrustedAutoAcceptController(
     private val transfers: FileTransferRepository,
@@ -49,6 +53,9 @@ class TrustedAutoAcceptController(
     private val settings: Flow<DeviceSettings>,
     private val destinations: PersistedDestinationOpener,
     private val leases: FileDestinationLeaseRegistry,
+    private val isResumeRetry: (FileTransferId) -> Boolean = { false },
+    private val hasRetainedPart: suspend (FileTransferState, treeUri: String) -> Boolean =
+        { _, _ -> false },
 ) : AutoAcceptStatusSource {
     private val mutableAutoAccepted = MutableStateFlow<Set<FileTransferId>>(emptySet())
     override val autoAccepted: StateFlow<Set<FileTransferId>> = mutableAutoAccepted
@@ -87,6 +94,13 @@ class TrustedAutoAcceptController(
         current: DeviceSettings,
     ) {
         val paused = mutableSetOf<FileTransferId>()
+        // A retry brings the same transfer back to CONNECTING; it may be decided again.
+        // Its registration is stale then even if the upload never opened an output.
+        processed.removeAll { id ->
+            val finished = snapshot.item(id)?.phase?.isTerminal != false
+            if (finished) leases.release(id)
+            finished
+        }
         val awaiting = snapshot.items.filter { item ->
             item.metadata.direction == FileTransferDirection.BROWSER_TO_ANDROID &&
                 item.phase == FileTransferPhase.CONNECTING
@@ -98,8 +112,13 @@ class TrustedAutoAcceptController(
             val owner = sessionState.sessions.firstOrNull { session ->
                 session.id == item.ownerSessionId && session.generationId == item.generationId
             }
-            if (owner?.trustedBrowserId == null || !current.autoAcceptTrustedFiles) continue
+            if (owner == null) continue
+            val trusted = owner.trustedBrowserId != null && current.autoAcceptTrustedFiles
+            val resume = isResumeRetry(id)
+            if (!trusted && !resume) continue
             val tree = current.destinationTree ?: continue
+            // An ordinary session continues only into the folder that holds its kept part.
+            if (!trusted && !hasRetainedPart(item, tree.value)) continue
             val lease = when (val approval = destinations.open(tree.value)) {
                 is DestinationApproval.Approved -> approval.lease
                 DestinationApproval.Cancelled,
@@ -116,7 +135,7 @@ class TrustedAutoAcceptController(
                 continue
             }
             if (transfers.approve(id, destinationId) == FileTransferOperationResult.Accepted) {
-                mutableAutoAccepted.update { it + id }
+                if (trusted) mutableAutoAccepted.update { it + id }
             } else {
                 leases.release(id, lease)
             }

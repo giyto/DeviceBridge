@@ -2,7 +2,6 @@ package ru.hznik.devicebridge.web
 
 import io.ktor.utils.io.ByteReadChannel
 import io.ktor.utils.io.readAvailable
-import java.security.MessageDigest
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
@@ -31,6 +30,11 @@ class RawFileUploadProcessor(
         require(bufferSize in 1..1024 * 1024)
     }
 
+    /**
+     * Writes the request body after the [FileUploadTarget.offsetBytes] already stored and checks
+     * the SHA-256 of the whole file. An interrupted body keeps what was written for a later
+     * resume; a wrong checksum or an oversized body deletes the output.
+     */
     suspend fun receive(
         channel: ByteReadChannel,
         metadata: FileTransferMetadata,
@@ -39,21 +43,24 @@ class RawFileUploadProcessor(
         onProgress: suspend (Long) -> Unit = {},
     ): RawFileUploadResult {
         var committed = false
+        var keepPartial = true
         try {
+            val offset = target.offsetBytes
+            val remaining = metadata.sizeBytes - offset
             if (declaredContentLength == null || declaredContentLength < 0) {
                 return RawFileUploadResult.InvalidContentLength
             }
-            if (declaredContentLength > HARD_MAX_FILE_BYTES || declaredContentLength > metadata.sizeBytes) {
+            if (declaredContentLength > HARD_MAX_FILE_BYTES || declaredContentLength > remaining) {
                 return RawFileUploadResult.Oversize
             }
-            if (declaredContentLength != metadata.sizeBytes) {
+            if (declaredContentLength != remaining) {
                 return RawFileUploadResult.InvalidContentLength
             }
 
             val output = target.outputStream()
-            val digest = MessageDigest.getInstance("SHA-256")
+            val digest = target.digest()
             val buffer = ByteArray(bufferSize)
-            var total = 0L
+            var total = offset
             while (true) {
                 currentCoroutineContext().ensureActive()
                 val read = channel.readAvailable(buffer, 0, buffer.size)
@@ -61,6 +68,7 @@ class RawFileUploadProcessor(
                 if (read == 0) continue
                 total = Math.addExact(total, read.toLong())
                 if (total > metadata.sizeBytes || total > HARD_MAX_FILE_BYTES) {
+                    keepPartial = false
                     return RawFileUploadResult.Oversize
                 }
                 withContext(ioDispatcher) { output.write(buffer, 0, read) }
@@ -70,6 +78,7 @@ class RawFileUploadProcessor(
             if (total != metadata.sizeBytes) return RawFileUploadResult.PrematureEof
             val actualHash = digest.digest().toHex()
             if (!actualHash.equals(metadata.sha256, ignoreCase = true)) {
+                keepPartial = false
                 return RawFileUploadResult.ChecksumMismatch
             }
             withContext(ioDispatcher) {
@@ -88,7 +97,9 @@ class RawFileUploadProcessor(
             }
         } finally {
             withContext(kotlinx.coroutines.NonCancellable + ioDispatcher) {
-                if (!committed) runCatching { target.abort() }
+                if (!committed) {
+                    runCatching { if (keepPartial) target.retain() else target.abort() }
+                }
                 runCatching { target.close() }
             }
         }
