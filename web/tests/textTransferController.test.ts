@@ -167,6 +167,23 @@ describe("TextTransferController", () => {
     });
   });
 
+  it("shows a text from the phone as delivered once this browser has it", () => {
+    const fixture = createFixture();
+    fixture.controller.activate("token");
+
+    fixture.controller.receive({
+      protocolVersion: 1,
+      type: "text.received",
+      ...incomingItem("incoming-1", "пипи"),
+      status: "SENDING",
+    });
+
+    expect(fixture.states.at(-1)).toMatchObject({
+      kind: "active",
+      items: [{ messageId: "incoming-1", status: "DELIVERED" }],
+    });
+  });
+
   it("marks an in-flight operation uncertain on disconnect and retries the same messageId", async () => {
     const api = fakeSender();
     api.send = vi.fn()
