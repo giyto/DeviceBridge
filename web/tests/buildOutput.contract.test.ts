@@ -7,13 +7,19 @@ const outputRoot = resolve(process.cwd(), "../app/src/main/assets/web");
 
 describe("Vite Android asset output", () => {
   it("emits hashed JavaScript and CSS referenced by current HTML", () => {
-    const html = readFileSync(resolve(outputRoot, "index.html"), "utf8");
+    const index = readFileSync(resolve(outputRoot, "index.html"), "utf8");
+    const setup = readFileSync(resolve(outputRoot, "setup.html"), "utf8");
     const assets = readdirSync(resolve(outputRoot, "assets")).sort();
 
     expect(assets.some((path) => /^index-[A-Za-z0-9_-]{8,}\.js$/.test(path))).toBe(true);
-    expect(assets.some((path) => /^index-[A-Za-z0-9_-]{8,}\.css$/.test(path))).toBe(true);
+    expect(assets.some((path) => /^setup-[A-Za-z0-9_-]{8,}\.js$/.test(path))).toBe(true);
+    // The design tokens and base styles are shared by the app and the certificate setup page.
+    const shared = assets.filter((path) => /^shared-[A-Za-z0-9_-]{8,}\.css$/.test(path));
+    expect(shared).toHaveLength(1);
+    expect(index).toContain(`/assets/${shared[0]}`);
+    expect(setup).toContain(`/assets/${shared[0]}`);
     for (const asset of assets) {
-      expect(html).toContain(`/assets/${asset}`);
+      expect(index + setup).toContain(`/assets/${asset}`);
     }
   });
 

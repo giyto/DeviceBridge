@@ -314,7 +314,7 @@ class DeviceBridgeNavigationTest {
         }
         DeviceBridgeApp(
             modifier = modifier,
-            homeContent = { onOpenText, onOpenFiles ->
+            homeContent = { onOpenText, onOpenFiles, _ ->
                 HomeScreen(
                     uiState = sessionState,
                     onOpenText = onOpenText,

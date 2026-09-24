@@ -99,7 +99,7 @@ private fun ApplicationCall.isAllowedWebRequest(allowedHosts: Set<String>): Bool
 
     val origin = request.header(HttpHeaders.Origin) ?: return true
     val originUri = runCatching { URI(origin) }.getOrNull() ?: return false
-    return originUri.scheme?.lowercase(Locale.ROOT) == "http" &&
+    return originUri.scheme?.lowercase(Locale.ROOT) == originScheme() &&
         originUri.rawAuthority?.lowercase(Locale.ROOT) == host &&
         originUri.userInfo == null &&
         originUri.rawQuery == null &&

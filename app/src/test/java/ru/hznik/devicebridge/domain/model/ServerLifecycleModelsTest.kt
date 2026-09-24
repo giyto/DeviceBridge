@@ -13,6 +13,8 @@ class ServerLifecycleModelsTest {
         val endpoint = ServerEndpoint(host = "192.168.1.24", port = 8787)
 
         assertEquals("http://192.168.1.24:8787", endpoint.url)
+        // Secure mode keeps the plain entry address, which moves trusted browsers to HTTPS.
+        assertEquals("http://192.168.1.24:8787", endpoint.copy(secure = true).url)
         assertThrows(IllegalArgumentException::class.java) {
             ServerEndpoint(host = "", port = 8787)
         }

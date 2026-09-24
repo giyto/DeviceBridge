@@ -30,6 +30,11 @@ import ru.hznik.devicebridge.domain.session.ServerGenerationId
 import ru.hznik.devicebridge.core.protocol.session.SessionChallengeResponse
 import ru.hznik.devicebridge.core.protocol.session.SessionConfirmResponse
 import ru.hznik.devicebridge.core.protocol.session.SessionProtocolJson
+import ru.hznik.devicebridge.data.tls.LocalCertificateAuthority
+import ru.hznik.devicebridge.data.tls.RelayedConnectionRegistry
+import ru.hznik.devicebridge.data.tls.ServerTlsMaterial
+import ru.hznik.devicebridge.data.tls.SoftwareTlsKeyStore
+import ru.hznik.devicebridge.data.tls.TlsFrontDoor
 
 internal class SessionRouteTestServer(
     maxChallenges: Int = 64,
@@ -86,16 +91,46 @@ internal class SessionRouteTestServer(
     }
     val port: Int = ServerSocket(0).use { it.localPort }
     val authority: String = "127.0.0.1:$port"
+
+    /** When set, browsers reach the routes through the TLS front door, as in secure mode. */
+    val secure: Boolean = secureTransportForTests.get()
+    val scheme: String = if (secure) "https" else "http"
+    private val relayed = RelayedConnectionRegistry()
+    private val tlsMaterial: ServerTlsMaterial? = if (secure) {
+        LocalCertificateAuthority(
+            SoftwareTlsKeyStore(),
+            java.nio.file.Files.createTempDirectory("devicebridge-tls").toFile(),
+        ).serverMaterial(java.net.InetAddress.getByName("127.0.0.1") as java.net.Inet4Address)
+    } else {
+        null
+    }
+    internal val backendPort: Int = if (secure) ServerSocket(0).use { it.localPort } else port
     private val engine = embeddedServer(
         factory = CIO,
         host = "127.0.0.1",
-        port = port,
+        port = backendPort,
         module = {
+            tlsMaterial?.let { material ->
+                installSecureModeGuard(
+                    peerFor = relayed::peerFor,
+                    rootCertificate = { material.root.encoded },
+                    webAssetProvider = object : WebAssetProvider {
+                        override fun find(requestPath: String): WebAssetResource? = null
+                    },
+                    allowedHosts = { setOf(authority) },
+                )
+            }
             installSessionRoutes(
                 coordinator = coordinator,
                 generationHandle = { handle },
                 allowedHosts = { setOf(authority) },
-                sourceIpv4 = { "127.0.0.1" },
+                sourceIpv4 = { call ->
+                    if (secure) {
+                        relayed.peerFor(call.request.local.remotePort)?.address.orEmpty()
+                    } else {
+                        "127.0.0.1"
+                    }
+                },
                 monotonicClockMs = clock::nowMs,
                 wallClockMs = { 1_000_000 },
                 webSocketAuthTimeoutMs = webSocketAuthTimeoutMs,
@@ -128,7 +163,16 @@ internal class SessionRouteTestServer(
            )
         },
     ).also { it.start(wait = false) }
-    private val client = HttpClient.newHttpClient()
+    private val frontDoor: TlsFrontDoor? = tlsMaterial?.let { material ->
+        TlsFrontDoor(TlsFrontDoor.serverContext(material), backendPort, relayed).also {
+            it.start(java.net.InetAddress.getLoopbackAddress(), port)
+        }
+    }
+    private val client: HttpClient = if (tlsMaterial != null) {
+        HttpClient.newBuilder().sslContext(trustingOnly(tlsMaterial.root)).build()
+    } else {
+        HttpClient.newHttpClient()
+    }
 
     fun request(
         method: String,
@@ -137,7 +181,7 @@ internal class SessionRouteTestServer(
         headers: Map<String, String> = emptyMap(),
     ): HttpResponse<String> {
         val builder = HttpRequest.newBuilder()
-            .uri(URI("http://127.0.0.1:$port$path"))
+            .uri(URI("$scheme://127.0.0.1:$port$path"))
         headers.forEach(builder::header)
         when (method) {
             "POST" -> builder.POST(HttpRequest.BodyPublishers.ofString(body.orEmpty()))
@@ -153,7 +197,7 @@ internal class SessionRouteTestServer(
         body: String? = null,
         headers: Map<String, String> = emptyMap(),
     ): java.util.concurrent.CompletableFuture<HttpResponse<String>> {
-        val builder = HttpRequest.newBuilder().uri(URI("http://127.0.0.1:$port$path"))
+        val builder = HttpRequest.newBuilder().uri(URI("$scheme://127.0.0.1:$port$path"))
         headers.forEach(builder::header)
         when (method) {
             "POST" -> builder.POST(HttpRequest.BodyPublishers.ofString(body.orEmpty()))
@@ -169,7 +213,7 @@ internal class SessionRouteTestServer(
         body: ByteArray,
         headers: Map<String, String> = emptyMap(),
     ): HttpResponse<String> {
-        val builder = HttpRequest.newBuilder().uri(URI("http://127.0.0.1:$port$path"))
+        val builder = HttpRequest.newBuilder().uri(URI("$scheme://127.0.0.1:$port$path"))
         headers.forEach(builder::header)
         if (method == "POST") builder.POST(HttpRequest.BodyPublishers.ofByteArray(body))
         else error("Unsupported byte request method: $method")
@@ -180,7 +224,7 @@ internal class SessionRouteTestServer(
         path: String,
         headers: Map<String, String> = emptyMap(),
     ): HttpResponse<ByteArray> {
-        val builder = HttpRequest.newBuilder().uri(URI("http://127.0.0.1:$port$path")).GET()
+        val builder = HttpRequest.newBuilder().uri(URI("$scheme://127.0.0.1:$port$path")).GET()
         headers.forEach(builder::header)
         return client.send(builder.build(), HttpResponse.BodyHandlers.ofByteArray())
     }
@@ -247,13 +291,13 @@ internal class SessionRouteTestServer(
 
     fun sameOriginJsonHeaders(extra: Map<String, String> = emptyMap()): Map<String, String> =
         mapOf(
-            "Origin" to "http://$authority",
+            "Origin" to "$scheme://$authority",
             "Content-Type" to "application/json",
         ) + extra
 
     fun sameOriginBinaryHeaders(extra: Map<String, String> = emptyMap()): Map<String, String> =
         mapOf(
-            "Origin" to "http://$authority",
+            "Origin" to "$scheme://$authority",
             "Content-Type" to "application/octet-stream",
         ) + extra
 
@@ -262,8 +306,25 @@ internal class SessionRouteTestServer(
         runBlocking { fileCoordinator.close(handle.generationId) }
         runBlocking { textCoordinator.close(handle.generationId) }
         runBlocking { coordinator.closeGeneration(handle) }
+        frontDoor?.close()
         engine.stop(gracePeriodMillis = 0, timeoutMillis = 2_000)
         scope.cancel()
+    }
+
+    companion object {
+        /** Makes servers created on this thread serve over TLS; see [SecureTransportRouteTest]. */
+        val secureTransportForTests: ThreadLocal<Boolean> = ThreadLocal.withInitial { false }
+
+        private fun trustingOnly(root: java.security.cert.X509Certificate): javax.net.ssl.SSLContext {
+            val trust = java.security.KeyStore.getInstance(java.security.KeyStore.getDefaultType()).apply {
+                load(null)
+                setCertificateEntry("root", root)
+            }
+            val managers = javax.net.ssl.TrustManagerFactory.getInstance("PKIX")
+                .apply { init(trust) }
+                .trustManagers
+            return javax.net.ssl.SSLContext.getInstance("TLS").apply { init(null, managers, null) }
+        }
     }
 
     private class FixedClock(var value: Long) : MonotonicClock {

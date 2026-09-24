@@ -112,6 +112,87 @@ class SettingsScreenTest {
     }
 
     @Test
+    fun secureModeToggleConfirmsRestartAndShowsTheFingerprintToCompare() {
+        val actions = mutableListOf<SettingsAction>()
+        var state by mutableStateOf(SettingsUiState(loadState = SettingsLoadState.CONTENT))
+        composeRule.setContent {
+            MaterialTheme {
+                SettingsScreen(uiState = state, onAction = { actions += it })
+            }
+        }
+
+        scrollToTag("secure-mode-toggle").performScrollTo().assertIsEnabled().assertIsOff()
+        composeRule.onNodeWithTag("secure-mode-toggle").performClick()
+        assertEquals(listOf<SettingsAction>(SettingsAction.SecureModeToggled(true)), actions)
+        actions.clear()
+
+        state = state.copy(pendingSecureModeChange = SecureModeChange.Toggle(true))
+        composeRule.onNodeWithText("Включить защищённый режим?").assertIsDisplayed()
+        composeRule.onNodeWithText("Включить").performClick()
+        assertEquals(listOf<SettingsAction>(SettingsAction.SecureModeChangeConfirmed), actions)
+        actions.clear()
+
+        val fingerprints = ru.hznik.devicebridge.data.tls.CertificateFingerprints(
+            sha1 = "E101A32A C458EB0F 2CDF4C3D BEA241A6 69319FE1",
+            sha256 = "9F 5D 00 12",
+        )
+        state = state.copy(
+            settings = state.settings.copy(secureModeEnabled = true),
+            pendingSecureModeChange = null,
+            rootCertificate = ru.hznik.devicebridge.data.tls.RootCertificateStatus.Ready(fingerprints),
+        )
+        scrollToTag("secure-mode-toggle").assertIsOn()
+        scrollToTag("secure-mode-sha1-short").assertTextEquals("E101A32A … 69319FE1")
+        scrollToTag("secure-mode-sha1").assertTextEquals(fingerprints.sha1)
+        scrollToTag("share-certificate").performClick()
+        assertEquals(listOf<SettingsAction>(SettingsAction.ShareCertificateClicked), actions)
+        composeRule.onNodeWithTag("secure-mode-sha256").assertDoesNotExist()
+        scrollToText("Подробнее: SHA-256").performClick()
+        scrollToTag("secure-mode-sha256").assertTextEquals(fingerprints.sha256)
+    }
+
+    @Test
+    fun certificateResetIsConfirmedAndExplainsWhatToDoOnTheComputer() {
+        val actions = mutableListOf<SettingsAction>()
+        val ready = ru.hznik.devicebridge.data.tls.RootCertificateStatus.Ready(
+            ru.hznik.devicebridge.data.tls.CertificateFingerprints("AAAA0000 BBBB1111", "AA BB"),
+        )
+        var state by mutableStateOf(
+            SettingsUiState(
+                loadState = SettingsLoadState.CONTENT,
+                settings = DeviceSettings.defaults().copy(secureModeEnabled = true),
+                rootCertificate = ready,
+            ),
+        )
+        composeRule.setContent {
+            MaterialTheme {
+                SettingsScreen(uiState = state, onAction = { actions += it })
+            }
+        }
+
+        scrollToText("Сбросить сертификат").performClick()
+        assertEquals(listOf<SettingsAction>(SettingsAction.ResetCertificateClicked), actions)
+        actions.clear()
+
+        state = state.copy(pendingSecureModeChange = SecureModeChange.ResetCertificate)
+        composeRule.onNodeWithText("Сбросить сертификат?").assertIsDisplayed()
+        composeRule.onNodeWithText("Отмена").performClick()
+        assertEquals(listOf<SettingsAction>(SettingsAction.SecureModeChangeDismissed), actions)
+        actions.clear()
+
+        state = state.copy(pendingSecureModeChange = null, certificateWasReset = true)
+        scrollToText("Понятно").performClick()
+        composeRule.onNodeWithText("Создан новый сертификат.", substring = true).assertExists()
+        assertEquals(listOf<SettingsAction>(SettingsAction.CertificateResetNoticeDismissed), actions)
+
+        state = state.copy(
+            certificateWasReset = false,
+            rootCertificate = ru.hznik.devicebridge.data.tls.RootCertificateStatus.Unusable,
+        )
+        scrollToText("Сертификат телефона повреждён", substring = true).assertIsDisplayed()
+    }
+
+    @Test
     fun idleStopSelectorShowsDefaultAndDispatchesChoice() {
         val actions = mutableListOf<SettingsAction>()
         composeRule.setContent {
@@ -462,8 +543,8 @@ class SettingsScreenTest {
         return composeRule.onNodeWithTag(tag)
     }
 
-    private fun scrollToText(text: String): SemanticsNodeInteraction {
-        composeRule.onNode(hasScrollAction()).performScrollToNode(hasText(text))
-        return composeRule.onNodeWithText(text)
+    private fun scrollToText(text: String, substring: Boolean = false): SemanticsNodeInteraction {
+        composeRule.onNode(hasScrollAction()).performScrollToNode(hasText(text, substring = substring))
+        return composeRule.onNodeWithText(text, substring = substring)
     }
 }

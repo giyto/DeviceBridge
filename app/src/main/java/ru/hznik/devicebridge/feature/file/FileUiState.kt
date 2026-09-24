@@ -102,7 +102,7 @@ private fun FileTransferItemUiState.resumableFailureMessage(): String? {
     return if (direction == FileTransferDirection.ANDROID_TO_BROWSER) {
         "Загрузка прервалась. Браузер может возобновить её в течение 15 минут, иначе повторите с начала."
     } else if (failure == FileTransferFailure.InsufficientSpace) {
-        "На устройстве недостаточно свободного места. Сохранено ${formatBytes(kept)} — освободите место и продолжите."
+        "На устройстве недостаточно свободного места. Сохранено ${formatBytes(kept)} - освободите место и продолжите."
     } else {
         "Передача прервалась. Сохранено ${formatBytes(kept)} из ${formatBytes(sizeBytes)}, её можно продолжить."
     }

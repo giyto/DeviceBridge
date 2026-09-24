@@ -25,6 +25,8 @@ enum class HomeTextTransferStatus {
 data class ServerSessionUiState(
     val status: HomeServerStatus = HomeServerStatus.Stopped,
     val localAddress: String? = null,
+    /** The browser switches from [localAddress] to HTTPS by itself. */
+    val secureMode: Boolean = false,
     val uptimeSeconds: Long = 0,
     val errorMessage: String? = null,
     val failure: UserFacingFailure? = null,

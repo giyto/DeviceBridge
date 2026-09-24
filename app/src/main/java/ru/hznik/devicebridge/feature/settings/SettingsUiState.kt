@@ -1,6 +1,7 @@
 package ru.hznik.devicebridge.feature.settings
 
 import ru.hznik.devicebridge.data.file.PartialUploadSummary
+import ru.hznik.devicebridge.data.tls.RootCertificateStatus
 import ru.hznik.devicebridge.domain.settings.DeviceSettings
 import ru.hznik.devicebridge.domain.settings.IdleStopTimeout
 import ru.hznik.devicebridge.domain.settings.ThemePreference
@@ -55,6 +56,14 @@ data class SettingsUiState(
     val partialUploads: PartialUploadSummary = PartialUploadSummary(count = 0, totalBytes = 0),
     val discardPartialUploadsPending: Boolean = false,
     val partialUploadsError: String? = null,
+    val secureModeState: SettingsFieldState = SettingsFieldState(),
+    val rootCertificate: RootCertificateStatus = RootCertificateStatus.NotCreated,
+    /** A change that waits for the user to agree, because it restarts the server or resets trust. */
+    val pendingSecureModeChange: SecureModeChange? = null,
+    val certificateResetPending: Boolean = false,
+    /** Set after a reset, until dismissed: the old root must be removed from computers. */
+    val certificateWasReset: Boolean = false,
+    val certificateShareError: String? = null,
 ) {
     val autoAcceptStatus: AutoAcceptStatus
         get() = when {
@@ -63,6 +72,11 @@ data class SettingsUiState(
             destinationAvailability == DestinationAvailability.UNAVAILABLE -> AutoAcceptStatus.PAUSED
             else -> AutoAcceptStatus.ON
         }
+}
+
+sealed interface SecureModeChange {
+    data class Toggle(val enabled: Boolean) : SecureModeChange
+    data object ResetCertificate : SecureModeChange
 }
 
 data class TrustedBrowserUiState(
@@ -95,8 +109,17 @@ sealed interface SettingsAction {
     data class ThemeSelected(val value: ThemePreference) : SettingsAction
     data class AutoAcceptToggled(val enabled: Boolean) : SettingsAction
     data class IdleStopSelected(val value: IdleStopTimeout) : SettingsAction
+    data class SecureModeToggled(val enabled: Boolean) : SettingsAction
+    data object ResetCertificateClicked : SettingsAction
+    data object SecureModeChangeConfirmed : SettingsAction
+    data object SecureModeChangeDismissed : SettingsAction
+    data object CertificateResetNoticeDismissed : SettingsAction
+    data object ShareCertificateClicked : SettingsAction
 }
 
 sealed interface SettingsEffect {
     data object ChooseDestination : SettingsEffect
+
+    /** Opens the system share sheet for the root certificate at [contentUri]. */
+    data class ShareCertificate(val contentUri: String) : SettingsEffect
 }

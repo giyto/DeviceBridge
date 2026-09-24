@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest";
 const outputRoot = resolve(process.cwd(), "../app/src/main/assets/web");
 
 describe("built web privacy contract", () => {
-  it("contains no external runtime URL, analytics or service worker", () => {
+  it("contains no external runtime URL, analytics or service worker registration", () => {
     const textOutputs = outputFiles()
       .filter((path) => /\.(?:html|css|js|json)$/.test(path))
       .map((path) => readFileSync(resolve(outputRoot, path), "utf8"))
@@ -13,7 +13,14 @@ describe("built web privacy contract", () => {
 
     expect(textOutputs).not.toMatch(/https?:\/\//i);
     expect(textOutputs).not.toMatch(/(?:googletagmanager|google-analytics|segment\.io|sentry\.io)/i);
-    expect(textOutputs).not.toMatch(/(?:navigator\.)?serviceWorker|service-worker/i);
+    expect(textOutputs).not.toMatch(/service-worker/i);
+    // The one service worker access is the certificate trust probe. It asks to register the
+    // JSON web manifest, which can never become a worker, and reads only the refusal.
+    expect(textOutputs.match(/serviceWorker/g) ?? []).toHaveLength(1);
+    const registered = [...textOutputs.matchAll(/\.register\(\s*([`"'])([^`"']*)/g)].map(
+      (match) => match[2],
+    );
+    expect(registered).toEqual(["/web-manifest.json"]);
   });
 
   it("contains only entry files and assets declared by the Vite manifest", () => {
@@ -24,6 +31,7 @@ describe("built web privacy contract", () => {
       ".gitkeep",
       "asset-manifest.json",
       "index.html",
+      "setup.html",
       "web-manifest.json",
     ]);
 
@@ -37,7 +45,9 @@ describe("built web privacy contract", () => {
   });
 
   it("keeps every browser request on the DeviceBridge origin", () => {
-    const html = readFileSync(resolve(outputRoot, "index.html"), "utf8");
+    const html = ["index.html", "setup.html"]
+      .map((page) => readFileSync(resolve(outputRoot, page), "utf8"))
+      .join("\n");
     const runtimeUrls = [...html.matchAll(/(?:src|href)="([^"]+)"/g)].map(
       (match) => match[1] ?? "",
     );

@@ -9,7 +9,7 @@
       content="Локальный браузерный интерфейс DeviceBridge для связи с Android-устройством."
     />
     <link rel="icon" href="/src/favicon.svg" type="image/svg+xml" />
-    <title>DeviceBridge — локальная связь</title>
+    <title>DeviceBridge - локальная связь</title>
     <script data-role="theme-bootstrap">
       (() => {
         const key = "devicebridge.theme.v1";
@@ -120,11 +120,11 @@
           <dl class="version-list" data-role="version-data" hidden>
             <div data-role="device-row" hidden>
               <dt>Android-устройство</dt>
-              <dd data-role="device-name">—</dd>
+              <dd data-role="device-name">-</dd>
             </div>
             <div data-role="session-count-row" hidden>
               <dt>Активных браузеров</dt>
-              <dd data-role="session-count">—</dd>
+              <dd data-role="session-count">-</dd>
             </div>
           </dl>
 
@@ -165,6 +165,33 @@
               <path d="m6 9 6 6 6-6"></path>
             </svg>
           </button>
+          <p class="secure-note" data-role="secure-connection-note" hidden>
+            <span class="secure-note__icon" aria-hidden="true">✓</span>
+            <span class="secure-note__body">
+              <span>Соединение с телефоном зашифровано</span>
+              <span class="secure-note__detail">
+                Сохраните эту страницу в закладки, чтобы сразу открывать защищённую версию.
+              </span>
+            </span>
+          </p>
+          <div
+            class="untrusted-note"
+            data-role="untrusted-certificate-note"
+            role="alert"
+            hidden
+          >
+            <span class="untrusted-note__icon" aria-hidden="true">!</span>
+            <span class="untrusted-note__body">
+              <strong>Сертификат телефона не установлен</strong>
+              <span class="untrusted-note__detail">
+                Браузер открыл страницу без проверки сертификата, поэтому не предупредит о
+                подмене. Установите сертификат и полностью перезапустите браузер.
+              </span>
+              <a class="primary-button untrusted-note__action" data-role="install-certificate-link" href="/">
+                Установить сертификат
+              </a>
+            </span>
+          </div>
           <p
             class="visually-hidden"
             data-role="preference-announcer"
@@ -202,7 +229,7 @@
             <input id="remember-browser" name="remember-browser" type="checkbox" />
             <span>
               Запомнить этот браузер
-              <small>Доступ можно отозвать на телефоне; срок — не более 30 дней.</small>
+              <small>Доступ можно отозвать на телефоне; срок - не более 30 дней.</small>
             </span>
           </label>
           <button class="primary-button" data-action="pair" type="submit">

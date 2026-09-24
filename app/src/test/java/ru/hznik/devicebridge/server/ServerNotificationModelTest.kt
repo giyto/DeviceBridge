@@ -47,6 +47,22 @@ class ServerNotificationModelTest {
         assertFalse(stopping.showStopAction)
     }
 
+
+    @Test
+    fun secureServerShowsThePlainEntryAddress() {
+        val running = requireNotNull(
+            factory.create(
+                ServerLifecycleState.Running(
+                    generation = 1,
+                    endpoint = ServerEndpoint("192.168.1.24", 8_787, secure = true),
+                    startedAtElapsedRealtimeMs = 10,
+                ),
+            ),
+        )
+
+        assertTrue(running.text.startsWith("http://192.168.1.24:8787 "))
+    }
+
     @Test
     fun idleCountdownAddsStopTimeOnlyWhileItRuns() {
         val running = ServerLifecycleState.Running(

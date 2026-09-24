@@ -20,4 +20,6 @@ interface SettingsRepository {
     suspend fun updateAutoAcceptTrustedFiles(enabled: Boolean): SettingsUpdateResult
 
     suspend fun updateIdleStopTimeout(value: IdleStopTimeout): SettingsUpdateResult
+
+    suspend fun updateSecureMode(enabled: Boolean): SettingsUpdateResult
 }

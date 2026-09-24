@@ -173,6 +173,18 @@ class DataStoreSettingsRepositoryTest {
     }
 
     @Test
+    fun secureModeIsOffByDefaultAndPersists() = runTest {
+        val dataStore = InMemoryPreferencesDataStore()
+        val repository = DataStoreSettingsRepository(dataStore)
+
+        assertEquals(false, repository.settings.first().secureModeEnabled)
+        assertTrue(repository.updateSecureMode(true) is SettingsUpdateResult.Updated)
+        assertEquals(true, DataStoreSettingsRepository(dataStore).settings.first().secureModeEnabled)
+        repository.updateSecureMode(false)
+        assertEquals(false, DataStoreSettingsRepository(dataStore).settings.first().secureModeEnabled)
+    }
+
+    @Test
     fun debugIdleStopIsRejectedAndIgnoredOutsideDebugBuilds() = runTest {
         val dataStore = InMemoryPreferencesDataStore()
         val release = DataStoreSettingsRepository(dataStore)

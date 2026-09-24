@@ -522,6 +522,7 @@ fun Application.installFileRoutes(
                 origin = call.request.header(HttpHeaders.Origin),
                 allowedHosts = allowedHosts(),
                 allowMissingOrigin = true,
+                originScheme = call.originScheme(),
             )
             if (security is RequestGuardResult.Rejected) {
                 call.respondText("Not found", status = HttpStatusCode.NotFound)
@@ -722,6 +723,7 @@ private suspend fun ApplicationCall.requireFileJsonRequest(
         allowedHosts = allowedHosts,
         maxBodyBytes = MAX_FILE_CONTROL_JSON_BYTES.toLong(),
         bodyTooLargeStatus = HttpStatusCode.PayloadTooLarge,
+        originScheme = originScheme(),
     )
     if (result is RequestGuardResult.Rejected) {
         if (result.status == HttpStatusCode.PayloadTooLarge) {

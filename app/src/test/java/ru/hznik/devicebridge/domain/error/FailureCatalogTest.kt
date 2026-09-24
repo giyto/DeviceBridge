@@ -73,6 +73,11 @@ class FailureCatalogTest {
                 FailureSeverity.RECOVERABLE,
                 RecoveryAction.RETRY,
             ),
+            ServerLifecycleError.SecureCertificateUnavailable to expected(
+                FailureCode.SECURE_CERTIFICATE_UNAVAILABLE,
+                FailureSeverity.RECOVERABLE,
+                RecoveryAction.RESET_CERTIFICATE,
+            ),
         )
 
         cases.forEach { (source, expected) ->

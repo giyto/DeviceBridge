@@ -28,6 +28,7 @@ internal object SettingsPreferenceKeys {
     val effectiveFileLimitBytes = longPreferencesKey("effective_file_limit_bytes")
     val autoAcceptTrustedFiles = booleanPreferencesKey("auto_accept_trusted_files")
     val idleStopTimeout = stringPreferencesKey("idle_stop_timeout")
+    val secureModeEnabled = booleanPreferencesKey("secure_mode_enabled")
 }
 
 class DataStoreSettingsRepository(
@@ -117,6 +118,11 @@ class DataStoreSettingsRepository(
         }
     }
 
+    override suspend fun updateSecureMode(enabled: Boolean): SettingsUpdateResult =
+        update { preferences ->
+            preferences[SettingsPreferenceKeys.secureModeEnabled] = enabled
+        }
+
     private suspend fun update(
         transform: suspend (androidx.datastore.preferences.core.MutablePreferences) -> Unit,
     ): SettingsUpdateResult {
@@ -160,6 +166,7 @@ class DataStoreSettingsRepository(
                 preferences[SettingsPreferenceKeys.idleStopTimeout],
                 allowDebug = allowDebugIdleTimeout,
             ),
+            secureModeEnabled = preferences[SettingsPreferenceKeys.secureModeEnabled] ?: false,
         )
     }
 }

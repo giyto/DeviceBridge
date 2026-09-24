@@ -285,6 +285,7 @@ class HomeViewModel @Inject constructor(
             is ServerLifecycleState.Running -> ServerSessionUiState(
                 status = HomeServerStatus.Running,
                 localAddress = endpoint.url,
+                secureMode = endpoint.secure,
                 uptimeSeconds = ((nowMs - startedAtElapsedRealtimeMs) / 1_000)
                     .coerceAtLeast(0),
             )
@@ -405,6 +406,8 @@ class HomeViewModel @Inject constructor(
             "Android не разрешил фоновый запуск. Откройте приложение и повторите."
         ServerLifecycleError.ServerStartFailed -> "Не удалось запустить локальный сервер."
         ServerLifecycleError.StopTimedOut -> "Остановка заняла слишком много времени."
+        ServerLifecycleError.SecureCertificateUnavailable ->
+            "Сертификат защищённого режима недоступен. Сбросьте его в настройках."
         is ServerLifecycleError.Unexpected -> "Произошла непредвиденная ошибка сервера."
     }
 }

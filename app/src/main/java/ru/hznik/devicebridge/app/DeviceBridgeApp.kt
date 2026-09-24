@@ -60,6 +60,7 @@ import ru.hznik.devicebridge.feature.settings.SettingsScreen
 import ru.hznik.devicebridge.feature.settings.SettingsAction
 import ru.hznik.devicebridge.feature.settings.SettingsEffect
 import ru.hznik.devicebridge.feature.settings.SettingsViewModel
+import ru.hznik.devicebridge.data.tls.FileProviderRootCertificateExporter
 import ru.hznik.devicebridge.feature.text.TextScreen
 import ru.hznik.devicebridge.feature.text.SharedTextDraft
 import ru.hznik.devicebridge.feature.text.TextAction
@@ -107,9 +108,10 @@ fun DeviceBridgeApp(
     homeContent: @Composable (
         onOpenText: () -> Unit,
         onOpenFiles: () -> Unit,
-    ) -> Unit = { onOpenText, onOpenFiles ->
+        onOpenSettings: () -> Unit,
+    ) -> Unit = { onOpenText, onOpenFiles, onOpenSettings ->
         val homeViewModel: HomeViewModel = hiltViewModel()
-        HomeRoute(homeViewModel, onOpenText, onOpenFiles)
+        HomeRoute(homeViewModel, onOpenText, onOpenFiles, onOpenSettings)
     },
     textContent: @Composable (
         onBack: () -> Unit,
@@ -276,6 +278,15 @@ fun DeviceBridgeApp(
                     {
                         navController.navigate(FILE_ROUTE) { launchSingleTop = true }
                     },
+                    {
+                        navController.navigate(TopLevelDestination.Settings.route) {
+                            popUpTo(navController.graph.findStartDestination().id) {
+                                saveState = true
+                            }
+                            launchSingleTop = true
+                            restoreState = true
+                        }
+                    },
                 )
             }
             composable(TopLevelDestination.History.route) {
@@ -366,11 +377,26 @@ private fun SettingsRoute(viewModel: SettingsViewModel) {
 
     LaunchedEffect(viewModel, destinationPicker) {
         viewModel.effects.collect { effect ->
-            if (effect == SettingsEffect.ChooseDestination) {
-                val initialUri = viewModel.uiState.value.settings.destinationTree
-                    ?.value
-                    ?.let(Uri::parse)
-                destinationPicker.launch(initialUri)
+            when (effect) {
+                SettingsEffect.ChooseDestination -> {
+                    val initialUri = viewModel.uiState.value.settings.destinationTree
+                        ?.value
+                        ?.let(Uri::parse)
+                    destinationPicker.launch(initialUri)
+                }
+                is SettingsEffect.ShareCertificate -> {
+                    val uri = Uri.parse(effect.contentUri)
+                    val send = Intent(Intent.ACTION_SEND)
+                        .setType(FileProviderRootCertificateExporter.MIME_TYPE)
+                        .putExtra(Intent.EXTRA_STREAM, uri)
+                        .putExtra(Intent.EXTRA_TITLE, FileProviderRootCertificateExporter.FILE_NAME)
+                        .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                    send.clipData = android.content.ClipData.newRawUri(
+                        FileProviderRootCertificateExporter.FILE_NAME,
+                        uri,
+                    )
+                    context.startActivity(Intent.createChooser(send, "Поделиться сертификатом"))
+                }
             }
         }
     }
@@ -386,6 +412,7 @@ private fun HomeRoute(
     viewModel: HomeViewModel,
     onOpenText: () -> Unit,
     onOpenFiles: () -> Unit,
+    onOpenSettings: () -> Unit,
 ) {
     val context = LocalContext.current
     val activity = context.findActivity()
@@ -436,6 +463,7 @@ private fun HomeRoute(
         onAction = viewModel::onAction,
         onOpenText = onOpenText,
         onOpenFiles = onOpenFiles,
+        onOpenSettings = onOpenSettings,
     )
 }
 

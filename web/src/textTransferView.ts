@@ -220,7 +220,7 @@ function createItem(
   const manualLabel = documentRef.createElement("label");
   const manualId = `manual-copy-${item.messageId}`;
   manualLabel.htmlFor = manualId;
-  manualLabel.textContent = "Автокопирование недоступно — выделите текст вручную";
+  manualLabel.textContent = "Автокопирование недоступно - выделите текст вручную";
   const manualField = documentRef.createElement("textarea");
   manualField.id = manualId;
   manualField.readOnly = true;

@@ -3,6 +3,7 @@ package ru.hznik.devicebridge.feature.settings
 import ru.hznik.devicebridge.domain.repository.ThemePreferenceRepository
 import ru.hznik.devicebridge.domain.settings.ThemePreference
 import kotlinx.coroutines.async
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.first
@@ -26,6 +27,13 @@ import org.junit.Before
 import org.junit.Test
 import ru.hznik.devicebridge.domain.file.HARD_MAX_FILE_BYTES
 import ru.hznik.devicebridge.domain.repository.SettingsRepository
+import ru.hznik.devicebridge.data.tls.LocalCertificateAuthority
+import ru.hznik.devicebridge.data.tls.RootCertificateStatus
+import ru.hznik.devicebridge.data.tls.SecureModeController
+import ru.hznik.devicebridge.data.tls.SoftwareTlsKeyStore
+import ru.hznik.devicebridge.domain.model.ServerLifecycleState
+import ru.hznik.devicebridge.domain.model.ServerStopReason
+import ru.hznik.devicebridge.domain.repository.ServerLifecycleRepository
 import ru.hznik.devicebridge.domain.repository.BrowserSessionRepository
 import ru.hznik.devicebridge.domain.repository.TrustedBrowserRepository
 import ru.hznik.devicebridge.domain.settings.DestinationTree
@@ -371,6 +379,90 @@ class SettingsViewModelTest {
     }
 
     @Test
+    fun secureModeTurnsOnAtOnceWhileStoppedAndShowsTheFingerprint() = runTest(dispatcher) {
+        val lifecycle = FakeLifecycle()
+        val viewModel = viewModel(FakeSettingsRepository(), lifecycle = lifecycle)
+        runCurrent()
+        assertEquals(RootCertificateStatus.NotCreated, viewModel.uiState.value.rootCertificate)
+
+        viewModel.onAction(SettingsAction.SecureModeToggled(true))
+        runCurrent()
+
+        val state = viewModel.uiState.value
+        assertTrue(state.settings.secureModeEnabled)
+        assertNull(state.pendingSecureModeChange)
+        assertTrue(state.rootCertificate is RootCertificateStatus.Ready)
+        assertEquals(emptyList<String>(), lifecycle.commands)
+    }
+
+    @Test
+    fun secureModeAsksBeforeRestartingARunningServer() = runTest(dispatcher) {
+        val lifecycle = FakeLifecycle().apply { state.value = FakeLifecycle.RUNNING }
+        val viewModel = viewModel(FakeSettingsRepository(), lifecycle = lifecycle)
+        runCurrent()
+
+        viewModel.onAction(SettingsAction.SecureModeToggled(true))
+        runCurrent()
+        assertEquals(SecureModeChange.Toggle(true), viewModel.uiState.value.pendingSecureModeChange)
+        assertFalse(viewModel.uiState.value.settings.secureModeEnabled)
+
+        viewModel.onAction(SettingsAction.SecureModeChangeDismissed)
+        runCurrent()
+        assertNull(viewModel.uiState.value.pendingSecureModeChange)
+        assertFalse(viewModel.uiState.value.settings.secureModeEnabled)
+
+        viewModel.onAction(SettingsAction.SecureModeToggled(true))
+        viewModel.onAction(SettingsAction.SecureModeChangeConfirmed)
+        runCurrent()
+        assertTrue(viewModel.uiState.value.settings.secureModeEnabled)
+        assertEquals(listOf("stop", "start"), lifecycle.commands)
+    }
+
+    @Test
+    fun certificateResetIsConfirmedAndLeavesANewFingerprintAndNotice() = runTest(dispatcher) {
+        val viewModel = viewModel(FakeSettingsRepository())
+        runCurrent()
+        viewModel.onAction(SettingsAction.SecureModeToggled(true))
+        runCurrent()
+        val before = viewModel.uiState.value.rootCertificate as RootCertificateStatus.Ready
+
+        viewModel.onAction(SettingsAction.ResetCertificateClicked)
+        assertEquals(SecureModeChange.ResetCertificate, viewModel.uiState.value.pendingSecureModeChange)
+        viewModel.onAction(SettingsAction.SecureModeChangeConfirmed)
+        runCurrent()
+
+        val after = viewModel.uiState.value.rootCertificate as RootCertificateStatus.Ready
+        assertFalse(before.fingerprints == after.fingerprints)
+        assertTrue(viewModel.uiState.value.certificateWasReset)
+        viewModel.onAction(SettingsAction.CertificateResetNoticeDismissed)
+        assertFalse(viewModel.uiState.value.certificateWasReset)
+    }
+
+    @Test
+    fun sharingTheCertificateOpensTheShareSheetOrExplainsTheFailure() = runTest(dispatcher) {
+        val viewModel = viewModel(FakeSettingsRepository())
+        runCurrent()
+        val effects = mutableListOf<SettingsEffect>()
+        val collecting = backgroundScope.launch { viewModel.effects.collect { effects += it } }
+
+        viewModel.onAction(SettingsAction.ShareCertificateClicked)
+        runCurrent()
+
+        assertEquals(listOf<SettingsEffect>(SettingsEffect.ShareCertificate(SHARED_CERTIFICATE_URI)), effects)
+        assertNull(viewModel.uiState.value.certificateShareError)
+
+        val failing = viewModel(
+            FakeSettingsRepository(),
+            certificateExporter = ru.hznik.devicebridge.data.tls.RootCertificateExporter { null },
+        )
+        runCurrent()
+        failing.onAction(SettingsAction.ShareCertificateClicked)
+        runCurrent()
+        assertEquals("Не удалось подготовить файл сертификата.", failing.uiState.value.certificateShareError)
+        collecting.cancel()
+    }
+
+    @Test
     fun idleStopSelectionIsSavedOnceAndReflectedInState() = runTest(dispatcher) {
         val repository = FakeSettingsRepository()
         val viewModel = viewModel(repository)
@@ -404,6 +496,9 @@ class SettingsViewModelTest {
         sessionRepository: BrowserSessionRepository = FakeBrowserSessionRepository(trustedRepository),
         themeRepository: ThemePreferenceRepository = FakeThemePreferenceRepository(),
         partialUploads: ru.hznik.devicebridge.data.file.PartialUploadStore = FakePartialUploadStore(),
+        lifecycle: FakeLifecycle = FakeLifecycle(),
+        certificateExporter: ru.hznik.devicebridge.data.tls.RootCertificateExporter =
+            ru.hznik.devicebridge.data.tls.RootCertificateExporter { SHARED_CERTIFICATE_URI },
     ) = SettingsViewModel(
         observeSettings = ObserveSettingsUseCase(repository),
         updateDeviceName = UpdateDeviceNameUseCase(repository),
@@ -417,7 +512,42 @@ class SettingsViewModelTest {
         revokeAllTrustedBrowsers = RevokeAllTrustedBrowsersUseCase(sessionRepository),
         themePreferenceRepository = themeRepository,
         partialUploads = partialUploads,
+        secureMode = SecureModeController(
+            updateSetting = repository::updateSecureMode,
+            awaitSettingApplied = {},
+            lifecycle = lifecycle,
+            authority = LocalCertificateAuthority(
+                SoftwareTlsKeyStore(),
+                java.nio.file.Files.createTempDirectory("settings-tls").toFile(),
+            ),
+            io = dispatcher,
+        ),
+        certificateExporter = certificateExporter,
     )
+
+    class FakeLifecycle : ServerLifecycleRepository {
+        override val state = MutableStateFlow<ServerLifecycleState>(ServerLifecycleState.Stopped)
+        override val lastStopReason: StateFlow<ServerStopReason?> = MutableStateFlow(null)
+        val commands = mutableListOf<String>()
+
+        override suspend fun start() {
+            commands += "start"
+            state.value = RUNNING
+        }
+
+        override suspend fun stop(reason: ServerStopReason) {
+            commands += "stop"
+            state.value = ServerLifecycleState.Stopped
+        }
+
+        companion object {
+            val RUNNING = ServerLifecycleState.Running(
+                1,
+                ru.hznik.devicebridge.domain.model.ServerEndpoint("192.168.1.24", 8_787),
+                0,
+            )
+        }
+    }
 
     private class FakePartialUploadStore(
         count: Int = 0,
@@ -566,9 +696,16 @@ class SettingsViewModelTest {
             current.value = current.value.copy(idleStopTimeout = value)
             return SettingsUpdateResult.Updated(current.value)
         }
+
+        override suspend fun updateSecureMode(enabled: Boolean): SettingsUpdateResult {
+            current.value = current.value.copy(secureModeEnabled = enabled)
+            return SettingsUpdateResult.Updated(current.value)
+        }
     }
 
     private companion object {
+        const val SHARED_CERTIFICATE_URI =
+            "content://ru.hznik.devicebridge.certificates/shared_certificate/DeviceBridge-CA.crt"
         val TEST_TREE = DestinationTree("content://documents/tree/devicebridge")
     }
 }

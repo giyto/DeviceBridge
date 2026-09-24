@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="ru" data-theme="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="light dark" />
+    <link rel="icon" href="/src/favicon.svg" type="image/svg+xml" />
+    <title>DeviceBridge - установка сертификата</title>
+    <link rel="stylesheet" href="/src/styles.css" />
+    <link rel="stylesheet" href="/src/setup/setup.css" />
+  </head>
+  <body>
+    <main id="main-content" class="container setup">
+      <section class="hero" aria-labelledby="setup-title">
+        <h1 id="setup-title">DeviceBridge</h1>
+        <p class="hero__lead">
+          Телефон работает в защищённом режиме: соединение с ним шифруется (HTTPS). Чтобы
+          браузер доверял телефону, один раз установите его сертификат на этот компьютер.
+        </p>
+      </section>
+
+      <section
+        class="status-card setup__status"
+        data-role="trust-status"
+        data-state="checking"
+        role="status"
+        aria-live="polite"
+        aria-atomic="true"
+      >
+        <h2 data-role="trust-title">Проверяем, доверяет ли браузер телефону…</h2>
+        <p data-role="trust-detail">Это займёт несколько секунд.</p>
+        <button class="secondary-button" data-action="check-again" type="button">
+          Проверить снова
+        </button>
+      </section>
+
+      <ol class="setup__steps">
+        <li class="setup__step">
+          <h2>Скачайте сертификат телефона</h2>
+          <a
+            class="primary-button setup__download"
+            data-role="download"
+            href="/devicebridge-ca.crt"
+            download="DeviceBridge-CA.crt"
+          >
+            Скачать сертификат
+          </a>
+          <p class="setup__note setup__note--safe" role="note" data-role="fingerprint-warning">
+            Надёжнее, особенно в чужой Wi-Fi: «Поделиться сертификатом» на телефоне
+            (Настройки → Защищённое соединение). Если скачиваете здесь, сверьте первые и последние
+            8 символов отпечатка с телефоном. Не совпадают - не устанавливайте.
+          </p>
+        </li>
+
+        <li class="setup__step">
+          <h2>Установите его как доверенный</h2>
+          <div class="setup__tabs" role="tablist" aria-label="Система или браузер">
+            <button type="button" role="tab" data-platform="windows" aria-controls="guide-windows">
+              Windows
+            </button>
+            <button type="button" role="tab" data-platform="macos" aria-controls="guide-macos">
+              macOS
+            </button>
+            <button type="button" role="tab" data-platform="firefox" aria-controls="guide-firefox">
+              Firefox
+            </button>
+            <button type="button" role="tab" data-platform="linux" aria-controls="guide-linux">
+              Linux
+            </button>
+          </div>
+
+          <div class="setup__guide" id="guide-windows" role="tabpanel" data-guide="windows">
+            <p>Для Chrome, Edge и Яндекс Браузера в Windows:</p>
+            <ol>
+              <li>Откройте скачанный файл DeviceBridge-CA.crt и нажмите «Установить сертификат…».</li>
+              <li>Выберите «Текущий пользователь» и нажмите «Далее».</li>
+              <li>
+                Выберите «Поместить все сертификаты в следующее хранилище», нажмите «Обзор» и
+                укажите «Доверенные корневые центры сертификации». Затем «Далее» и «Готово».
+              </li>
+              <li>
+                Windows покажет предупреждение с полем «Отпечаток (sha1)». Сверьте его с
+                отпечатком SHA-1 на телефоне. Совпадает - нажмите «Да», нет - «Нет».
+              </li>
+              <li>Закройте все окна браузера, откройте его снова и вернитесь на эту страницу.</li>
+            </ol>
+          </div>
+
+          <div class="setup__guide" id="guide-macos" role="tabpanel" data-guide="macos" hidden>
+            <p>Для Safari, Chrome и Edge в macOS:</p>
+            <ol>
+              <li>Откройте скачанный файл: сертификат добавится в «Связку ключей», раздел «Вход».</li>
+              <li>
+                Найдите в «Связке ключей» сертификат «DeviceBridge Local CA» и откройте его.
+                Сверьте «Отпечаток SHA-256» с телефоном (Настройки → Подробнее: SHA-256).
+              </li>
+              <li>
+                Раскройте «Доверие», выберите «Всегда доверять», закройте окно и подтвердите
+                паролем.
+              </li>
+              <li>Перезапустите браузер и вернитесь на эту страницу.</li>
+            </ol>
+          </div>
+
+          <div class="setup__guide" id="guide-firefox" role="tabpanel" data-guide="firefox" hidden>
+            <p>Firefox хранит сертификаты отдельно от системы:</p>
+            <ol>
+              <li>Откройте «Настройки» → «Приватность и защита» → «Сертификаты» → «Просмотр сертификатов…».</li>
+              <li>На вкладке «Центры сертификации» нажмите «Импортировать…» и выберите DeviceBridge-CA.crt.</li>
+              <li>
+                Нажмите «Просмотреть» и сверьте отпечаток с телефоном. Если совпадает, отметьте
+                «Доверять при идентификации веб-сайтов» и нажмите «ОК».
+              </li>
+              <li>Вернитесь на эту страницу.</li>
+            </ol>
+          </div>
+
+          <div class="setup__guide" id="guide-linux" role="tabpanel" data-guide="linux" hidden>
+            <p>Для Chrome и Chromium в Linux:</p>
+            <ol>
+              <li>Откройте адрес chrome://certificate-manager в новой вкладке.</li>
+              <li>
+                В разделе «Установленные вами» → «Доверенные сертификаты» нажмите
+                «Импортировать» и выберите DeviceBridge-CA.crt.
+              </li>
+              <li>Сверьте отпечаток с телефоном и вернитесь на эту страницу.</li>
+            </ol>
+          </div>
+        </li>
+
+        <li class="setup__step">
+          <h2>Откройте защищённую страницу</h2>
+          <p>
+            Когда браузер начнёт доверять телефону, эта страница сама откроет защищённую
+            версию DeviceBridge. Браузер один раз подключится заново по коду с телефона.
+          </p>
+          <p class="setup__note setup__note--danger" role="note" data-role="proceed-warning">
+            Красный экран «Подключение не защищено»? Не нажимайте «Всё равно перейти»,
+            сначала установите сертификат.
+          </p>
+        </li>
+      </ol>
+    </main>
+
+    <script type="module" src="/src/setup/main.ts"></script>
+  </body>
+</html>
