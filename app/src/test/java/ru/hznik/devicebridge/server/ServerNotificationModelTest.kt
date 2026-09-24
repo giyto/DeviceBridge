@@ -86,11 +86,50 @@ class ServerNotificationModelTest {
         val none = requireNotNull(factory.create(running, activeSessionCount = 0))
         val two = requireNotNull(factory.create(running, activeSessionCount = 2))
 
-        assertTrue(none.text.contains("0 браузеров"))
-        assertTrue(two.text.contains("2 браузеров"))
+        assertTrue(none.text.contains(" • 0 браузеров • "))
+        assertTrue(two.text.contains(" • 2 браузера • "))
         assertFalse(two.text.contains("code", ignoreCase = true))
         assertFalse(two.text.contains("token", ignoreCase = true))
         assertFalse(two.text.contains("bearer", ignoreCase = true))
+    }
+
+    @Test
+    fun runningModelUsesRussianPluralForConnectedBrowserCount() {
+        val running = ServerLifecycleState.Running(
+            generation = 1,
+            endpoint = ServerEndpoint("192.168.1.24", 49_321),
+            startedAtElapsedRealtimeMs = 10,
+        )
+
+        mapOf(
+            1 to "1 браузер",
+            2 to "2 браузера",
+            4 to "4 браузера",
+            5 to "5 браузеров",
+            11 to "11 браузеров",
+            12 to "12 браузеров",
+            21 to "21 браузер",
+            22 to "22 браузера",
+        ).forEach { (count, expected) ->
+            val model = requireNotNull(factory.create(running, activeSessionCount = count))
+            assertEquals(
+                "http://192.168.1.24:49321 • $expected • Передача не выполняется",
+                model.text,
+            )
+        }
+    }
+
+    @Test
+    fun androidPublisherCountsOnlyLiveBrowserConnections() {
+        val source = Files.readString(
+            Path.of(
+                "src/main/java/ru/hznik/devicebridge/server/" +
+                    "AndroidServerNotificationController.kt",
+            ),
+        )
+
+        assertTrue(source.contains("connectedSessionIds.value.size"))
+        assertFalse(source.contains("sessions.size"))
     }
 
     @Test
@@ -167,5 +206,6 @@ class ServerNotificationModelTest {
 
         assertTrue(source.contains("BrowserSessionRepository"))
         assertTrue(source.contains("combine("))
+        assertTrue(source.contains("browserSessionRepository.connectedSessionIds"))
     }
 }

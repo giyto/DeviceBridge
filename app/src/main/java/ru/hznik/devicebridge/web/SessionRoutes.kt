@@ -595,7 +595,10 @@ fun Application.installSessionRoutes(
                         protocolVersion = SESSION_PROTOCOL_VERSION,
                         sessionId = authorized.session.id.value,
                         connected = true,
-                        activeSessionCount = coordinator.state.value.sessions.size,
+                        // Browsers with a live connection; the caller counts even before its
+                        // event socket opens, a closed tab does not.
+                        activeSessionCount =
+                            (coordinator.connectedSessionIds.value + authorized.session.id).size,
                         effectiveFileLimitBytes = effectiveFileLimitBytes(
                             effectiveFileLimitBytes(),
                         ),

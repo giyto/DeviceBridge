@@ -320,6 +320,8 @@ class TextViewModelTest {
     ) : BrowserSessionRepository {
         val mutableState = MutableStateFlow(initial)
         override val state: StateFlow<BrowserSessionState> = mutableState
+        override val connectedSessionIds: StateFlow<Set<BrowserSessionId>> =
+            MutableStateFlow(emptySet())
 
         override suspend fun approve(requestId: PairingRequestId) = Unit
         override suspend fun deny(requestId: PairingRequestId) = Unit

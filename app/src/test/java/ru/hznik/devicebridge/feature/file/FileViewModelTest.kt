@@ -347,6 +347,8 @@ class FileViewModelTest {
     private class FakeSessions(initial: BrowserSessionState) : BrowserSessionRepository {
         val mutable = MutableStateFlow(initial)
         override val state: StateFlow<BrowserSessionState> = mutable
+        override val connectedSessionIds: StateFlow<Set<BrowserSessionId>> =
+            MutableStateFlow(emptySet())
         override suspend fun approve(requestId: PairingRequestId) = Unit
         override suspend fun deny(requestId: PairingRequestId) = Unit
         override suspend fun revoke(sessionId: BrowserSessionId) = Unit

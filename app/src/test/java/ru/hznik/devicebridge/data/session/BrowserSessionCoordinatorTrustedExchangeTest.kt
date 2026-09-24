@@ -120,6 +120,7 @@ class BrowserSessionCoordinatorTrustedExchangeTest {
 
         assertEquals(0, ordinaryConnection.closeCalls)
         assertEquals(1, trustedConnection.closeCalls)
+        assertEquals(setOf(ordinary.sessionId), coordinator.connectedSessionIds.value)
         assertNotNull(coordinator.authenticate(handle, ordinary.token))
         assertNull(coordinator.authenticate(handle, firstTrusted.token))
 

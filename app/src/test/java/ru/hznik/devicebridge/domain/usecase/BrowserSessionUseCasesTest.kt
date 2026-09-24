@@ -38,6 +38,8 @@ class BrowserSessionUseCasesTest {
     private class FakeBrowserSessionRepository : BrowserSessionRepository {
         override val state: StateFlow<BrowserSessionState> =
             MutableStateFlow(BrowserSessionState.inactive())
+        override val connectedSessionIds: StateFlow<Set<BrowserSessionId>> =
+            MutableStateFlow(emptySet())
         val approved = mutableListOf<PairingRequestId>()
         val denied = mutableListOf<PairingRequestId>()
         val revoked = mutableListOf<BrowserSessionId>()
