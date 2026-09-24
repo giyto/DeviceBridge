@@ -51,7 +51,7 @@ class AndroidServerNotificationController @Inject constructor(
         val model = requireNotNull(
             modelFactory.create(
                 state = state,
-                activeSessionCount = browserSessionRepository.state.value.sessions.size,
+                activeSessionCount = browserSessionRepository.connectedSessionIds.value.size,
                 hasActiveTextTransfer = textTransferRepository.hasActiveTransfer(),
                 activeFileTransfer = fileTransferRepository.activeNotificationTransfer(),
                 idleStopAtLocalTime = idleStopAtLocalTime(),
@@ -85,7 +85,7 @@ class AndroidServerNotificationController @Inject constructor(
     override fun publish(state: ServerLifecycleState) {
         val model = modelFactory.create(
             state = state,
-            activeSessionCount = browserSessionRepository.state.value.sessions.size,
+            activeSessionCount = browserSessionRepository.connectedSessionIds.value.size,
             hasActiveTextTransfer = textTransferRepository.hasActiveTransfer(),
             activeFileTransfer = fileTransferRepository.activeNotificationTransfer(),
             idleStopAtLocalTime = idleStopAtLocalTime(),

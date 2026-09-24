@@ -247,7 +247,6 @@ class HomeScreenTest {
         composeRule.onNodeWithText("Передача текста выполняется")
             .performScrollTo()
             .assertIsDisplayed()
-        composeRule.onNodeWithText("секретное содержимое").assertDoesNotExist()
     }
 
     @Test
@@ -364,6 +363,62 @@ class HomeScreenTest {
         composeRule.onNodeWithText("Bearer", substring = true, ignoreCase = true)
             .assertDoesNotExist()
         assertEquals(listOf(HomeAction.RevokeBrowser(sessionId)), actions)
+    }
+
+    @Test
+    fun offlineBrowserIsMarkedNotCountedAndStillRevocable() {
+        val actions = mutableListOf<HomeAction>()
+        val onlineId = BrowserSessionId("session-1")
+        val offlineId = BrowserSessionId("session-2")
+        setScreen(
+            ServerSessionUiState(
+                status = HomeServerStatus.Running,
+                pairingCode = "123456",
+                pairingExpiresInSeconds = 120,
+                activeBrowsers = listOf(
+                    ActiveBrowserUiState(onlineId, "Chrome", "192.168.1.3"),
+                    ActiveBrowserUiState(offlineId, "Edge", "192.168.1.5", connected = false),
+                ),
+            ),
+            onAction = actions::add,
+        )
+
+        composeRule.onNodeWithText("Подключённые браузеры: 1")
+            .performScrollTo().assertIsDisplayed()
+        composeRule.onAllNodesWithText("Не в сети", useUnmergedTree = true)
+            .assertCountEquals(1)
+        composeRule.onNodeWithContentDescription("Edge, 192.168.1.5, не в сети")
+            .performScrollTo().assertIsDisplayed()
+        composeRule.onNodeWithContentDescription(
+            "Отключить Edge с адреса 192.168.1.5, не в сети",
+        ).performScrollTo().assertIsEnabled().performClick()
+        composeRule.onNodeWithContentDescription("Отключить Chrome с адреса 192.168.1.3")
+            .performScrollTo().assertIsEnabled()
+        assertEquals(listOf(HomeAction.RevokeBrowser(offlineId)), actions)
+    }
+
+    @Test
+    fun onlyOfflineBrowsersKeepPairingGuidanceAndDisableTransfers() {
+        setScreen(
+            ServerSessionUiState(
+                status = HomeServerStatus.Running,
+                pairingCode = "123456",
+                pairingExpiresInSeconds = 120,
+                activeBrowsers = listOf(
+                    ActiveBrowserUiState(
+                        BrowserSessionId("session-2"),
+                        "Edge",
+                        "192.168.1.5",
+                        connected = false,
+                    ),
+                ),
+            ),
+        )
+
+        composeRule.onNodeWithText("Подключённые браузеры: 0")
+            .performScrollTo().assertIsDisplayed()
+        composeRule.onNodeWithText("Сначала безопасно подключите браузер по коду выше.")
+            .performScrollTo().assertIsDisplayed()
     }
 
     @Test

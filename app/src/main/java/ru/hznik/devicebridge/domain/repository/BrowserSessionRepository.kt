@@ -9,6 +9,12 @@ import ru.hznik.devicebridge.domain.trust.TrustedBrowserId
 interface BrowserSessionRepository {
     val state: StateFlow<BrowserSessionState>
 
+    /**
+     * Sessions that currently hold at least one live WebSocket connection. A session whose
+     * browser tab was closed stays in [state] (it can reconnect) but leaves this set.
+     */
+    val connectedSessionIds: StateFlow<Set<BrowserSessionId>>
+
     suspend fun approve(requestId: PairingRequestId)
 
     suspend fun approveAndRemember(requestId: PairingRequestId) = approve(requestId)

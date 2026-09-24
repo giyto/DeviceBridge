@@ -67,8 +67,8 @@ class DeviceBridgeTileService : TileService() {
         super.onStartListening()
         listeningJob?.cancel()
         listeningJob = applicationScope.launch(Dispatchers.Main.immediate) {
-            combine(coordinator.state, browserSessions.state) { state, sessions ->
-                ServerTilePolicy.model(state, sessions.sessions.size)
+            combine(coordinator.state, browserSessions.connectedSessionIds) { state, connected ->
+                ServerTilePolicy.model(state, connected.size)
             }
                 .distinctUntilChanged()
                 .collect(::render)
@@ -207,8 +207,8 @@ class ServerTileRefresher @Inject constructor(
     fun start(context: Context) {
         val appContext = context.applicationContext
         applicationScope.launch {
-            combine(coordinator.state, browserSessions.state) { state, sessions ->
-                ServerTilePolicy.model(state, sessions.sessions.size)
+            combine(coordinator.state, browserSessions.connectedSessionIds) { state, connected ->
+                ServerTilePolicy.model(state, connected.size)
             }
                 .distinctUntilChanged()
                 .drop(1)

@@ -67,6 +67,41 @@ class ProtectedSessionRouteTest {
         }
 
     @Test
+    fun statusCountsOnlyBrowsersWithLiveConnectionPlusCaller() =
+        withSessionRouteServer { server ->
+            val chrome = server.pairBrowser("Chrome")
+            val edge = server.pairBrowser("Edge")
+            fun chromeCount(): Int {
+                val response = server.request(
+                    "GET",
+                    "/api/v1/status",
+                    headers = mapOf(
+                        "Origin" to "http://${server.authority}",
+                        "Authorization" to "Bearer ${chrome.token}",
+                    ),
+                )
+                assertEquals(200, response.statusCode())
+                return SessionProtocolJson.decode<SessionStatusResponse>(response.body())
+                    .activeSessionCount
+            }
+
+            // Edge paired but its tab holds no event socket: it is not a connected browser.
+            assertEquals(1, chromeCount())
+
+            val edgeTab = ru.hznik.devicebridge.data.session.SessionConnection { }
+            runBlocking {
+                server.coordinator.attachConnection(BrowserSessionId(edge.sessionId), edgeTab)
+            }
+            assertEquals(2, chromeCount())
+
+            runBlocking {
+                server.coordinator.detachConnection(BrowserSessionId(edge.sessionId), edgeTab)
+            }
+            assertEquals(1, chromeCount())
+            assertEquals(2, server.coordinator.state.value.sessions.size)
+        }
+
+    @Test
     fun authorizedStatusPublishesOnlyEffectiveSettingsCapabilities() =
         withSessionRouteServer(effectiveFileLimitBytes = 512) { server ->
             val paired = server.pairBrowser("Chrome")

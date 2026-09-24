@@ -52,12 +52,16 @@ class ServerTilePolicyTest {
     }
 
     @Test
-    fun browserCountUsesRussianPlurals() {
-        assertEquals("1 браузер", ServerTilePolicy.formatBrowserCount(1))
-        assertEquals("4 браузера", ServerTilePolicy.formatBrowserCount(4))
-        assertEquals("5 браузеров", ServerTilePolicy.formatBrowserCount(5))
-        assertEquals("11 браузеров", ServerTilePolicy.formatBrowserCount(11))
-        assertEquals("21 браузер", ServerTilePolicy.formatBrowserCount(21))
+    fun tileAndRefresherCountOnlyBrowsersWithLiveConnection() {
+        val source = java.nio.file.Files.readString(
+            java.nio.file.Path.of(
+                "src/main/java/ru/hznik/devicebridge/server/DeviceBridgeTileService.kt",
+            ),
+        )
+
+        // Both the listening tile and the refresher that rebinds it follow live connections.
+        assertEquals(2, source.split("browserSessions.connectedSessionIds").size - 1)
+        assertFalse(source.contains("sessions.sessions.size"))
     }
 
     @Test

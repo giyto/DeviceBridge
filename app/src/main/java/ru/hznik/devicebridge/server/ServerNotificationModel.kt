@@ -20,6 +20,10 @@ data class FileNotificationProgress(
 
 class ServerNotificationModelFactory @Inject constructor() {
 
+    /**
+     * [activeSessionCount] is the number of browsers with a live connection right now, not the
+     * number of sessions that could still reconnect.
+     */
     fun create(
         state: ServerLifecycleState,
         activeSessionCount: Int = 0,
@@ -43,7 +47,7 @@ class ServerNotificationModelFactory @Inject constructor() {
         is ServerLifecycleState.Running -> ServerNotificationModel(
             title = "Сервер запущен",
             text = state.endpoint.url +
-                " • $activeSessionCount браузеров • " +
+                " • ${ServerTilePolicy.formatBrowserCount(activeSessionCount)} • " +
                 if (activeFileTransfer != null) {
                     activeFileTransfer.notificationText()
                 } else if (hasActiveTextTransfer) {

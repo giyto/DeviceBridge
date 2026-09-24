@@ -163,6 +163,7 @@ class BrowserSessionCoordinator(
     private val connections = LinkedHashMap<BrowserSessionId, MutableSet<SessionConnection>>()
     private val mutableState = MutableStateFlow(BrowserSessionState.inactive())
     private val mutableActiveConnectionCount = MutableStateFlow(0)
+    private val mutableConnectedSessionIds = MutableStateFlow<Set<BrowserSessionId>>(emptySet())
 
     @Volatile
     private var activeHandle: SessionGenerationHandle? = null
@@ -192,6 +193,9 @@ class BrowserSessionCoordinator(
      * as a browser tab closes its WebSocket, so idle detection can rely on it.
      */
     val activeConnectionCount: StateFlow<Int> = mutableActiveConnectionCount.asStateFlow()
+
+    override val connectedSessionIds: StateFlow<Set<BrowserSessionId>> =
+        mutableConnectedSessionIds.asStateFlow()
 
     suspend fun activate(generationId: ServerGenerationId): SessionGenerationHandle {
         val (handle, oldConnections) = mutex.withLock {
@@ -792,6 +796,7 @@ class BrowserSessionCoordinator(
 
     private fun publishConnectionCountLocked() {
         mutableActiveConnectionCount.value = connections.values.sumOf { it.size }
+        mutableConnectedSessionIds.value = connections.keys.toSet()
     }
 
     private suspend fun closeConnections(connections: List<SessionConnection>) {

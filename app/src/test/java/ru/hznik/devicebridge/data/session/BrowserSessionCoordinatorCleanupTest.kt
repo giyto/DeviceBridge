@@ -12,6 +12,7 @@ import org.junit.Test
 import ru.hznik.devicebridge.data.server.MonotonicClock
 import ru.hznik.devicebridge.data.session.security.CryptographicRandom
 import ru.hznik.devicebridge.data.session.security.SessionSecretGenerator
+import ru.hznik.devicebridge.domain.session.BrowserSessionId
 import ru.hznik.devicebridge.domain.session.BrowserSessionPhase
 import ru.hznik.devicebridge.domain.session.ServerGenerationId
 
@@ -77,6 +78,44 @@ class BrowserSessionCoordinatorCleanupTest {
         coordinator.attachConnection(second.sessionId, RecordingConnection())
         coordinator.closeGeneration(handle)
         assertEquals(0, coordinator.activeConnectionCount.value)
+    }
+
+    @Test
+    fun connectedSessionIdsFollowLiveTransportsWhileSessionsSurvive() = runTest {
+        val coordinator = coordinator()
+        val handle = coordinator.activate(ServerGenerationId(1))
+        val chrome = pair(coordinator, handle, "Chrome", "192.168.1.2", "123456")
+        val edge = pair(coordinator, handle, "Edge", "192.168.1.3", "654321")
+        assertEquals(emptySet<BrowserSessionId>(), coordinator.connectedSessionIds.value)
+
+        val chromeTab = RecordingConnection()
+        val chromeSecondTab = RecordingConnection()
+        coordinator.attachConnection(chrome.sessionId, chromeTab)
+        coordinator.attachConnection(chrome.sessionId, chromeSecondTab)
+        coordinator.attachConnection(edge.sessionId, RecordingConnection())
+        assertEquals(setOf(chrome.sessionId, edge.sessionId), coordinator.connectedSessionIds.value)
+
+        // One of two sockets closing keeps the browser connected.
+        coordinator.detachConnection(chrome.sessionId, chromeTab)
+        assertEquals(setOf(chrome.sessionId, edge.sessionId), coordinator.connectedSessionIds.value)
+
+        // Closing the last tab drops the browser from the set but keeps the session.
+        coordinator.detachConnection(chrome.sessionId, chromeSecondTab)
+        assertEquals(setOf(edge.sessionId), coordinator.connectedSessionIds.value)
+        assertEquals(2, coordinator.state.value.sessions.size)
+        assertEquals(chrome.sessionId, coordinator.authenticate(handle, chrome.token)?.id)
+
+        // Reloading the tab reconnects the same session.
+        coordinator.attachConnection(chrome.sessionId, RecordingConnection())
+        assertEquals(setOf(chrome.sessionId, edge.sessionId), coordinator.connectedSessionIds.value)
+
+        coordinator.revoke(chrome.sessionId)
+        assertEquals(setOf(edge.sessionId), coordinator.connectedSessionIds.value)
+        assertFalse(coordinator.attachConnection(chrome.sessionId, RecordingConnection()))
+        assertEquals(setOf(edge.sessionId), coordinator.connectedSessionIds.value)
+
+        coordinator.closeGeneration(handle)
+        assertEquals(emptySet<BrowserSessionId>(), coordinator.connectedSessionIds.value)
     }
 
     @Test

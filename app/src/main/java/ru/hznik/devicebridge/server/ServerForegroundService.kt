@@ -71,7 +71,11 @@ class ServerForegroundService : Service() {
         stateCollectionJob = applicationScope.launch {
             combine(
                 coordinator.state,
-                browserSessionRepository.state,
+                // Opening or closing a browser tab changes the count without touching the state.
+                combine(
+                    browserSessionRepository.state,
+                    browserSessionRepository.connectedSessionIds,
+                ) { _, _ -> },
                 textTransferRepository.state,
                 fileTransferRepository.state,
                 idleStopController.stopAtWallClockMs,

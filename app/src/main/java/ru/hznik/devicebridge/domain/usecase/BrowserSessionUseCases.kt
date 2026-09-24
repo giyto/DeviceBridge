@@ -11,6 +11,9 @@ class ObserveBrowserSessionsUseCase(
     private val repository: BrowserSessionRepository,
 ) {
     operator fun invoke(): StateFlow<BrowserSessionState> = repository.state
+
+    /** Sessions with a live WebSocket right now; a closed tab drops out of this set. */
+    fun connectedSessionIds(): StateFlow<Set<BrowserSessionId>> = repository.connectedSessionIds
 }
 
 class ApproveBrowserRequestUseCase(
