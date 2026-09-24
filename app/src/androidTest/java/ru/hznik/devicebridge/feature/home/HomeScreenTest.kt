@@ -331,6 +331,31 @@ class HomeScreenTest {
     }
 
     @Test
+    fun newPendingRequestIsScrolledIntoView() {
+        val running = ServerSessionUiState(
+            status = HomeServerStatus.Running,
+            localAddress = "http://192.168.1.24:8787",
+            pairingCode = "123456",
+            pairingExpiresInSeconds = 120,
+        )
+        var state by mutableStateOf(running)
+        composeRule.setContent {
+            DeviceBridgeTheme {
+                HomeScreen(uiState = state)
+            }
+        }
+
+        state = running.copy(
+            pendingBrowsers = listOf(
+                PendingBrowserUiState(PairingRequestId("edge-request"), "Edge", "192.168.1.2", 42),
+            ),
+        )
+
+        composeRule.onNodeWithContentDescription("Разрешить Edge с адреса 192.168.1.2")
+            .assertIsDisplayed()
+    }
+
+    @Test
     fun pendingBrowserCardsDispatchExactApproveAndDenyIds() {
         val actions = mutableListOf<HomeAction>()
         val edge = PairingRequestId("edge-request")

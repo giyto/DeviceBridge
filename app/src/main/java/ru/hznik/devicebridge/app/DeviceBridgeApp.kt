@@ -91,6 +91,9 @@ import kotlinx.coroutines.launch
 private const val TEXT_ROUTE = "text"
 private const val FILE_ROUTE = "files"
 
+/** A notification asked to show one screen: "home", "text" or "files". */
+data class OpenSectionRequest(val id: Long, val section: String)
+
 internal val LocalNavigationWidthOverride = staticCompositionLocalOf<Dp?> { null }
 
 @Composable
@@ -100,6 +103,8 @@ fun DeviceBridgeApp(
     sharedTextDraft: SharedTextDraft? = null,
     sharedFileDraft: SharedFileDraft? = null,
     startServerRequest: Long? = null,
+    openSectionRequest: OpenSectionRequest? = null,
+    onOpenSectionConsumed: (Long) -> Unit = {},
     onSharedTextConsumed: (Long) -> Unit = {},
     onSharedFileConsumed: (Long) -> Unit = {},
     completedFileRegistry: CompletedFileRegistry? = null,
@@ -333,6 +338,19 @@ fun DeviceBridgeApp(
         if (sharedFileDraft != null && currentRoute != null && currentRoute != FILE_ROUTE) {
             navController.navigate(FILE_ROUTE) { launchSingleTop = true }
         }
+    }
+    LaunchedEffect(openSectionRequest?.id, currentRoute != null) {
+        val request = openSectionRequest ?: return@LaunchedEffect
+        if (currentRoute == null) return@LaunchedEffect
+        val route = when (request.section) {
+            "text" -> TEXT_ROUTE
+            "files" -> FILE_ROUTE
+            else -> TopLevelDestination.Home.route
+        }
+        if (currentRoute != route) {
+            navController.navigate(route) { launchSingleTop = true }
+        }
+        onOpenSectionConsumed(request.id)
     }
 }
 

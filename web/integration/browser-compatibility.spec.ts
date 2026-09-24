@@ -1,4 +1,4 @@
-import { expect, type Page, test } from "@playwright/test";
+import { expect, type Page, test, type WebSocketRoute } from "@playwright/test";
 
 const MANIFEST = {
   protocolVersion: 1,
@@ -292,6 +292,103 @@ test("pasted clipboard image joins the file draft and uploads only after confirm
   expect(offers[0]!.items[0]!.displayName).toMatch(/^Скриншот .+\.png$/);
   expect(offers[0]!.items[0]!.mimeType).toBe("image/png");
   expect(offers[0]!.items[0]!.sizeBytes).toBe(8);
+});
+
+test("an HTTPS page notifies once about a phone text while the tab is hidden", async ({
+  page,
+  context,
+}) => {
+  const origin = "https://devicebridge.test";
+  await context.grantPermissions(["notifications"], { origin });
+  await page.addInitScript(() => {
+    const attention = { hidden: false };
+    const shown: { title: string; body?: string }[] = [];
+    Object.assign(window, { __attention: attention, __notifications: shown });
+    Object.defineProperty(document, "visibilityState", {
+      get: () => (attention.hidden ? "hidden" : "visible"),
+    });
+    document.hasFocus = () => !attention.hidden;
+    const Real = window.Notification;
+    class Recording extends Real {
+      constructor(title: string, options?: NotificationOptions) {
+        super(title, options);
+        shown.push({ title, body: options?.body });
+      }
+    }
+    window.Notification = Recording as typeof Notification;
+  });
+  // The dev server's files under an HTTPS origin: the page is a secure context, as in secure mode.
+  await page.route(`${origin}/**`, async (route) => {
+    const url = new URL(route.request().url());
+    const response = await route.fetch({ url: "http://127.0.0.1:4176" + url.pathname + url.search });
+    await route.fulfill({ response });
+  });
+  await page.addInitScript(() => sessionStorage.setItem("devicebridge.session.v1", "notification-token"));
+  await installManifest(page);
+  await page.route("**/api/v1/status", (route) => route.fulfill({
+    contentType: "application/json",
+    body: JSON.stringify(STATUS),
+  }));
+  let phone: WebSocketRoute | undefined;
+  await page.routeWebSocket("**/api/v1/events", (socket) => {
+    phone = socket;
+    socket.onMessage((message) => {
+      const value = JSON.parse(typeof message === "string" ? message : message.toString()) as {
+        type?: string;
+      };
+      if (value.type !== "session.auth") return;
+      socket.send(JSON.stringify({
+        protocolVersion: 1,
+        messageId: "notification-authenticated",
+        type: "session.authenticated",
+        timestamp: Date.now(),
+      }));
+      socket.send(JSON.stringify({
+        protocolVersion: 1,
+        messageId: "notification-snapshot",
+        type: "text.snapshot",
+        timestamp: Date.now(),
+        items: [],
+      }));
+    });
+  });
+
+  await page.goto(`${origin}/`);
+  await expectConnected(page);
+  await page.getByRole("button", { name: "Включить уведомления" }).click();
+  await expect(page.getByRole("button", { name: "Выключить уведомления" })).toBeVisible();
+
+  await page.evaluate(() => {
+    (window as unknown as { __attention: { hidden: boolean } }).__attention.hidden = true;
+    document.dispatchEvent(new Event("visibilitychange"));
+  });
+  phone!.send(JSON.stringify({
+    protocolVersion: 1,
+    messageId: "phone-text",
+    type: "text.received",
+    timestamp: Date.now(),
+    content: "Привет с телефона",
+    contentKind: "TEXT",
+    direction: "ANDROID_TO_BROWSER",
+    senderLabel: "Телефон",
+    status: "DELIVERED",
+  }));
+
+  await expect.poll(() => page.evaluate(() =>
+    (window as unknown as { __notifications: unknown[] }).__notifications,
+  )).toEqual([{ title: "Текст с телефона", body: "Привет с телефона" }]);
+  await expect(page).toHaveTitle(/^\(1\) DeviceBridge/);
+  // The certificate probe's registration attempt fails on its own; nothing may stay registered.
+  await expect.poll(
+    () => page.evaluate(async () => (await navigator.serviceWorker.getRegistrations()).length),
+    { timeout: 15_000 },
+  ).toBe(0);
+
+  await page.evaluate(() => {
+    (window as unknown as { __attention: { hidden: boolean } }).__attention.hidden = false;
+    document.dispatchEvent(new Event("visibilitychange"));
+  });
+  await expect(page).toHaveTitle(/^DeviceBridge/);
 });
 
 async function installManifest(page: Page): Promise<void> {

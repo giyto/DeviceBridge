@@ -181,7 +181,7 @@ private fun TransferCard(
         direction = item.direction,
         phase = item.phase,
         modifier = Modifier.semantics {
-            contentDescription = "Этап передачи ${item.displayName}: ${item.phase.label()}" +
+            contentDescription = "Этап передачи ${item.displayName}: ${item.phase.label(item.direction)}" +
                 if (item.autoAccepted) ", принят автоматически" else ""
             liveRegion = LiveRegionMode.Polite
         },

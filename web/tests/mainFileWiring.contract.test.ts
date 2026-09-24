@@ -11,7 +11,21 @@ describe("file transfer application wiring", () => {
     expect(source).toContain("new XhrFileUploader()");
     expect(source).toContain("new NativeFileDownloader(document)");
     expect(source).toContain("hashFileStreaming");
-    expect(source).toMatch(/new SessionController\([\s\S]*textController,[\s\S]*fileController,/);
+    expect(source).toMatch(
+      /new SessionController\([\s\S]*notifyingTextSession,[\s\S]*notifyingFileSession,/,
+    );
+    // The sessions handed to SessionController still deliver every event to the controllers.
+    for (const call of [
+      "textController.receive(event)",
+      "textController.applySnapshot(event)",
+      "textController.receiveError(event)",
+      "fileController.receiveOffer(event)",
+      "fileController.receiveProgress(event)",
+      "fileController.applySnapshot(event)",
+      "fileController.receiveError(event)",
+    ]) {
+      expect(source).toContain(call);
+    }
     expect(source).toContain("fileController.dispose()");
     expect(source).toContain("fileView.dispose()");
   });
@@ -25,6 +39,10 @@ describe("file transfer application wiring", () => {
       resolve(process.cwd(), "src/securityWarningController.ts"),
       "utf8",
     );
+    const notificationSource = readFileSync(
+      resolve(process.cwd(), "src/eventNotificationController.ts"),
+      "utf8",
+    );
 
     expect(source).toContain("new BrowserThemePreferenceStore()");
     expect(source).toContain("new ThemeController(");
@@ -35,7 +53,10 @@ describe("file transfer application wiring", () => {
       .toBeLessThan(source.indexOf("new SessionController("));
     expect(source).toContain("themeController.dispose()");
     expect(source).toContain("securityWarningController.dispose()");
-    expect(themeSource + warningSource).not.toMatch(
+    expect(source).toContain("new BrowserNotificationPreferenceStore()");
+    expect(source).toContain("notificationController.start()");
+    expect(source).toContain("notificationController.dispose()");
+    expect(themeSource + warningSource + notificationSource).not.toMatch(
       /SessionController|TextTransferController|FileTransferController/,
     );
   });

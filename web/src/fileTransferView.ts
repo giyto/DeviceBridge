@@ -576,7 +576,7 @@ function directionLabel(direction: FileTransferUiItem["metadata"]["direction"]):
   return direction === "ANDROID_TO_BROWSER" ? "С телефона" : "На телефон";
 }
 
-function formatBytes(bytes: number): string {
+export function formatBytes(bytes: number): string {
   if (bytes >= 1024 ** 3) return (bytes / 1024 ** 3).toFixed(1) + " ГБ";
   if (bytes >= 1024 ** 2) return (bytes / 1024 ** 2).toFixed(1) + " МБ";
   if (bytes >= 1024) return (bytes / 1024).toFixed(1) + " КБ";

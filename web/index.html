@@ -192,6 +192,37 @@
               </a>
             </span>
           </div>
+          <section
+            class="notification-panel"
+            data-role="notification-panel"
+            data-state="unavailable"
+            aria-labelledby="notification-panel-title"
+          >
+            <h2 id="notification-panel-title" class="notification-panel__title">Уведомления</h2>
+            <p class="notification-panel__detail" data-role="notification-status">
+              Уведомления доступны в защищённом режиме.
+            </p>
+            <button
+              class="secondary-button notification-panel__action"
+              data-action="enable-notifications"
+              type="button"
+              hidden
+            >
+              Включить уведомления
+            </button>
+            <label class="notification-panel__option" data-role="notification-options" hidden>
+              <input type="checkbox" data-role="hide-notification-content" />
+              <span>Скрывать содержимое</span>
+            </label>
+            <button
+              class="secondary-button notification-panel__action"
+              data-action="disable-notifications"
+              type="button"
+              hidden
+            >
+              Выключить уведомления
+            </button>
+          </section>
           <p
             class="visually-hidden"
             data-role="preference-announcer"

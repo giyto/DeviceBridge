@@ -71,6 +71,17 @@ abstract class ServerLifecycleModule {
 
     @Binds
     @Singleton
+    abstract fun bindEventNotificationPublisher(
+        implementation: ru.hznik.devicebridge.server.AndroidEventNotificationPublisher,
+    ): ru.hznik.devicebridge.server.EventNotificationPublisher
+
+    @Binds
+    abstract fun bindTextClipboard(
+        implementation: ru.hznik.devicebridge.server.AndroidTextClipboard,
+    ): ru.hznik.devicebridge.server.TextClipboard
+
+    @Binds
+    @Singleton
     abstract fun bindServerSessionJournal(
         implementation: AndroidServerSessionJournal,
     ): ServerSessionJournal
@@ -159,6 +170,7 @@ abstract class ServerLifecycleModule {
             observeSettings: ru.hznik.devicebridge.domain.usecase.ObserveSettingsUseCase,
             destinationLeases: FileDestinationLeaseRegistry,
             partialUploads: ru.hznik.devicebridge.data.file.PartialUploadStore,
+            notificationAccepted: ru.hznik.devicebridge.data.file.NotificationAcceptedTransfers,
             @dagger.hilt.android.qualifiers.ApplicationContext context: android.content.Context,
         ): ru.hznik.devicebridge.data.file.TrustedAutoAcceptController {
             val destinations = ru.hznik.devicebridge.data.file.PersistedDestinationPermissionController(
@@ -185,8 +197,36 @@ abstract class ServerLifecycleModule {
                         ),
                     ) != null
                 },
+                notificationAccepted = notificationAccepted,
             )
         }
+
+        @Provides
+        @Singleton
+        fun provideEventNotificationCoordinator(
+            browserSessions: BrowserSessionCoordinator,
+            fileTransfers: FileTransferCoordinator,
+            textTransfers: TextTransferRepository,
+            autoAccept: ru.hznik.devicebridge.domain.file.AutoAcceptStatusSource,
+            notificationAccepted: ru.hznik.devicebridge.data.file.NotificationAcceptedTransfers,
+            observeSettings: ru.hznik.devicebridge.domain.usecase.ObserveSettingsUseCase,
+            visibility: ru.hznik.devicebridge.server.AppVisibilityTracker,
+            clock: MonotonicClock,
+            publisher: ru.hznik.devicebridge.server.EventNotificationPublisher,
+        ): ru.hznik.devicebridge.server.EventNotificationCoordinator =
+            ru.hznik.devicebridge.server.EventNotificationCoordinator(
+                sessions = browserSessions.state,
+                transfers = fileTransfers.state,
+                texts = textTransfers.state,
+                autoAccepted = autoAccept.autoAccepted,
+                paused = autoAccept.paused,
+                acceptedFromNotification = notificationAccepted.ids,
+                settings = observeSettings(),
+                appVisible = visibility.visible,
+                isResumeRetry = fileTransfers::isResumeRetry,
+                clock = clock,
+                publisher = publisher,
+            )
 
         @Provides
         @Singleton

@@ -1,5 +1,6 @@
 package ru.hznik.devicebridge.feature.text
 
+import android.content.ClipData
 import android.content.res.Configuration
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
@@ -25,12 +26,15 @@ import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.platform.LocalClipboard
+import androidx.compose.ui.platform.toClipEntry
+import kotlinx.coroutines.launch
+import ru.hznik.devicebridge.ui.theme.bridgeStatusColors
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.isTraversalGroup
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
@@ -38,11 +42,10 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
-import ru.hznik.devicebridge.core.ui.OperationalItem
+import ru.hznik.devicebridge.core.ui.RecordCard
 import ru.hznik.devicebridge.core.ui.PrimaryActionButton
 import ru.hznik.devicebridge.core.ui.ScreenHeader
 import ru.hznik.devicebridge.core.ui.SectionHeader
-import ru.hznik.devicebridge.core.ui.StateTone
 import ru.hznik.devicebridge.core.ui.dismissKeyboardOnUnconsumedTap
 import ru.hznik.devicebridge.domain.session.BrowserSessionId
 import ru.hznik.devicebridge.domain.text.TextContentKind
@@ -396,34 +399,54 @@ private fun TransferFeed(
     }
 }
 
+/** Laid out like a file card: status and type, the message, time, direction and participant. */
 @Composable
 private fun TransferItemCard(
     item: TextItemUiState,
     onRetry: (TextMessageId) -> Unit,
     onOpenLinkRequested: (String) -> Unit,
 ) {
-    OperationalItem(
+    val clipboard = LocalClipboard.current
+    val coroutineScope = rememberCoroutineScope()
+    val colors = MaterialTheme.bridgeStatusColors
+    val typeLabel = item.contentKind.label()
+    RecordCard(
         statusLabel = item.status.label(),
-        title = item.participantLabel(),
-        metadata = "${item.direction.label()} · Время: ${item.timestampEpochMillis.transferTimeLabel()}",
-        tone = when (item.status) {
+        statusColor = when (item.status) {
             TextTransferStatus.PENDING,
-            TextTransferStatus.SENDING -> StateTone.LOADING
-            TextTransferStatus.DELIVERED -> StateTone.SUCCESS
-            TextTransferStatus.FAILED -> StateTone.ERROR
+            TextTransferStatus.SENDING -> colors.info
+            TextTransferStatus.DELIVERED -> colors.success
+            TextTransferStatus.FAILED -> colors.error
         },
-        modifier = Modifier.semantics {
-            liveRegion = LiveRegionMode.Polite
-        },
-        content = {
-            Text(text = item.content, style = MaterialTheme.typography.bodyLarge)
+        typeLabel = typeLabel,
+        typeDescription = "Тип: $typeLabel",
+        title = item.content,
+        subtitle = "Время: ${item.timestampEpochMillis.transferTimeLabel()}",
+        directionLabel = item.direction.label(),
+        titleStyle = MaterialTheme.typography.bodyLarge,
+        titleMaxLines = Int.MAX_VALUE,
+        footer = {
             Text(
-                text = "Тип: ${item.contentKind.label()}",
-                style = MaterialTheme.typography.bodySmall,
+                text = item.participantLabel(),
+                style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         },
         actions = {
+            OutlinedButton(
+                onClick = {
+                    coroutineScope.launch {
+                        clipboard.setClipEntry(
+                            ClipData.newPlainText("DeviceBridge", item.content).toClipEntry(),
+                        )
+                    }
+                },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .semantics { contentDescription = "Копировать сообщение: ${item.participantLabel()}" },
+            ) {
+                Text("Копировать")
+            }
             if (item.contentKind == TextContentKind.LINK) {
                 OutlinedButton(
                     onClick = { onOpenLinkRequested(item.content) },

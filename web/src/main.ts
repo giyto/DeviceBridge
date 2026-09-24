@@ -1,5 +1,9 @@
 import { SessionApiClient } from "./sessionApiClient";
-import { SessionController } from "./sessionController";
+import {
+  SessionController,
+  type FileSessionLifecycle,
+  type TextSessionLifecycle,
+} from "./sessionController";
 import { SessionEventSocketClient } from "./sessionEventSocketClient";
 import { BrowserSessionTokenStore } from "./sessionTokenStore";
 import { BrowserTrustedCredentialStore } from "./browserTrustedCredentialStore";
@@ -26,11 +30,21 @@ import { createThemeControl } from "./themeControl";
 import { BrowserSecurityWarningPreferenceStore } from "./browserSecurityWarningPreferenceStore";
 import { createSecurityWarningController } from "./securityWarningController";
 import { certificateSetupUrl, probeCertificateTrust } from "./certificateTrustProbe";
+import { BrowserNotificationPreferenceStore } from "./browserNotificationPreferenceStore";
+import {
+  createBrowserNotificationPort,
+  createDocumentAttentionPort,
+  createDocumentReveal,
+  createDocumentTitlePort,
+  EventNotificationController,
+} from "./eventNotificationController";
+import { createEventNotificationView } from "./eventNotificationView";
 
 let controller: SessionController;
 let textController: TextTransferController;
 let fileController: FileTransferController;
 let themeController: ThemeController;
+let notificationController: EventNotificationController;
 const documentThemeApplication = createDocumentThemeApplication(document);
 const themeControl = createThemeControl(
   document,
@@ -56,6 +70,20 @@ const securityWarningController = createSecurityWarningController(
     : null,
 );
 securityWarningController.start();
+const notificationView = createEventNotificationView(document, {
+  onEnable: () => void notificationController.enable(),
+  onDisable: () => notificationController.disable(),
+  onHideContentChange: (hideContent) => notificationController.setHideContent(hideContent),
+});
+notificationController = new EventNotificationController({
+  notifications: createBrowserNotificationPort(window.location, document),
+  attention: createDocumentAttentionPort(document, window),
+  title: createDocumentTitlePort(document),
+  preferences: new BrowserNotificationPreferenceStore(),
+  reveal: createDocumentReveal(document),
+  render: (state) => notificationView.render(state),
+});
+notificationController.start();
 const view = createShellView(document, {
   onRetry: () => controller.retry(),
   onSubmitCode: (code, rememberBrowser) => controller.submitCode(code, rememberBrowser),
@@ -88,22 +116,70 @@ fileController = new FileTransferController(
   new XhrFileUploader(),
   new NativeFileDownloader(document),
   hashFileStreaming,
-  (state) => fileView.render(state),
+  (state) => {
+    fileView.render(state);
+    if (state.kind === "active") {
+      notificationController.uploadsChanged(
+        state.transfers.map((item) => ({
+          transferId: item.metadata.transferId,
+          direction: item.metadata.direction,
+          status: item.status,
+        })),
+      );
+    }
+  },
   createProtocolMessageId,
   () => Date.now(),
   () => controller.handleFileUnauthorized(),
 );
+
+// Events from the phone also reach the notifications; the controllers stay unaware of them.
+const notifyingTextSession: TextSessionLifecycle = {
+  activate: (token, sessionScopeId) => textController.activate(token, sessionScopeId),
+  deactivate: () => textController.deactivate(),
+  suspendSession: () => textController.suspendSession(),
+  dispose: () => textController.dispose(),
+  setConnectionAvailable: (available) => textController.setConnectionAvailable(available),
+  receive: (event) => {
+    textController.receive(event);
+    notificationController.textReceived(event);
+  },
+  applySnapshot: (event) => {
+    textController.applySnapshot(event);
+    notificationController.textSnapshot(event.items);
+  },
+  receiveError: (event) => textController.receiveError(event),
+};
+const notifyingFileSession: FileSessionLifecycle = {
+  activate: (token, effectiveFileLimitBytes) =>
+    fileController.activate(token, effectiveFileLimitBytes),
+  deactivate: () => fileController.deactivate(),
+  setConnectionAvailable: (available) => fileController.setConnectionAvailable(available),
+  receiveOffer: (event) => {
+    fileController.receiveOffer(event);
+    notificationController.filesOffered(event.items);
+  },
+  receiveProgress: (event) => fileController.receiveProgress(event),
+  applySnapshot: (event) => {
+    fileController.applySnapshot(event);
+    notificationController.fileSnapshot(event.items);
+  },
+  receiveError: (event) => fileController.receiveError(event),
+};
 
 controller = new SessionController(
   new WebManifestClient(),
   new SessionApiClient(),
   new BrowserSessionTokenStore(),
   new SessionEventSocketClient(),
-  (state) => view.render(state),
+  (state) => {
+    view.render(state);
+    notificationController.sessionChanged(state.kind);
+  },
   (effect) => view.consume(effect),
   createBrowserLabel(navigator.userAgent, navigator.platform),
-  textController,
-  fileController,
+  notifyingTextSession,
+  notifyingFileSession,
   new BrowserTrustedCredentialStore(),
 );
 controller.start();
@@ -117,6 +193,8 @@ globalThis.addEventListener(
     themeController.dispose();
     themeControl.dispose();
     securityWarningController.dispose();
+    notificationController.dispose();
+    notificationView.dispose();
     view.dispose();
     textView.dispose();
     fileView.dispose();

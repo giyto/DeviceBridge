@@ -531,6 +531,53 @@ h2 {
   display: none;
 }
 
+.notification-panel {
+  display: grid;
+  gap: var(--space-2);
+  padding: 1rem 1.2rem;
+  border: var(--border-width-subtle) solid var(--border);
+  border-radius: var(--radius-large);
+  background: color-mix(in srgb, var(--surface-elevated) 86%, transparent);
+  color: var(--text);
+}
+
+.notification-panel__title {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.notification-panel__detail {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 0.9rem;
+}
+
+.notification-panel__action {
+  justify-self: start;
+  margin-top: var(--space-1);
+}
+
+.notification-panel__option {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-height: 44px;
+  cursor: pointer;
+  font-weight: var(--font-weight-semibold);
+}
+
+.notification-panel__option input {
+  width: 1.15rem;
+  height: 1.15rem;
+  margin: 0;
+  accent-color: var(--accent);
+}
+
+.notification-panel__action[hidden],
+.notification-panel__option[hidden] {
+  display: none;
+}
+
 .secure-note {
   display: flex;
   align-items: center;

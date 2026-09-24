@@ -82,20 +82,19 @@ class ServerNotificationModelFactory @Inject constructor() {
         }
         return "$directionLabel: ${displayName.safeNotificationName()} - $progress%"
     }
-
-    private fun String.safeNotificationName(): String {
-        val leaf = substringAfterLast('/').substringAfterLast('\\')
-        val safe = leaf.filterNot { char ->
-            char.isISOControl() || char in BIDI_CONTROL_CHARACTERS
-        }.trim().take(64)
-        return safe.ifBlank { "Файл" }
-    }
-
-    private companion object {
-        val BIDI_CONTROL_CHARACTERS = setOf(
-            '\u061c', '\u200e', '\u200f',
-            '\u202a', '\u202b', '\u202c', '\u202d', '\u202e',
-            '\u2066', '\u2067', '\u2068', '\u2069',
-        )
-    }
 }
+
+/** Strips the path, control and bidi characters a browser could put in a notification. */
+internal fun String.safeNotificationName(): String {
+    val leaf = substringAfterLast('/').substringAfterLast('\\')
+    val safe = leaf.filterNot { char ->
+        char.isISOControl() || char in BIDI_CONTROL_CHARACTERS
+    }.trim().take(64)
+    return safe.ifBlank { "Файл" }
+}
+
+private val BIDI_CONTROL_CHARACTERS = setOf(
+    '\u061c', '\u200e', '\u200f',
+    '\u202a', '\u202b', '\u202c', '\u202d', '\u202e',
+    '\u2066', '\u2067', '\u2068', '\u2069',
+)

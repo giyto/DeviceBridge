@@ -41,20 +41,19 @@ class AndroidTlsKeyStore @Inject constructor() : TlsKeyStore {
 
     override fun generate(alias: String, purpose: TlsKeyPurpose): PublicKey {
         delete(alias)
-        val digests = when (purpose) {
-            TlsKeyPurpose.CERTIFICATE_AUTHORITY -> arrayOf(KeyProperties.DIGEST_SHA256)
-            TlsKeyPurpose.SERVER -> arrayOf(
+        val builder = KeyGenParameterSpec.Builder(alias, KeyProperties.PURPOSE_SIGN)
+            .setAlgorithmParameterSpec(ECGenParameterSpec(CURVE))
+        // Listed in each call rather than through an array, so lint can check the constants.
+        val spec = when (purpose) {
+            TlsKeyPurpose.CERTIFICATE_AUTHORITY -> builder.setDigests(KeyProperties.DIGEST_SHA256)
+            TlsKeyPurpose.SERVER -> builder.setDigests(
                 KeyProperties.DIGEST_NONE,
                 KeyProperties.DIGEST_SHA1,
                 KeyProperties.DIGEST_SHA256,
                 KeyProperties.DIGEST_SHA384,
                 KeyProperties.DIGEST_SHA512,
             )
-        }
-        val spec = KeyGenParameterSpec.Builder(alias, KeyProperties.PURPOSE_SIGN)
-            .setAlgorithmParameterSpec(ECGenParameterSpec(CURVE))
-            .setDigests(*digests)
-            .build()
+        }.build()
         return KeyPairGenerator.getInstance(KeyProperties.KEY_ALGORITHM_EC, ANDROID_KEY_STORE)
             .apply { initialize(spec) }
             .generateKeyPair()

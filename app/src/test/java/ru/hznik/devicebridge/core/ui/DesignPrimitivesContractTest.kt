@@ -77,7 +77,8 @@ class DesignPrimitivesContractTest {
         listOf(
             "ScreenHeader(",
             "SectionHeader(",
-            "OperationalItem(",
+            // Text cards share the file card layout.
+            "RecordCard(",
             "PrimaryActionButton(",
         ).forEach { primitive ->
             assertTrue("Text screen is missing $primitive", screen.contains(primitive))

@@ -4,6 +4,8 @@ import android.content.ClipData
 import android.content.res.Configuration
 import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.relocation.BringIntoViewRequester
+import androidx.compose.foundation.relocation.bringIntoViewRequester
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -28,6 +30,8 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.rememberCoroutineScope
@@ -411,7 +415,16 @@ private fun PendingBrowsersSection(
     requests: List<PendingBrowserUiState>,
     onAction: (HomeAction) -> Unit,
 ) {
-    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+    // A new request is the one thing to do here, including after "Открыть" in its notification:
+    // it sits below the address and code, so it is scrolled into view.
+    val bringIntoView = remember { BringIntoViewRequester() }
+    LaunchedEffect(requests.lastOrNull()?.id) {
+        bringIntoView.bringIntoView()
+    }
+    Column(
+        modifier = Modifier.bringIntoViewRequester(bringIntoView),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
         Text(
             text = "Запросы на подключение",
             style = MaterialTheme.typography.titleLarge,

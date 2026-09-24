@@ -1,32 +1,19 @@
 package ru.hznik.devicebridge.feature.file
 
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import kotlin.math.roundToInt
+import ru.hznik.devicebridge.core.ui.RecordCard
 import ru.hznik.devicebridge.domain.file.FileTransferDirection
 import ru.hznik.devicebridge.domain.file.FileTransferPhase
 import ru.hznik.devicebridge.ui.theme.bridgeStatusColors
@@ -47,73 +34,20 @@ internal fun TransferRecordCard(
     footer: @Composable ColumnScope.() -> Unit = {},
     actions: @Composable ColumnScope.() -> Unit = {},
 ) {
-    val statusColor = phase.statusColor()
     val typeLabel = mimeType.fileTypeLabel()
-    Card(
-        modifier = modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(24.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceContainer,
-        ),
-    ) {
-        Column(
-            modifier = Modifier.padding(18.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .size(9.dp)
-                            .background(statusColor, CircleShape),
-                    )
-                    Text(
-                        text = phase.label(),
-                        style = MaterialTheme.typography.labelLarge,
-                        fontWeight = FontWeight.SemiBold,
-                        color = statusColor,
-                    )
-                }
-                Text(
-                    text = typeLabel,
-                    modifier = Modifier.semantics { contentDescription = "Тип файла $typeLabel" },
-                    style = MaterialTheme.typography.labelLarge,
-                    color = MaterialTheme.colorScheme.primary,
-                )
-            }
-            Text(
-                text = displayName,
-                style = MaterialTheme.typography.titleLarge,
-                fontWeight = FontWeight.SemiBold,
-                maxLines = 3,
-                overflow = TextOverflow.Ellipsis,
-            )
-            Text(
-                text = formatBytes(sizeBytes),
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            details()
-            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-            Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                Text(
-                    text = direction.label(),
-                    style = MaterialTheme.typography.labelLarge,
-                )
-                footer()
-            }
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                actions()
-            }
-        }
-    }
+    RecordCard(
+        statusLabel = phase.label(direction),
+        statusColor = phase.statusColor(),
+        typeLabel = typeLabel,
+        typeDescription = "Тип файла $typeLabel",
+        title = displayName,
+        subtitle = formatBytes(sizeBytes),
+        directionLabel = direction.label(),
+        modifier = modifier,
+        details = details,
+        footer = footer,
+        actions = actions,
+    )
 }
 
 /** Progress of a running transfer: bar, percent and speed, and where a resumed one continued. */
@@ -177,9 +111,11 @@ internal fun String.fileTypeLabel(): String = when {
     else -> "Файл"
 }
 
-internal fun FileTransferPhase.label(): String = when (this) {
+/** A phone offer waits for the browser's download click, not for an approval. */
+internal fun FileTransferPhase.label(direction: FileTransferDirection? = null): String = when (this) {
     FileTransferPhase.QUEUED -> "В очереди"
-    FileTransferPhase.CONNECTING -> "Ожидает подтверждения"
+    FileTransferPhase.CONNECTING ->
+        if (direction == FileTransferDirection.ANDROID_TO_BROWSER) "Ожидает скачивания" else "Ожидает подтверждения"
     FileTransferPhase.TRANSFERRING -> "Передаётся"
     FileTransferPhase.VERIFYING -> "Проверяется"
     FileTransferPhase.COMPLETED -> "Завершено"
