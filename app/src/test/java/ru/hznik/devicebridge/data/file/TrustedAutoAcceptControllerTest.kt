@@ -202,6 +202,66 @@ class TrustedAutoAcceptControllerTest {
         fixture.controller.stop()
     }
 
+    @Test
+    fun filesAcceptedFromANotificationAreApprovedAsTheirTurnComes() = runTest(
+        UnconfinedTestDispatcher(),
+    ) {
+        val fixture = Fixture(this, settings = ENABLED.copy(autoAcceptTrustedFiles = false))
+        fixture.queue("t1", ORDINARY_SESSION)
+        fixture.queue("t2", ORDINARY_SESSION)
+        fixture.queue("t3", ORDINARY_SESSION)
+        fixture.promote("t1")
+        assertTrue(fixture.transfers.approved.isEmpty())
+
+        fixture.notificationAccepted.accept(listOf("t1", "t2", "t3").map(::FileTransferId))
+        assertEquals(listOf(FileTransferId("t1")), fixture.transfers.approved.map { it.first })
+
+        fixture.start("t1")
+        fixture.promote("t2")
+
+        assertEquals(
+            listOf(FileTransferId("t1"), FileTransferId("t2")),
+            fixture.transfers.approved.map { it.first },
+        )
+        // Only an automatic acceptance of a trusted browser is marked as one.
+        assertTrue(fixture.controller.autoAccepted.value.isEmpty())
+        // A started file is no longer waiting for the notification's decision.
+        assertEquals(
+            setOf(FileTransferId("t2"), FileTransferId("t3")),
+            fixture.notificationAccepted.ids.value,
+        )
+        fixture.controller.stop()
+        assertTrue(fixture.notificationAccepted.ids.value.isEmpty())
+    }
+
+    @Test
+    fun notificationAcceptWithoutAFolderWaitsForThePerson() = runTest(UnconfinedTestDispatcher()) {
+        val fixture = Fixture(
+            this,
+            settings = ENABLED.copy(autoAcceptTrustedFiles = false, destinationTree = null),
+        )
+        fixture.offer("t1", ORDINARY_SESSION)
+
+        fixture.notificationAccepted.accept(listOf(FileTransferId("t1")))
+
+        assertTrue(fixture.transfers.approved.isEmpty())
+        assertEquals(setOf(FileTransferId("t1")), fixture.controller.paused.value)
+        fixture.controller.stop()
+    }
+
+    @Test
+    fun notificationAcceptOfAStartedFileIsDropped() = runTest(UnconfinedTestDispatcher()) {
+        val fixture = Fixture(this, settings = ENABLED.copy(autoAcceptTrustedFiles = false))
+        fixture.offer("t1", ORDINARY_SESSION)
+        fixture.start("t1")
+
+        fixture.notificationAccepted.accept(listOf(FileTransferId("t1"), FileTransferId("gone")))
+
+        assertTrue(fixture.transfers.approved.isEmpty())
+        assertTrue(fixture.notificationAccepted.ids.value.isEmpty())
+        fixture.controller.stop()
+    }
+
     private class Fixture(
         scope: TestScope,
         settings: DeviceSettings = ENABLED,
@@ -213,6 +273,7 @@ class TrustedAutoAcceptControllerTest {
         val sessions = MutableStateFlow(sessionState(TRUSTED_SESSION, ORDINARY_SESSION))
         val settings = MutableStateFlow(settings)
         val leases = FileDestinationLeaseRegistry()
+        val notificationAccepted = NotificationAcceptedTransfers()
         private val permissions = object : DocumentTreePermissionGateway {
             override fun acquire(uri: String, grantFlags: Int) = true
             override fun isAvailable(uri: String) = true
@@ -232,6 +293,7 @@ class TrustedAutoAcceptControllerTest {
             leases = leases,
             isResumeRetry = { id -> id.value in resumeIds },
             hasRetainedPart = { _, treeUri -> treeUri in retainedTrees },
+            notificationAccepted = notificationAccepted,
         )
 
         init {
@@ -265,6 +327,12 @@ class TrustedAutoAcceptControllerTest {
         fun promote(id: String) {
             transfers.update(FileTransferId(id)) {
                 FileTransferReducer.reduce(it, FileTransferEvent.Connecting)
+            }
+        }
+
+        fun start(id: String) {
+            transfers.update(FileTransferId(id)) {
+                FileTransferReducer.reduce(it, FileTransferEvent.Started)
             }
         }
 

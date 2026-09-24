@@ -218,6 +218,24 @@ class SettingsScreenTest {
     }
 
     @Test
+    fun serverCardLinksToTheSystemSettingsOfEventNotifications() {
+        composeRule.setContent {
+            MaterialTheme {
+                SettingsScreen(
+                    uiState = SettingsUiState(loadState = SettingsLoadState.CONTENT),
+                    onAction = {},
+                )
+            }
+        }
+
+        composeRule.onNodeWithTag("event-notifications").performScrollTo()
+        composeRule.onNodeWithText("Уведомления о событиях").assertIsDisplayed()
+        composeRule.onNodeWithContentDescription("Открыть системные настройки уведомлений о событиях")
+            .performScrollTo()
+            .assertIsEnabled()
+    }
+
+    @Test
     fun serverCardOffersTheTileForThisAndroidVersion() {
         composeRule.setContent {
             MaterialTheme {

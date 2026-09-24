@@ -14,6 +14,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.flow.MutableStateFlow
 import ru.hznik.devicebridge.app.DeviceBridgeApp
+import ru.hznik.devicebridge.app.OpenSectionRequest
 import ru.hznik.devicebridge.feature.text.SharedTextDraft
 import ru.hznik.devicebridge.feature.text.SharedTextIntentParser
 import ru.hznik.devicebridge.feature.file.SharedFileDraft
@@ -43,6 +44,7 @@ class MainActivity : ComponentActivity() {
 
     private val sharedTextDraft = MutableStateFlow<SharedTextDraft?>(null)
     private val sharedFileDraft = MutableStateFlow<SharedFileDraft?>(null)
+    private val openSectionRequest = MutableStateFlow<OpenSectionRequest?>(null)
     private var nextSharedTextRequestId = 0L
     private var sharedIntentHandled = false
 
@@ -55,12 +57,14 @@ class MainActivity : ComponentActivity() {
         }
         if (savedInstanceState == null) {
             acceptTileStartIntent(intent)
+            acceptOpenSectionIntent(intent)
         }
         enableEdgeToEdge()
         setContent {
             val pendingSharedDraft by sharedTextDraft.collectAsStateWithLifecycle()
             val pendingSharedFileDraft by sharedFileDraft.collectAsStateWithLifecycle()
             val pendingServerStart by serverStartRequests.pending.collectAsStateWithLifecycle()
+            val pendingOpenSection by openSectionRequest.collectAsStateWithLifecycle()
             val themePreference by themePreferenceRepository.themePreference
                 .collectAsStateWithLifecycle(initialValue = null)
             val systemDarkTheme = isSystemInDarkTheme()
@@ -90,6 +94,12 @@ class MainActivity : ComponentActivity() {
                         sharedTextDraft = pendingSharedDraft,
                         sharedFileDraft = pendingSharedFileDraft,
                         startServerRequest = pendingServerStart,
+                        openSectionRequest = pendingOpenSection,
+                        onOpenSectionConsumed = { requestId ->
+                            if (openSectionRequest.value?.id == requestId) {
+                                openSectionRequest.value = null
+                            }
+                        },
                         onSharedTextConsumed = { requestId ->
                             if (sharedTextDraft.value?.requestId == requestId) {
                                 sharedTextDraft.value = null
@@ -112,6 +122,7 @@ class MainActivity : ComponentActivity() {
         sharedIntentHandled = false
         acceptSharedIntent(intent)
         acceptTileStartIntent(intent)
+        acceptOpenSectionIntent(intent)
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
@@ -124,6 +135,18 @@ class MainActivity : ComponentActivity() {
         if (source?.getBooleanExtra(EXTRA_START_SERVER_FROM_TILE, false) != true) return
         source.removeExtra(EXTRA_START_SERVER_FROM_TILE)
         serverStartRequests.request()
+    }
+
+    /** An event notification opens the screen that shows its event. */
+    private fun acceptOpenSectionIntent(source: Intent?) {
+        val section = source?.getStringExtra(EXTRA_OPEN_SECTION) ?: return
+        source.removeExtra(EXTRA_OPEN_SECTION)
+        val notificationId = source.getIntExtra(EXTRA_DISMISS_NOTIFICATION, NO_NOTIFICATION)
+        source.removeExtra(EXTRA_DISMISS_NOTIFICATION)
+        if (notificationId != NO_NOTIFICATION) {
+            getSystemService(android.app.NotificationManager::class.java)?.cancel(notificationId)
+        }
+        openSectionRequest.value = OpenSectionRequest(++nextSharedTextRequestId, section)
     }
 
     private fun acceptSharedIntent(source: Intent?) {
@@ -145,6 +168,9 @@ class MainActivity : ComponentActivity() {
 
     companion object {
         const val EXTRA_START_SERVER_FROM_TILE = "ru.hznik.devicebridge.extra.START_SERVER_FROM_TILE"
+        const val EXTRA_OPEN_SECTION = "ru.hznik.devicebridge.extra.OPEN_SECTION"
+        const val EXTRA_DISMISS_NOTIFICATION = "ru.hznik.devicebridge.extra.DISMISS_NOTIFICATION"
+        private const val NO_NOTIFICATION = -1
         private const val STATE_SHARED_INTENT_HANDLED = "shared_text_intent_handled"
         private val LIGHT_NAVIGATION_SCRIM = Color.argb(0xe6, 0xFF, 0xFF, 0xFF)
         private val DARK_NAVIGATION_SCRIM = Color.argb(0x80, 0x1b, 0x1b, 0x1b)

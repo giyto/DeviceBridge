@@ -45,7 +45,8 @@ fun interface PersistedDestinationOpener {
  * setting or an unusable folder stay in CONNECTING for manual approval.
  *
  * A retried upload that kept a part in the default destination is approved there as well, so
- * «Продолжить» in the browser does not need another tap on the phone.
+ * «Продолжить» in the browser does not need another tap on the phone. So are files the person
+ * accepted with «Принять» in a notification.
  */
 class TrustedAutoAcceptController(
     private val transfers: FileTransferRepository,
@@ -56,6 +57,7 @@ class TrustedAutoAcceptController(
     private val isResumeRetry: (FileTransferId) -> Boolean = { false },
     private val hasRetainedPart: suspend (FileTransferState, treeUri: String) -> Boolean =
         { _, _ -> false },
+    private val notificationAccepted: NotificationAcceptedTransfers = NotificationAcceptedTransfers(),
 ) : AutoAcceptStatusSource {
     private val mutableAutoAccepted = MutableStateFlow<Set<FileTransferId>>(emptySet())
     override val autoAccepted: StateFlow<Set<FileTransferId>> = mutableAutoAccepted
@@ -71,10 +73,15 @@ class TrustedAutoAcceptController(
     fun start(scope: CoroutineScope) {
         stop()
         job = scope.launch {
-            combine(transfers.state, sessions, settings) { snapshot, sessionState, current ->
-                Triple(snapshot, sessionState, current)
-            }.collect { (snapshot, sessionState, current) ->
-                mutex.withLock { evaluate(snapshot, sessionState, current) }
+            combine(
+                transfers.state,
+                sessions,
+                settings,
+                notificationAccepted.ids,
+            ) { snapshot, sessionState, current, accepted ->
+                Evaluation(snapshot, sessionState, current, accepted)
+            }.collect { (snapshot, sessionState, current, accepted) ->
+                mutex.withLock { evaluate(snapshot, sessionState, current, accepted) }
             }
         }
     }
@@ -84,6 +91,7 @@ class TrustedAutoAcceptController(
         job?.cancel()
         job = null
         processed.clear()
+        notificationAccepted.clear()
         mutableAutoAccepted.value = emptySet()
         mutablePaused.value = emptySet()
     }
@@ -92,6 +100,7 @@ class TrustedAutoAcceptController(
         snapshot: FileTransferSnapshot,
         sessionState: BrowserSessionState,
         current: DeviceSettings,
+        acceptedFromNotification: Set<FileTransferId>,
     ) {
         val paused = mutableSetOf<FileTransferId>()
         // A retry brings the same transfer back to CONNECTING; it may be decided again.
@@ -101,6 +110,11 @@ class TrustedAutoAcceptController(
             if (finished) leases.release(id)
             finished
         }
+        // A decision made elsewhere, or a file that went away, ends a notification «Принять».
+        acceptedFromNotification.filter { id ->
+            val phase = snapshot.item(id)?.phase
+            phase != FileTransferPhase.QUEUED && phase != FileTransferPhase.CONNECTING
+        }.forEach(notificationAccepted::consume)
         val awaiting = snapshot.items.filter { item ->
             item.metadata.direction == FileTransferDirection.BROWSER_TO_ANDROID &&
                 item.phase == FileTransferPhase.CONNECTING
@@ -115,10 +129,16 @@ class TrustedAutoAcceptController(
             if (owner == null) continue
             val trusted = owner.trustedBrowserId != null && current.autoAcceptTrustedFiles
             val resume = isResumeRetry(id)
-            if (!trusted && !resume) continue
-            val tree = current.destinationTree ?: continue
+            val fromNotification = id in acceptedFromNotification
+            if (!trusted && !resume && !fromNotification) continue
+            val tree = current.destinationTree
+            if (tree == null) {
+                // The folder was cleared after «Принять»: the person has to choose one now.
+                if (fromNotification) paused += id
+                continue
+            }
             // An ordinary session continues only into the folder that holds its kept part.
-            if (!trusted && !hasRetainedPart(item, tree.value)) continue
+            if (!trusted && !fromNotification && !hasRetainedPart(item, tree.value)) continue
             val lease = when (val approval = destinations.open(tree.value)) {
                 is DestinationApproval.Approved -> approval.lease
                 DestinationApproval.Cancelled,
@@ -142,4 +162,11 @@ class TrustedAutoAcceptController(
         }
         mutablePaused.value = paused
     }
+
+    private data class Evaluation(
+        val snapshot: FileTransferSnapshot,
+        val sessions: BrowserSessionState,
+        val settings: DeviceSettings,
+        val acceptedFromNotification: Set<FileTransferId>,
+    )
 }

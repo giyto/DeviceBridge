@@ -56,6 +56,8 @@ import ru.hznik.devicebridge.core.ui.ScreenHeader
 import ru.hznik.devicebridge.core.ui.SectionHeader
 import ru.hznik.devicebridge.core.ui.TonalActionButton
 import ru.hznik.devicebridge.core.ui.dismissKeyboardOnUnconsumedTap
+import androidx.lifecycle.compose.LifecycleResumeEffect
+import ru.hznik.devicebridge.server.AndroidEventNotificationPublisher
 import ru.hznik.devicebridge.server.DeviceBridgeTileService
 import ru.hznik.devicebridge.R
 @Composable
@@ -165,6 +167,7 @@ fun SettingsScreen(
                         onSelect = { onAction(SettingsAction.IdleStopSelected(it)) },
                     )
                     AddServerTileRow()
+                    EventNotificationsRow()
                 }
             }
 
@@ -491,6 +494,47 @@ private fun AddServerTileRow() {
                 style = MaterialTheme.typography.bodySmall,
             )
         }
+    }
+}
+
+/** Uses the Android channel as the only switch, so there is no second one to disagree with it. */
+@Composable
+private fun EventNotificationsRow() {
+    val context = LocalContext.current
+    var enabled by remember { mutableStateOf(AndroidEventNotificationPublisher.eventsEnabled(context)) }
+    LifecycleResumeEffect(Unit) {
+        enabled = AndroidEventNotificationPublisher.eventsEnabled(context)
+        onPauseOrDispose {}
+    }
+    Column(
+        modifier = Modifier.testTag("event-notifications"),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Text(
+            text = "Уведомления о событиях",
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.SemiBold,
+        )
+        Text(
+            text = if (enabled) {
+                "Включены. Когда приложение свёрнуто, телефон сообщит о запросе подключения, " +
+                    "тексте и файлах с компьютера."
+            } else {
+                "Выключены в системе. Включите их, чтобы узнавать о запросах подключения, " +
+                    "тексте и файлах с компьютера."
+            },
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            style = MaterialTheme.typography.bodySmall,
+        )
+        TonalActionButton(
+            label = if (enabled) "Настроить" else "Включить",
+            onClick = {
+                runCatching {
+                    context.startActivity(AndroidEventNotificationPublisher.settingsIntent(context))
+                }
+            },
+            contentDescription = "Открыть системные настройки уведомлений о событиях",
+        )
     }
 }
 
