@@ -295,6 +295,88 @@ describe("FileTransferController", () => {
     expect(transferOf(states, id)).toMatchObject({ status: "FAILED", localError: "Сеть прервала передачу файла." });
   });
 
+  it("stops its upload when the phone cancels and keeps the card cancelled", async () => {
+    const api = fakeApi();
+    let reportProgress: ((bytes: number) => void) | undefined;
+    let uploadSignal: AbortSignal | undefined;
+    const uploader = {
+      upload: vi.fn().mockImplementation((
+        _token: string, _id: string, _file: File, onProgress: (bytes: number) => void, signal: AbortSignal,
+      ) => new Promise((_resolve, reject) => {
+        reportProgress = onProgress;
+        uploadSignal = signal;
+        signal.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError")));
+      })),
+    };
+    const states: unknown[] = [];
+    const controller = createController(api, uploader, states);
+    controller.activate("token");
+    controller.selectFiles([new File(["one"], "one.txt")]);
+    await controller.confirmSelection();
+    const id = api.offer.mock.calls[0]![1].items[0]!.transferId;
+    controller.receiveProgress(progress(id, "TRANSFERRING", 1));
+    await vi.waitFor(() => expect(uploader.upload).toHaveBeenCalledOnce());
+
+    controller.receiveProgress(terminalProgress(id, "CANCELLED"));
+    reportProgress!(3);
+
+    expect(uploadSignal!.aborted).toBe(true);
+    expect(transferOf(states, id)).toMatchObject({ status: "CANCELLED", cancelledOnPhone: true });
+    expect(lastActive(states)).not.toHaveProperty("error", expect.any(String));
+  });
+
+  it("drops the network error an upload got when the phone cut it for a cancel", async () => {
+    const api = fakeApi();
+    const uploader = {
+      upload: vi.fn().mockRejectedValue(new Error("Сеть прервала передачу файла.")),
+    };
+    const states: unknown[] = [];
+    const controller = createController(api, uploader, states);
+    controller.activate("token");
+    controller.selectFiles([new File(["one"], "one.txt")]);
+    await controller.confirmSelection();
+    const id = api.offer.mock.calls[0]![1].items[0]!.transferId;
+    controller.receiveProgress(progress(id, "TRANSFERRING", 1));
+    await vi.waitFor(() => expect(transferOf(states, id)).toMatchObject({ status: "FAILED" }));
+    expect(lastActive(states)).toHaveProperty("error", "Сеть прервала передачу файла.");
+
+    controller.receiveProgress(terminalProgress(id, "CANCELLED"));
+
+    expect(transferOf(states, id)).toMatchObject({ status: "CANCELLED", cancelledOnPhone: true });
+    expect(lastActive(states)).toHaveProperty("error", undefined);
+  });
+
+  it("shows the phone's «cancelled» answer as a cancel, not as an error", async () => {
+    const api = fakeApi();
+    const uploader = { upload: vi.fn().mockRejectedValue(new FileApiError(409, "CANCELLED")) };
+    const states: unknown[] = [];
+    const controller = createController(api, uploader, states);
+    controller.activate("token");
+    controller.selectFiles([new File(["one"], "one.txt")]);
+    await controller.confirmSelection();
+    const id = api.offer.mock.calls[0]![1].items[0]!.transferId;
+
+    controller.receiveProgress(progress(id, "TRANSFERRING", 1));
+
+    await vi.waitFor(() => expect(transferOf(states, id)).toMatchObject({ status: "CANCELLED" }));
+    expect(transferOf(states, id)).toMatchObject({ cancelledOnPhone: true });
+    expect(lastActive(states)).not.toHaveProperty("error", expect.any(String));
+  });
+
+  it("does not call a cancel from this browser one made on the phone", async () => {
+    const api = fakeApi();
+    const states: unknown[] = [];
+    const controller = createController(api, { upload: vi.fn() }, states);
+    controller.activate("token");
+    controller.applySnapshot(snapshot("CONNECTING", "phone-file"));
+
+    await controller.cancel("phone-file");
+    controller.receiveProgress(terminalProgress("phone-file", "CANCELLED"));
+
+    expect(transferOf(states, "phone-file")).toMatchObject({ status: "CANCELLED" });
+    expect(transferOf(states, "phone-file")).not.toHaveProperty("cancelledOnPhone", true);
+  });
+
   it("keeps an approval from the socket when the older retry answer still says «waiting»", async () => {
     const api = fakeApi();
     const uploader = { upload: vi.fn().mockResolvedValue(snapshot("COMPLETED")) };
@@ -667,6 +749,14 @@ function progress(id: string, status: "TRANSFERRING", bytes: number) {
   return {
     protocolVersion: 1 as const, messageId: "progress-1", type: "file.progress" as const,
     timestamp: 1_000, transferId: id, status, bytesTransferred: bytes,
+    totalBytes: 4, speedBytesPerSecond: 0,
+  };
+}
+
+function terminalProgress(id: string, status: "CANCELLED" | "FAILED") {
+  return {
+    protocolVersion: 1 as const, messageId: "progress-end", type: "file.progress" as const,
+    timestamp: 1_000, transferId: id, status, bytesTransferred: 1,
     totalBytes: 4, speedBytesPerSecond: 0,
   };
 }

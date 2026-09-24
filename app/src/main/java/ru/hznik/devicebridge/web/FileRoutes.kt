@@ -19,8 +19,12 @@ import java.net.URLEncoder
 import java.nio.charset.StandardCharsets
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicBoolean
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import ru.hznik.devicebridge.core.protocol.file.FILE_ERROR_TYPE
 import ru.hznik.devicebridge.core.protocol.file.FILE_DOWNLOAD_GRANT_TYPE
 import ru.hznik.devicebridge.core.protocol.file.FILE_PROTOCOL_VERSION
@@ -248,13 +252,11 @@ fun Application.installFileRoutes(
                 )
                 return@post
             }
-            val uploadJob = checkNotNull(currentCoroutineContext()[Job])
-            val managedTarget = if (prepared != null && preparedUploads.remove(transferId, prepared)) {
-                prepared.job = uploadJob
-                prepared.target
+            val managedResources = if (prepared != null && preparedUploads.remove(transferId, prepared)) {
+                prepared
             } else {
                 // Upload without a prepared output (older web shell): always from byte 0.
-                val resources = call.prepareUploadResources(
+                call.prepareUploadResources(
                     fileCoordinator,
                     uploadTargetFactory,
                     authorized,
@@ -262,26 +264,44 @@ fun Application.installFileRoutes(
                     resume = false,
                     wallClockMs = wallClockMs,
                 ) ?: return@post
-                resources.job = uploadJob
-                resources.target
             }
+            val managedTarget = managedResources.target
 
             val uploadSpeed = TransferSpeedMeter(monotonicMs)
+            // The body is read in its own job, so a cancel on the phone stops the reading while
+            // this call can still answer, and close the connection the browser keeps writing to.
+            val body = call.receiveChannel()
             val uploadResult = try {
-                uploadProcessor.receive(
-                    channel = call.receiveChannel(),
-                    metadata = item.metadata,
-                    declaredContentLength = contentLength,
-                    target = managedTarget,
-                    onProgress = { bytes ->
-                        fileCoordinator.transition(
-                            transferId,
-                            FileTransferEvent.Progressed(bytes, uploadSpeed.update(bytes)),
+                coroutineScope {
+                    val reading = async {
+                        uploadProcessor.receive(
+                            channel = body,
+                            metadata = item.metadata,
+                            declaredContentLength = contentLength,
+                            target = managedTarget,
+                            onProgress = { bytes ->
+                                fileCoordinator.transition(
+                                    transferId,
+                                    FileTransferEvent.Progressed(bytes, uploadSpeed.update(bytes)),
+                                )
+                            },
                         )
-                    },
-                )
+                    }
+                    managedResources.job = reading
+                    reading.await()
+                }
+            } catch (cancelled: CancellationException) {
+                currentCoroutineContext().ensureActive()
+                null
             } finally {
                 fileCoordinator.releaseResources(transferId)
+            }
+            if (uploadResult == null) {
+                // Without this the server would read the rest of the body before answering.
+                body.cancel(CancellationException("Cancelled on the phone"))
+                call.response.header(HttpHeaders.Connection, "close")
+                call.respondFileError(HttpStatusCode.Conflict, FileProtocolErrorCode.CANCELLED, wallClockMs, transferId.value)
+                return@post
             }
             if (uploadResult == RawFileUploadResult.Completed) {
                 fileCoordinator.transition(transferId, FileTransferEvent.Verifying)
@@ -647,6 +667,9 @@ fun Application.installFileRoutes(
                             transferId,
                             FileTransferEvent.Progressed(total, downloadSpeed.update(total)),
                         )
+                        // Cancelled on either side: cut the response, or the browser still gets the file.
+                        val phase = fileCoordinator.state.value.item(transferId)?.phase
+                        if (phase == null || phase.isTerminal) throw DownloadCancelledException()
                     }
                     if (total != end + 1) error("Download source ended before declared size")
                     if (end == size - 1 && input.read() >= 0) error("Download source exceeded declared size")
@@ -830,6 +853,9 @@ private class ManagedFileUploadTarget(
         if (closed.compareAndSet(false, true)) delegate.close()
     }
 }
+
+/** Ends a download response early because the transfer was cancelled on either side. */
+private class DownloadCancelledException : java.io.IOException("Download cancelled")
 
 private class UploadRouteResources(
     val target: ManagedFileUploadTarget,

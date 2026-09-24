@@ -241,7 +241,7 @@ test("file cancel and retry keep one transfer, keyboard focus and live feedback"
   await page.keyboard.press("Space");
 
   await expect(card.getByRole("button", { name: "Отменить" })).toBeFocused();
-  await expect(card.locator(".file-card__status")).toHaveText("Ожидает подтверждения");
+  await expect(card.locator(".file-card__status")).toHaveText("Ожидает скачивания");
   await expect(page.locator('[data-role="file-transfer-list"] .file-card')).toHaveCount(1);
 });
 
