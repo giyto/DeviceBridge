@@ -115,12 +115,13 @@ class HiltGraphContractTest {
     fun fileSelectionPreparationOwnsSourceRegistrationAndUsesSingletonRegistry() {
         val activity = read("src/main/java/ru/hznik/devicebridge/MainActivity.kt")
         val app = read("src/main/java/ru/hznik/devicebridge/app/DeviceBridgeApp.kt")
+        val fileRoute = read("src/main/java/ru/hznik/devicebridge/feature/file/FileRoute.kt")
         val viewModel = read("src/main/java/ru/hznik/devicebridge/feature/file/FileViewModel.kt")
 
         assertTrue(activity.contains("lateinit var fileSourceRegistry: FileSourceRegistry"))
         assertTrue(app.contains("fileSourceRegistry: FileSourceRegistry? = null"))
-        assertTrue(app.contains("sourceRegistry = effectiveFileSourceRegistry"))
-        assertTrue(app.contains("stageTemporarySources = true"))
+        assertTrue(fileRoute.contains("sourceRegistry = effectiveFileSourceRegistry"))
+        assertTrue(fileRoute.contains("stageTemporarySources = true"))
         assertFalse(viewModel.contains("FileSourceRegistry"))
     }
 

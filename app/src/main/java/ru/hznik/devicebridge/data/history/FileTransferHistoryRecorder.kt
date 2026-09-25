@@ -1,10 +1,7 @@
 package ru.hznik.devicebridge.data.history
 
-import java.security.MessageDigest
 import java.util.UUID
-import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.launch
 import ru.hznik.devicebridge.data.file.FileTerminalHistoryRecorder
 import ru.hznik.devicebridge.domain.file.FileTransferDirection
 import ru.hznik.devicebridge.domain.file.FileTransferFailure
@@ -13,8 +10,6 @@ import ru.hznik.devicebridge.domain.file.FileTransferState
 import ru.hznik.devicebridge.domain.history.HistoryDirection
 import ru.hznik.devicebridge.domain.history.HistoryFileMetadata
 import ru.hznik.devicebridge.domain.history.HistoryKind
-import ru.hznik.devicebridge.domain.history.HistoryOperationId
-import ru.hznik.devicebridge.domain.history.HistoryPersistenceEvent
 import ru.hznik.devicebridge.domain.history.HistoryRecord
 import ru.hznik.devicebridge.domain.history.HistoryRecordId
 import ru.hznik.devicebridge.domain.history.HistoryStatus
@@ -41,7 +36,11 @@ class FileTransferHistoryRecorder(
         }
         val record = HistoryRecord(
                 id = newRecordId(),
-                operationId = HistoryOperationId(item.stableHistoryOperationId()),
+                operationId = historyOperationId(
+                    item.generationId,
+                    item.ownerSessionId,
+                    item.metadata.id.value,
+                ),
                 kind = HistoryKind.FILE,
                 direction = when (item.metadata.direction) {
                     FileTransferDirection.ANDROID_TO_BROWSER ->
@@ -61,31 +60,10 @@ class FileTransferHistoryRecorder(
                 ),
                 failureReason = item.failure?.toSafeHistoryReason(),
         )
-        applicationScope.launch {
-            try {
-                // A resumed or retried transfer keeps one record with its latest result.
-                repository.replace(record)
-            } catch (failure: CancellationException) {
-                throw failure
-            } catch (_: Throwable) {
-                failureReporter.report(
-                    HistoryPersistenceEvent.WriteFailed(HistoryKind.FILE),
-                )
-            }
+        // A resumed or retried transfer keeps one record with its latest result.
+        applicationScope.persistBestEffort(record, failureReporter) {
+            repository.replace(it)
         }
-    }
-
-    private fun FileTransferState.stableHistoryOperationId(): String {
-        val source = buildString {
-            append(generationId.value)
-            append(':')
-            append(ownerSessionId.value)
-            append(':')
-            append(metadata.id.value)
-        }
-        return MessageDigest.getInstance("SHA-256")
-            .digest(source.encodeToByteArray())
-            .joinToString(separator = "") { byte -> "%02x".format(byte) }
     }
 }
 

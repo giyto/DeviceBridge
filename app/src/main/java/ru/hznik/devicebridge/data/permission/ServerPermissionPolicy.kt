@@ -1,5 +1,8 @@
 package ru.hznik.devicebridge.data.permission
 
+/** First Android SDK level that makes the app ask for local network access. */
+const val LOCAL_NETWORK_PERMISSION_MIN_SDK = 37
+
 data class ServerPermissionRequirements(
     val requiresLocalNetwork: Boolean,
     val requiresNotifications: Boolean,
@@ -16,7 +19,7 @@ class ServerPermissionPolicy {
 
     fun requirements(sdkInt: Int): ServerPermissionRequirements =
         ServerPermissionRequirements(
-            requiresLocalNetwork = sdkInt >= 37,
+            requiresLocalNetwork = sdkInt >= LOCAL_NETWORK_PERMISSION_MIN_SDK,
             requiresNotifications = sdkInt >= 33,
         )
 

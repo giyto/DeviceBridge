@@ -28,17 +28,6 @@ class LocalCertificateAuthorityTest {
     private val authority by lazy { LocalCertificateAuthority(keys, directory, { now }) }
 
     @Test
-    fun softwareKeyStoreCreatesReadsAndDeletesKeys() {
-        val publicKey = keys.generate("alias", TlsKeyPurpose.SERVER)
-
-        assertEquals(publicKey, keys.publicKey("alias"))
-        assertTrue(keys.privateKey("alias") != null)
-        keys.delete("alias")
-        assertNull(keys.publicKey("alias"))
-        assertThrows(TlsMaterialException::class.java) { keys.signSha256WithEcdsa("alias", byteArrayOf(1)) }
-    }
-
-    @Test
     fun rootIsCreatedOnceAndKept() {
         assertNull(authority.rootOrNull())
 

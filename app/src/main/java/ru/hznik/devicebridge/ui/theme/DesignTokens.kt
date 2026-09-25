@@ -23,12 +23,6 @@ object BridgeBorders {
     val focused = 3.dp
 }
 
-object BridgeElevation {
-    val flat = 0.dp
-    val raised = 2.dp
-    val overlay = 6.dp
-}
-
 val BridgeShapes = Shapes(
     extraSmall = RoundedCornerShape(8.dp),
     small = RoundedCornerShape(12.dp),

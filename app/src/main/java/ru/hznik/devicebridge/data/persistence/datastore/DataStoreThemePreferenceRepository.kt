@@ -3,11 +3,8 @@ package ru.hznik.devicebridge.data.persistence.datastore
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.edit
-import androidx.datastore.preferences.core.emptyPreferences
 import androidx.datastore.preferences.core.stringPreferencesKey
-import java.io.IOException
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import ru.hznik.devicebridge.domain.repository.ThemePreferenceRepository
@@ -19,13 +16,7 @@ class DataStoreThemePreferenceRepository(
     private val dataStore: DataStore<Preferences>,
 ) : ThemePreferenceRepository {
     override val themePreference: Flow<ThemePreference?> = dataStore.data
-        .catch { failure ->
-            if (failure is IOException) {
-                emit(emptyPreferences())
-            } else {
-                throw failure
-            }
-        }
+        .orEmptyOnIoError()
         .map { preferences ->
             preferences[themePreferenceKey]
                 ?.let { stored -> ThemePreference.entries.firstOrNull { it.name == stored } }

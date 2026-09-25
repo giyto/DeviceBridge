@@ -25,7 +25,6 @@ class ApproveBrowserRequestUseCase(
     ) = when (decision) {
         BrowserApprovalDecision.ALLOW_ONCE -> repository.approve(requestId)
         BrowserApprovalDecision.ALLOW_AND_REMEMBER -> repository.approveAndRemember(requestId)
-        BrowserApprovalDecision.REJECT -> repository.deny(requestId)
     }
 }
 

@@ -16,7 +16,6 @@ import ru.hznik.devicebridge.domain.model.ServerLifecycleState
 import ru.hznik.devicebridge.domain.session.BrowserSessionState
 import ru.hznik.devicebridge.domain.settings.IdleStopTimeout
 import ru.hznik.devicebridge.domain.text.TextTransferState
-import ru.hznik.devicebridge.domain.text.TextTransferStatus
 
 /**
  * Stops a running server after [IdleStopTimeout] without live browser connections, pending
@@ -45,10 +44,8 @@ class IdleStopController(
                 connections, sessionState, texts, files ->
             connections > 0 ||
                 sessionState.pendingRequests.isNotEmpty() ||
-                texts.items.any {
-                    it.status == TextTransferStatus.PENDING || it.status == TextTransferStatus.SENDING
-                } ||
-                files.items.any { !it.phase.isTerminal }
+                texts.hasActiveTransfer ||
+                files.hasUnfinishedTransfer
         }
         combine(lifecycle, activity, timeout) { state, active, selected ->
             IdleInputs(

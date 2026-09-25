@@ -1,16 +1,22 @@
 import { SESSION_PROTOCOL_VERSION } from "./sessionApiClient";
 import { createProtocolMessageId } from "./protocolMessageId";
+import { isProtocolId, isRecord } from "./protocolGuards";
 import { BoundedReconnectPolicy } from "./reconnectPolicy";
-import type {
-  TextApiErrorCode,
-  TextContentKind,
-  TextTransferStatus,
+import { browserScheduler, type Scheduler } from "./scheduler";
+import {
+  isTextContentKind,
+  isTextErrorCode,
+  isTextTransferStatus,
+  type TextApiErrorCode,
+  type TextContentKind,
+  type TextTransferStatus,
 } from "./textApiClient";
 import {
   parseFileError,
   parseFileOffer,
   parseFileProgress,
   parseFileSnapshot,
+  type FileDirection,
   type FileErrorEvent,
   type FileOfferEvent,
   type FileProgressEvent,
@@ -24,11 +30,6 @@ export interface SocketLike {
   onerror: ((event: Event) => void) | null;
   send(data: string): void;
   close(): void;
-}
-
-export interface SocketScheduler {
-  setTimeout(callback: () => void, delayMs: number): unknown;
-  clearTimeout(handle: unknown): void;
 }
 
 export type SessionEventLossReason = "authorization" | "reconnect_exhausted";
@@ -46,7 +47,7 @@ export interface SessionEventCallbacks {
   readonly onFileError?: (event: FileErrorEvent) => void;
 }
 
-export type TextDirection = "ANDROID_TO_BROWSER" | "BROWSER_TO_ANDROID";
+export type TextDirection = FileDirection;
 
 export interface TextFeedItem {
   readonly messageId: string;
@@ -84,11 +85,6 @@ type SocketFactory = (url: string) => SocketLike;
 
 const MAX_DEDUPLICATED_TEXT_IDS = 100;
 
-const browserScheduler: SocketScheduler = {
-  setTimeout: (callback, delayMs) => globalThis.setTimeout(callback, delayMs),
-  clearTimeout: (handle) => globalThis.clearTimeout(handle as number),
-};
-
 export class SessionEventSocketClient {
   private generation = 0;
   private socket?: SocketLike;
@@ -98,7 +94,7 @@ export class SessionEventSocketClient {
   constructor(
     private readonly socketFactory: SocketFactory = (url) => new WebSocket(url),
     private readonly origin: string = globalThis.location.origin,
-    private readonly scheduler: SocketScheduler = browserScheduler,
+    private readonly scheduler: Scheduler = browserScheduler,
     private readonly createMessageId: () => string = createProtocolMessageId,
     private readonly now: () => number = () => Date.now(),
     private readonly reconnectPolicy: BoundedReconnectPolicy = new BoundedReconnectPolicy(),
@@ -329,13 +325,13 @@ function parseTextFeedItem(value: Record<string, unknown>): TextFeedItem | undef
     !isPositiveInteger(value.timestamp) ||
     typeof value.content !== "string" ||
     value.content.length === 0 ||
-    !isContentKind(value.contentKind) ||
+    !isTextContentKind(value.contentKind) ||
     !isDirection(value.direction) ||
     typeof value.senderLabel !== "string" ||
     value.senderLabel.trim().length === 0 ||
     value.senderLabel.length > 64 ||
     [...value.senderLabel].some((character) => isControlCharacter(character)) ||
-    !isTransferStatus(value.status)
+    !isTextTransferStatus(value.status)
   ) return undefined;
   return {
     messageId: value.messageId,
@@ -348,47 +344,15 @@ function parseTextFeedItem(value: Record<string, unknown>): TextFeedItem | undef
   };
 }
 
-function isProtocolId(value: unknown): value is string {
-  return typeof value === "string" &&
-    value.length >= 1 &&
-    value.length <= 64 &&
-    /^[A-Za-z0-9_-]+$/.test(value);
-}
-
 function isPositiveInteger(value: unknown): value is number {
   return typeof value === "number" && Number.isSafeInteger(value) && value > 0;
-}
-
-function isContentKind(value: unknown): value is TextContentKind {
-  return value === "TEXT" || value === "LINK";
 }
 
 function isDirection(value: unknown): value is TextDirection {
   return value === "ANDROID_TO_BROWSER" || value === "BROWSER_TO_ANDROID";
 }
 
-function isTransferStatus(value: unknown): value is TextTransferStatus {
-  return value === "PENDING" ||
-    value === "SENDING" ||
-    value === "DELIVERED" ||
-    value === "FAILED";
-}
-
-function isTextErrorCode(value: unknown): value is TextApiErrorCode {
-  return value === "INVALID_PAYLOAD" ||
-    value === "UNSUPPORTED_VERSION" ||
-    value === "CONTENT_TOO_LARGE" ||
-    value === "MESSAGE_CONFLICT" ||
-    value === "SESSION_UNAVAILABLE" ||
-    value === "UNAUTHORIZED" ||
-    value === "SESSION_CLOSED";
-}
-
 function isControlCharacter(value: string): boolean {
   const codePoint = value.codePointAt(0);
   return codePoint !== undefined && (codePoint <= 0x1f || codePoint === 0x7f);
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
 }

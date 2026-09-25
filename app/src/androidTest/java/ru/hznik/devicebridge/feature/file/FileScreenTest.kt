@@ -33,6 +33,7 @@ import ru.hznik.devicebridge.domain.file.FileTransferPhase
 import ru.hznik.devicebridge.domain.file.FileTransferFailure
 import ru.hznik.devicebridge.domain.file.FileDraftId
 import ru.hznik.devicebridge.domain.session.BrowserSessionId
+import ru.hznik.devicebridge.feature.common.RecipientUiState
 import ru.hznik.devicebridge.ui.theme.DeviceBridgeTheme
 
 @RunWith(AndroidJUnit4::class)
@@ -348,7 +349,7 @@ class FileScreenTest {
                     ),
                 ),
                 recipients = listOf(
-                    FileRecipientUiState(sessionId, "Chrome", "192.168.1.2", selected = true),
+                    RecipientUiState(sessionId, "Chrome", "192.168.1.2", selected = true),
                 ),
                 selectedSessionId = sessionId,
                 transfers = listOf(
@@ -389,7 +390,7 @@ class FileScreenTest {
         setScreen(
             FileUiState(
                 recipients = listOf(
-                    FileRecipientUiState(
+                    RecipientUiState(
                         id = sessionId,
                         browserLabel = "Edge",
                         sourceIpv4 = "192.168.1.3",

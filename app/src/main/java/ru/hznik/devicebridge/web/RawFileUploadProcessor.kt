@@ -8,6 +8,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
+import ru.hznik.devicebridge.core.text.toLowerHex
 import ru.hznik.devicebridge.data.file.FileUploadTarget
 import ru.hznik.devicebridge.domain.file.HARD_MAX_FILE_BYTES
 import ru.hznik.devicebridge.domain.file.FileTransferMetadata
@@ -22,7 +23,13 @@ enum class RawFileUploadResult {
     Failed,
 }
 
-class RawFileUploadProcessor(
+/** What was actually received for the whole file: its length and SHA-256 as lowercase hex. */
+data class ReceivedFileDigest(
+    val sizeBytes: Long,
+    val sha256: String,
+)
+
+open class RawFileUploadProcessor(
     private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
     private val bufferSize: Int = 64 * 1024,
 ) {
@@ -34,13 +41,18 @@ class RawFileUploadProcessor(
      * Writes the request body after the [FileUploadTarget.offsetBytes] already stored and checks
      * the SHA-256 of the whole file. An interrupted body keeps what was written for a later
      * resume; a wrong checksum or an oversized body deletes the output.
+     *
+     * Once the whole file has been read, [onReceived] gets the length and SHA-256 measured over
+     * it (the stored prefix included) before they are compared with [metadata]; it is always
+     * called before [RawFileUploadResult.Completed] is returned.
      */
-    suspend fun receive(
+    open suspend fun receive(
         channel: ByteReadChannel,
         metadata: FileTransferMetadata,
         declaredContentLength: Long?,
         target: FileUploadTarget,
         onProgress: suspend (Long) -> Unit = {},
+        onReceived: (ReceivedFileDigest) -> Unit = {},
     ): RawFileUploadResult {
         var committed = false
         var keepPartial = true
@@ -76,7 +88,8 @@ class RawFileUploadProcessor(
                 onProgress(total)
             }
             if (total != metadata.sizeBytes) return RawFileUploadResult.PrematureEof
-            val actualHash = digest.digest().toHex()
+            val actualHash = digest.digest().toLowerHex()
+            onReceived(ReceivedFileDigest(sizeBytes = total, sha256 = actualHash))
             if (!actualHash.equals(metadata.sha256, ignoreCase = true)) {
                 keepPartial = false
                 return RawFileUploadResult.ChecksumMismatch
@@ -103,10 +116,6 @@ class RawFileUploadProcessor(
                 runCatching { target.close() }
             }
         }
-    }
-
-    private fun ByteArray.toHex(): String = buildString(size * 2) {
-        this@toHex.forEach { byte -> append("%02x".format(byte)) }
     }
 
     private fun Throwable.isInsufficientSpace(): Boolean =

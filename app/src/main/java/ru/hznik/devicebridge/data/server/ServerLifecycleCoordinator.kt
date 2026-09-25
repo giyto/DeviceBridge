@@ -17,6 +17,7 @@ import javax.inject.Inject
 import javax.inject.Singleton
 import ru.hznik.devicebridge.data.network.LanNetworkEvent
 import ru.hznik.devicebridge.data.network.LanNetworkObserver
+import ru.hznik.devicebridge.data.permission.LOCAL_NETWORK_PERMISSION_MIN_SDK
 import ru.hznik.devicebridge.data.permission.PermissionRevocationObserver
 import ru.hznik.devicebridge.data.permission.ServerPermissionGateway
 import ru.hznik.devicebridge.data.permission.ServerPermissionSnapshot
@@ -57,12 +58,7 @@ class ServerLifecycleCoordinator @Inject constructor(
 
     override suspend fun start() {
         mutex.withLock {
-            if (
-                mutableState.value !is ServerLifecycleState.Stopped &&
-                mutableState.value !is ServerLifecycleState.Error
-            ) {
-                return
-            }
+            if (!mutableState.value.isIdle) return
 
             mutableLastStopReason.value = null
             val currentGeneration = ++generation
@@ -101,9 +97,7 @@ class ServerLifecycleCoordinator @Inject constructor(
                 )
                 observeEndpoint(currentGeneration, newRuntime)
             } catch (throwable: Throwable) {
-                stopObservingEndpoint()
-                permissionRevocationObserver.stop()
-                lanNetworkObserver.stop()
+                stopObservers()
                 runCatching { newRuntime?.closeSessionGeneration() }
                 runCatching { newRuntime?.stop() }
                 activeRuntime = null
@@ -136,9 +130,7 @@ class ServerLifecycleCoordinator @Inject constructor(
                 mutableState.value,
                 ServerLifecycleEvent.StopRequested(currentGeneration),
             )
-            stopObservingEndpoint()
-            permissionRevocationObserver.stop()
-            lanNetworkObserver.stop()
+            stopObservers()
             val runtime = activeRuntime
             activeRuntime = null
             try {
@@ -179,12 +171,7 @@ class ServerLifecycleCoordinator @Inject constructor(
 
     suspend fun reportExternalStartFailure(cause: ServerLifecycleError) {
         mutex.withLock {
-            if (
-                mutableState.value !is ServerLifecycleState.Stopped &&
-                mutableState.value !is ServerLifecycleState.Error
-            ) {
-                return
-            }
+            if (!mutableState.value.isIdle) return
             mutableState.value = ServerLifecycleState.Error(
                 generation = ++generation,
                 cause = cause,
@@ -205,9 +192,7 @@ class ServerLifecycleCoordinator @Inject constructor(
                 mutableState.value,
                 ServerLifecycleEvent.Failed(generation, cause),
             )
-            stopObservingEndpoint()
-            permissionRevocationObserver.stop()
-            lanNetworkObserver.stop()
+            stopObservers()
             val runtime = activeRuntime
             activeRuntime = null
             runCatching { runtime?.closeSessionGeneration() }
@@ -224,7 +209,7 @@ class ServerLifecycleCoordinator @Inject constructor(
         }
         val permissions = permissionGateway.snapshot()
         return if (
-            permissions.sdkInt >= 37 &&
+            permissions.sdkInt >= LOCAL_NETWORK_PERMISSION_MIN_SDK &&
             !permissions.localNetworkGranted
         ) {
             ServerLifecycleState.Error(
@@ -249,9 +234,11 @@ class ServerLifecycleCoordinator @Inject constructor(
         }
     }
 
-    private fun stopObservingEndpoint() {
+    private fun stopObservers() {
         endpointChangesJob?.cancel()
         endpointChangesJob = null
+        permissionRevocationObserver.stop()
+        lanNetworkObserver.stop()
     }
 
     private fun observeNetwork(
@@ -317,13 +304,5 @@ class ServerLifecycleCoordinator @Inject constructor(
                 localNetworkGranted = true,
                 notificationsGranted = true,
             )
-    }
-
-    private fun ServerLifecycleState.generationOrNull(): Long? = when (this) {
-        ServerLifecycleState.Stopped -> null
-        is ServerLifecycleState.Starting -> generation
-        is ServerLifecycleState.Running -> generation
-        is ServerLifecycleState.Stopping -> generation
-        is ServerLifecycleState.Error -> generation
     }
 }

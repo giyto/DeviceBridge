@@ -2,65 +2,43 @@ import {
   FileApiError,
   HARD_MAX_FILE_BYTES,
   RESUMABLE_UPLOAD_MIN_BYTES,
+  isTerminalStatus,
   type FileApiClient,
   type FileErrorEvent,
   type FileMetadata,
   type FileOfferEvent,
   type FileProgressEvent,
   type FileSnapshotEvent,
-  type FileSnapshotItem,
   type FileTransferStatus,
 } from "./fileApiClient";
+import {
+  MAX_TRANSFER_ITEMS,
+  appendBounded,
+  defaultDisplayName,
+  fileCodeMessage,
+  isStaleStage,
+  matchesSourceMetadata,
+  mimeOf,
+  safeErrorMessage,
+  selectionError,
+  toUiItem,
+  upsertBounded,
+  type FileSelectionPreview,
+  type FileTransferUiItem,
+  type FileTransferUiState,
+} from "./fileTransferModel";
 import type { NativeFileDownloader } from "./nativeFileDownloader";
 import type { XhrFileUploader } from "./xhrFileUploader";
+import { isAbortError } from "./protocolGuards";
 
 const MAX_BATCH_ITEMS = 32;
-const MAX_TRANSFER_ITEMS = 100;
 const NETWORK_INTERRUPTED_MESSAGE = "Сеть прервала передачу файла.";
-
-export interface FileSelectionPreview {
-  readonly key: string;
-  readonly displayName: string;
-  readonly sizeBytes: number;
-  readonly mimeType: string;
-  readonly error?: string;
-}
 
 interface DraftFile {
   readonly key: string;
   readonly file: File;
   readonly error?: string;
 }
-
-export interface FileTransferUiItem {
-  readonly id: string;
-  readonly metadata: FileMetadata;
-  readonly status: FileTransferStatus;
-  readonly bytesTransferred: number;
-  readonly speedBytesPerSecond: number;
-  readonly localError?: string;
-  /** A failed item can continue from these bytes (server-reported). */
-  readonly resumableBytes?: number;
-  /** The server is reading the part it kept before the upload continues. */
-  readonly checkingSavedPart?: boolean;
-  /** The running upload continues after this many bytes kept on the phone. */
-  readonly resumedFromBytes?: number;
-  /** Percent of the source file re-read before a retry (the source must be unchanged). */
-  readonly checkingSourcePercent?: number;
-  /** Cancelled on the phone rather than in this browser. */
-  readonly cancelledOnPhone?: boolean;
-}
-
-export type FileTransferUiState =
-  | Readonly<{ kind: "inactive" }>
-  | Readonly<{
-      kind: "active";
-      connectionAvailable: boolean;
-      selection: readonly FileSelectionPreview[];
-      transfers: readonly FileTransferUiItem[];
-      preparing: boolean;
-      error?: string;
-    }>;
 
 export interface FileApi {
   offer: FileApiClient["offer"];
@@ -188,10 +166,6 @@ export class FileTransferController {
     return this.state;
   }
 
-  selectFiles(files: readonly File[]): void {
-    this.addFiles(files);
-  }
-
   addFiles(files: readonly File[]): void {
     if (this.state.kind !== "active") return;
     if (files.length === 0) return;
@@ -251,9 +225,9 @@ export class FileTransferController {
         if (!this.isCurrent(generation, token)) return;
         const metadata: FileMetadata = {
           transferId,
-          displayName: file.name || "file-" + transferId.slice(0, 8),
+          displayName: defaultDisplayName(file, transferId),
           sizeBytes: file.size,
-          mimeType: file.type || "application/octet-stream",
+          mimeType: mimeOf(file),
           sha256,
           direction: "BROWSER_TO_ANDROID",
         };
@@ -417,24 +391,16 @@ export class FileTransferController {
   }
 
   async cancel(transferId: string): Promise<void> {
-    if (
-      this.state.kind !== "active" ||
-      !this.state.connectionAvailable ||
-      this.token === undefined
-    ) return;
-    this.operations.get(transferId)?.abort();
+    const context = this.operationContext(transferId);
+    if (context === undefined) return;
     this.localCancels.add(transferId);
-    const controller = new AbortController();
-    this.operations.set(transferId, controller);
-    const generation = this.generation;
-    const token = this.token;
     try {
-      const snapshot = await this.api.cancel(token, transferId, controller.signal);
-      if (this.isCurrent(generation, token)) this.applySnapshot(snapshot);
+      const snapshot = await this.api.cancel(context.token, transferId, context.controller.signal);
+      if (this.isCurrent(context.generation, context.token)) this.applySnapshot(snapshot);
     } catch (error: unknown) {
       if (!isAbortError(error)) this.handleOperationError(error, transferId);
     } finally {
-      this.finishOperation(transferId, controller);
+      this.finishOperation(transferId, context.controller);
     }
   }
 
@@ -657,7 +623,7 @@ export class FileTransferController {
       key: draft.key,
       displayName: draft.file.name || `file-${index + 1}`,
       sizeBytes: draft.file.size,
-      mimeType: draft.file.type || "application/octet-stream",
+      mimeType: mimeOf(draft.file),
       ...(draft.error === undefined ? {} : { error: draft.error }),
     }));
   }
@@ -724,142 +690,4 @@ export class FileTransferController {
     this.pendingProgress.clear();
     this.localCancels.clear();
   }
-}
-
-function toUiItem(item: FileSnapshotItem): FileTransferUiItem {
-  return {
-    id: item.metadata.transferId,
-    metadata: item.metadata,
-    status: item.status,
-    bytesTransferred: item.bytesTransferred,
-    speedBytesPerSecond: item.speedBytesPerSecond,
-    ...(item.resumableBytes === undefined ? {} : { resumableBytes: item.resumableBytes }),
-  };
-}
-
-function upsertBounded(
-  items: readonly FileTransferUiItem[],
-  item: FileTransferUiItem,
-): readonly FileTransferUiItem[] {
-  const existing = items.find((candidate) => candidate.id === item.id);
-  const safeItem = existing === undefined
-    ? item
-    : {
-        ...item,
-        bytesTransferred: item.status === existing.status
-          ? Math.max(existing.bytesTransferred, item.bytesTransferred)
-          : item.bytesTransferred,
-        // Local upload stages outlive server updates until the item settles.
-        checkingSavedPart: isSettled(item.status)
-          ? undefined
-          : item.checkingSavedPart ?? existing.checkingSavedPart,
-        resumedFromBytes: isSettled(item.status)
-          ? undefined
-          : item.resumedFromBytes ?? existing.resumedFromBytes,
-      };
-  const next = existing === undefined
-    ? [...items, safeItem]
-    : items.map((candidate) => candidate.id === item.id ? safeItem : candidate);
-  return next.length <= MAX_TRANSFER_ITEMS ? next : next.slice(next.length - MAX_TRANSFER_ITEMS);
-}
-
-const ACTIVE_STAGE_ORDER: ReadonlyArray<FileTransferStatus> = [
-  "QUEUED",
-  "CONNECTING",
-  "TRANSFERRING",
-  "VERIFYING",
-];
-
-/** Within one attempt an item only moves forward; an older answer must not move it back. */
-function isStaleStage(current: FileTransferStatus, incoming: FileTransferStatus): boolean {
-  const currentIndex = ACTIVE_STAGE_ORDER.indexOf(current);
-  const incomingIndex = ACTIVE_STAGE_ORDER.indexOf(incoming);
-  return currentIndex >= 0 && incomingIndex >= 0 && incomingIndex < currentIndex;
-}
-
-function isTerminalStatus(status: FileTransferStatus): boolean {
-  return status === "COMPLETED" || status === "CANCELLED" || status === "FAILED";
-}
-
-function isSettled(status: FileTransferStatus): boolean {
-  return status === "COMPLETED" || status === "CANCELLED" || status === "FAILED" || status === "QUEUED";
-}
-
-function appendBounded(
-  items: readonly FileTransferUiItem[],
-  item: FileTransferUiItem,
-): readonly FileTransferUiItem[] {
-  const next = [...items, item];
-  return next.length <= MAX_TRANSFER_ITEMS ? next : next.slice(next.length - MAX_TRANSFER_ITEMS);
-}
-
-function safeErrorMessage(error: unknown): string {
-  if (error instanceof FileApiError) return error.message;
-  return error instanceof Error && error.message.startsWith("Сеть")
-    ? error.message
-    : "Не удалось выполнить файловую операцию.";
-}
-
-function fileCodeMessage(
-  code: FileErrorEvent["code"],
-  effectiveFileLimitBytes: number,
-): string {
-  switch (code) {
-    case "FILE_TOO_LARGE": return fileLimitMessage(effectiveFileLimitBytes);
-    case "CHECKSUM_MISMATCH": return "Контрольная сумма файла не совпала.";
-    case "DESTINATION_UNAVAILABLE": return "Папка назначения недоступна.";
-    case "INSUFFICIENT_SPACE": return "На устройстве недостаточно свободного места.";
-    case "SOURCE_UNAVAILABLE": return "Исходный файл недоступен или изменился.";
-    case "NOT_APPROVED": return "Подтвердите передачу на телефоне.";
-    case "CANCELLED": return "Передача отменена.";
-    case "SESSION_UNAVAILABLE":
-    case "UNAUTHORIZED": return "Сессия браузера завершена.";
-    case "STREAM_FAILED": return "Поток передачи был прерван.";
-    case "MESSAGE_CONFLICT": return "Команда передачи конфликтует с предыдущей.";
-    case "UNSUPPORTED_VERSION": return "Версия file protocol не поддерживается.";
-    case "INVALID_PAYLOAD": return "Некорректная файловая операция.";
-  }
-}
-
-function isAbortError(error: unknown): boolean {
-  return error instanceof DOMException && error.name === "AbortError";
-}
-
-function matchesSourceMetadata(file: File, metadata: FileMetadata): boolean {
-  return file.size === metadata.sizeBytes &&
-    (file.name || "file-" + metadata.transferId.slice(0, 8)) === metadata.displayName &&
-    (file.type || "application/octet-stream") === metadata.mimeType;
-}
-
-function selectionError(file: File, effectiveFileLimitBytes: number): string | undefined {
-  if (!Number.isSafeInteger(file.size) || file.size < 0) {
-    return "Не удалось определить размер файла.";
-  }
-  if (file.size > effectiveFileLimitBytes) {
-    return fileLimitMessage(effectiveFileLimitBytes);
-  }
-  if (
-    file.name.length > 255 ||
-    [...file.name].some((character) => {
-      const code = character.codePointAt(0) ?? 0;
-      return code <= 0x1f || code === 0x7f;
-    })
-  ) {
-    return "Имя файла не поддерживается.";
-  }
-  if (file.type.length > 127 || [...file.type].some((character) => character.charCodeAt(0) <= 0x1f)) {
-    return "Тип файла не поддерживается.";
-  }
-  return undefined;
-}
-
-function fileLimitMessage(bytes: number): string {
-  const formatted = bytes >= 1024 ** 3
-    ? `${bytes / 1024 ** 3} ГиБ`
-    : bytes >= 1024 ** 2
-      ? `${bytes / 1024 ** 2} МиБ`
-      : bytes >= 1024
-        ? `${bytes / 1024} КиБ`
-        : `${bytes} Б`;
-  return `Файл превышает установленный лимит ${formatted}.`;
 }

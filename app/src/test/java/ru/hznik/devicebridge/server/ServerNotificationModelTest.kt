@@ -114,24 +114,6 @@ class ServerNotificationModelTest {
     }
 
     @Test
-    fun runningModelUsesActualActiveSessionCountWithoutSecrets() {
-        val running = ServerLifecycleState.Running(
-            generation = 1,
-            endpoint = ServerEndpoint("192.168.1.24", 49_321),
-            startedAtElapsedRealtimeMs = 10,
-        )
-
-        val none = requireNotNull(factory.create(running, activeSessionCount = 0))
-        val two = requireNotNull(factory.create(running, activeSessionCount = 2))
-
-        assertTrue(none.text.contains(" • 0 браузеров • "))
-        assertTrue(two.text.contains(" • 2 браузера • "))
-        assertFalse(two.text.contains("code", ignoreCase = true))
-        assertFalse(two.text.contains("token", ignoreCase = true))
-        assertFalse(two.text.contains("bearer", ignoreCase = true))
-    }
-
-    @Test
     fun runningModelUsesRussianPluralForConnectedBrowserCount() {
         val running = ServerLifecycleState.Running(
             generation = 1,

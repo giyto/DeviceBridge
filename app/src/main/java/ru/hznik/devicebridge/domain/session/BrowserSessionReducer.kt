@@ -47,11 +47,6 @@ sealed interface BrowserSessionEvent {
 
     data class SourceBlockCleared(val generationId: ServerGenerationId) : BrowserSessionEvent
 
-    data class Failed(
-        val generationId: ServerGenerationId,
-        val error: BrowserSessionError,
-    ) : BrowserSessionEvent
-
     data class Deactivated(val generationId: ServerGenerationId) : BrowserSessionEvent
 }
 
@@ -67,14 +62,14 @@ object BrowserSessionReducer {
         )
 
         is BrowserSessionEvent.PairingCodeRotated -> current.ifGeneration(event.generationId) {
-            evolve(pairingCode = event.pairingCode, error = null)
+            evolve(pairingCode = event.pairingCode)
         }
 
         is BrowserSessionEvent.RequestAdded -> current.ifGeneration(event.request.generationId) {
             if (pendingRequests.any { it.id == event.request.id }) {
                 this
             } else {
-                evolve(pendingRequests = pendingRequests + event.request, error = null)
+                evolve(pendingRequests = pendingRequests + event.request)
             }
         }
 
@@ -99,7 +94,6 @@ object BrowserSessionReducer {
                     pairingCode = event.nextPairingCode,
                     pendingRequests = pendingRequests.filterNot { it.id == event.requestId },
                     sessions = sessions + event.session,
-                    error = null,
                 )
             }
         }
@@ -119,7 +113,7 @@ object BrowserSessionReducer {
             ) {
                 this
             } else {
-                evolve(sessions = sessions + event.session, error = null)
+                evolve(sessions = sessions + event.session)
             }
         }
 
@@ -129,10 +123,6 @@ object BrowserSessionReducer {
 
         is BrowserSessionEvent.SourceBlockCleared -> current.ifGeneration(event.generationId) {
             if (blockedUntilElapsedRealtimeMs == null) this else evolve(blockedUntilElapsedRealtimeMs = null)
-        }
-
-        is BrowserSessionEvent.Failed -> current.ifGeneration(event.generationId) {
-            evolve(error = event.error)
         }
 
         is BrowserSessionEvent.Deactivated -> current.ifGeneration(event.generationId) {

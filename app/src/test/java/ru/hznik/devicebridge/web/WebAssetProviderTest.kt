@@ -23,7 +23,6 @@ class WebAssetProviderTest {
     fun rootResolvesToAllowlistedIndexWithExactMetadata() {
         val asset = requireNotNull(provider.find("/"))
 
-        assertEquals("index.html", asset.path)
         assertEquals("text/html; charset=utf-8", asset.contentType)
         assertEquals(files.getValue("index.html").size.toLong(), asset.length)
         assertArrayEquals(files.getValue("index.html"), asset.openStream().use(InputStream::readBytes))

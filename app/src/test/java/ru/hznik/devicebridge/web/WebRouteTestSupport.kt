@@ -1,5 +1,6 @@
 package ru.hznik.devicebridge.web
 
+import io.ktor.server.application.Application
 import io.ktor.server.cio.CIO
 import io.ktor.server.engine.embeddedServer
 import java.io.ByteArrayInputStream
@@ -45,6 +46,11 @@ internal fun <T> withWebRouteServer(
         engine.stop(gracePeriodMillis = 0, timeoutMillis = 2_000)
     }
 }
+
+private fun Application.installWebRoutes(
+    webAssetProvider: WebAssetProvider,
+    allowedHosts: Set<String>,
+) = installWebRoutes(webAssetProvider) { allowedHosts }
 
 internal fun defaultWebFiles(): Map<String, ByteArray> = mapOf(
     "index.html" to "<!doctype html><title>DeviceBridge</title>".encodeToByteArray(),

@@ -1,8 +1,10 @@
+import { required } from "./dom";
 import type {
   TextTransferUiItem,
   TextTransferUiState,
 } from "./textTransferController";
 import {
+  directionLabel,
   textItemPresentationState,
   textPresentationState,
 } from "./uiPresentationState";
@@ -33,18 +35,35 @@ export function createTextTransferView(
   clipboard: ClipboardWriter = new BrowserClipboardWriter(),
   linkOpener: LinkOpener = new BrowserLinkOpener(),
 ): TextTransferView {
-  const section = requiredElement<HTMLElement>(
+  const section = required<HTMLElement>(
     documentRef,
     '[data-role="text-transfer"]',
+    "text transfer",
   );
-  const form = requiredElement<HTMLFormElement>(documentRef, '[data-role="text-form"]');
-  const draft = requiredElement<HTMLTextAreaElement>(documentRef, "#text-draft");
-  const send = requiredElement<HTMLButtonElement>(documentRef, '[data-action="send-text"]');
-  const error = requiredElement<HTMLElement>(documentRef, '[data-role="text-error"]');
-  const feed = requiredElement<HTMLOListElement>(documentRef, '[data-role="text-feed"]');
-  const empty = requiredElement<HTMLElement>(documentRef, '[data-role="text-feed-empty"]');
-  const count = requiredElement<HTMLElement>(documentRef, '[data-role="text-feed-count"]');
-  const announcer = requiredElement<HTMLElement>(documentRef, '[data-role="text-announcer"]');
+  const form = required<HTMLFormElement>(documentRef, '[data-role="text-form"]', "text transfer");
+  const draft = required<HTMLTextAreaElement>(documentRef, "#text-draft", "text transfer");
+  const send = required<HTMLButtonElement>(
+    documentRef,
+    '[data-action="send-text"]',
+    "text transfer",
+  );
+  const error = required<HTMLElement>(documentRef, '[data-role="text-error"]', "text transfer");
+  const feed = required<HTMLOListElement>(documentRef, '[data-role="text-feed"]', "text transfer");
+  const empty = required<HTMLElement>(
+    documentRef,
+    '[data-role="text-feed-empty"]',
+    "text transfer",
+  );
+  const count = required<HTMLElement>(
+    documentRef,
+    '[data-role="text-feed-count"]',
+    "text transfer",
+  );
+  const announcer = required<HTMLElement>(
+    documentRef,
+    '[data-role="text-announcer"]',
+    "text transfer",
+  );
   const itemCards = new Map<string, HTMLLIElement>();
   const itemFingerprints = new Map<string, string>();
   const knownStatuses = new Map<string, TextTransferUiItem["status"]>();
@@ -145,9 +164,6 @@ function createItem(
   const card = documentRef.createElement("li");
   card.className = "text-card";
   card.dataset.messageId = item.messageId;
-  card.dataset.direction = item.direction;
-  card.dataset.status = item.status;
-  card.dataset.viewState = textItemPresentationState(item.status);
 
   const metadata = documentRef.createElement("div");
   metadata.className = "text-card__metadata";
@@ -155,9 +171,7 @@ function createItem(
   const sender = documentRef.createElement("strong");
   sender.textContent = item.senderLabel;
   const direction = documentRef.createElement("span");
-  direction.textContent = item.direction === "ANDROID_TO_BROWSER"
-    ? "С телефона"
-    : "На телефон";
+  direction.textContent = directionLabel(item.direction);
   const timestamp = documentRef.createElement("time");
   const date = new Date(item.timestamp);
   timestamp.dateTime = date.toISOString();
@@ -180,10 +194,10 @@ function createItem(
   actionRow.setAttribute("role", "group");
   actionRow.setAttribute("aria-label", "Действия с сообщением");
   const kind = documentRef.createElement("span");
-  kind.textContent = item.contentKind === "LINK" ? "Ссылка" : "Текст";
+  kind.textContent = kindLabel(item.contentKind);
+  // The status text, like the card state, is filled by updateItemState below.
   const status = documentRef.createElement("span");
   status.className = "text-card__status";
-  status.textContent = statusLabel(item.status);
   summary.append(kind, status);
   footer.append(summary, actionRow);
 
@@ -205,7 +219,6 @@ function createItem(
   copy.dataset.copyMessageId = item.messageId;
   copy.textContent = "Копировать";
   actionRow.append(copy);
-
 
   const copyStatus = documentRef.createElement("span");
   copyStatus.className = "text-card__copy-status";
@@ -300,7 +313,7 @@ function updateItemState(
   connectionAvailable: boolean,
 ): void {
   const direction = directionLabel(item.direction);
-  const kind = item.contentKind === "LINK" ? "Ссылка" : "Текст";
+  const kind = kindLabel(item.contentKind);
   const status = statusLabel(item.status);
   card.dataset.direction = item.direction;
   card.dataset.status = item.status;
@@ -359,8 +372,8 @@ function immutableItemFingerprint(item: TextTransferUiItem): string {
   ]);
 }
 
-function directionLabel(direction: TextTransferUiItem["direction"]): string {
-  return direction === "ANDROID_TO_BROWSER" ? "С телефона" : "На телефон";
+function kindLabel(contentKind: TextTransferUiItem["contentKind"]): string {
+  return contentKind === "LINK" ? "Ссылка" : "Текст";
 }
 function statusLabel(status: TextTransferUiItem["status"]): string {
   switch (status) {
@@ -375,15 +388,4 @@ function statusLabel(status: TextTransferUiItem["status"]): string {
     case "FAILED":
       return "Ошибка";
   }
-}
-
-function requiredElement<T extends Element>(
-  documentRef: Document,
-  selector: string,
-): T {
-  const element = documentRef.querySelector<T>(selector);
-  if (element === null) {
-    throw new Error(`Required text transfer element is missing: ${selector}`);
-  }
-  return element;
 }

@@ -1,7 +1,6 @@
 import {
   TextApiError,
   type TextAccepted,
-  type TextApiClient,
   type TextApiErrorCode,
   type TextContentKind,
   type TextSendCommand,
@@ -15,6 +14,7 @@ import type {
   TextSnapshotEvent,
 } from "./sessionEventSocketClient";
 import { createProtocolMessageId } from "./protocolMessageId";
+import { isAbortError } from "./protocolGuards";
 
 const MAX_FEED_ITEMS = 100;
 
@@ -117,19 +117,12 @@ export class TextTransferController {
 
   deactivate(): void {
     if (this.draftScopeId !== undefined) this.draftStore.clear(this.draftScopeId);
-    this.beginNewGeneration();
-    this.token = undefined;
-    this.draftScopeId = undefined;
-    this.retryCommands.clear();
-    this.emit({ kind: "inactive" });
+    this.reset();
   }
 
+  /** Like [deactivate], but keeps the stored draft. */
   dispose(): void {
-    this.beginNewGeneration();
-    this.token = undefined;
-    this.draftScopeId = undefined;
-    this.retryCommands.clear();
-    this.emit({ kind: "inactive" });
+    this.reset();
   }
 
   setConnectionAvailable(available: boolean): void {
@@ -151,11 +144,7 @@ export class TextTransferController {
   updateDraft(draft: string): void {
     if (this.state.kind !== "active") return;
     this.emit({ ...this.state, draft, error: undefined });
-    const scopeId = this.draftScopeId;
-    if (scopeId !== undefined) {
-      if (draft.length === 0) this.draftStore.clear(scopeId);
-      else this.draftStore.save(scopeId, draft);
-    }
+    this.persistDraft(draft);
   }
 
   sendDraft(): void {
@@ -250,6 +239,21 @@ export class TextTransferController {
       });
   }
 
+  private reset(): void {
+    this.beginNewGeneration();
+    this.token = undefined;
+    this.draftScopeId = undefined;
+    this.retryCommands.clear();
+    this.emit({ kind: "inactive" });
+  }
+
+  private persistDraft(draft: string): void {
+    const scopeId = this.draftScopeId;
+    if (scopeId === undefined) return;
+    if (draft.length === 0) this.draftStore.clear(scopeId);
+    else this.draftStore.save(scopeId, draft);
+  }
+
   private upsertOutgoing(
     command: TextSendCommand,
     status: TextTransferStatus,
@@ -279,11 +283,7 @@ export class TextTransferController {
     if (previous === undefined) return;
     this.retryCommands.delete(command.messageId);
     const draft = this.state.draft === command.content ? "" : this.state.draft;
-    const scopeId = this.draftScopeId;
-    if (scopeId !== undefined) {
-      if (draft.length === 0) this.draftStore.clear(scopeId);
-      else this.draftStore.save(scopeId, draft);
-    }
+    this.persistDraft(draft);
     this.emit({
       ...this.state,
       draft,
@@ -397,9 +397,3 @@ function errorMessage(code: TextApiErrorCode): string {
       return "Некорректное текстовое сообщение.";
   }
 }
-
-function isAbortError(error: unknown): boolean {
-  return error instanceof DOMException && error.name === "AbortError";
-}
-
-export type { TextApiClient };

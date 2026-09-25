@@ -54,9 +54,6 @@ class RoomHistoryRepository(
 
     override suspend fun clear(): Int = dao.clear()
 
-    override suspend fun deleteOlderThan(cutoffEpochMillis: Long): Int =
-        dao.deleteOlderThan(cutoffEpochMillis)
-
     private suspend fun cleanupExpired(): Int {
         val retentionDays = settingsRepository.settings.first().retentionDays
         val cutoffEpochMillis = clock.millis() - retentionDays * MILLIS_PER_DAY

@@ -1,5 +1,7 @@
-import type { FileTransferUiState } from "./fileTransferController";
+import type { FileDirection, FileTransferStatus } from "./fileApiClient";
+import type { FileTransferUiState } from "./fileTransferModel";
 import type { SessionUiState } from "./sessionController";
+import type { TextTransferStatus } from "./textApiClient";
 import type { TextTransferUiState } from "./textTransferController";
 
 export type UiPresentationState =
@@ -59,8 +61,7 @@ export function filePresentationState(state: FileTransferUiState): UiPresentatio
 }
 
 export function transferItemPresentationState(
-  status: "QUEUED" | "CONNECTING" | "TRANSFERRING" | "VERIFYING" |
-    "COMPLETED" | "CANCELLED" | "FAILED",
+  status: FileTransferStatus,
 ): UiPresentationState {
   switch (status) {
     case "QUEUED":
@@ -78,7 +79,7 @@ export function transferItemPresentationState(
 }
 
 export function textItemPresentationState(
-  status: "PENDING" | "SENDING" | "UNCERTAIN" | "DELIVERED" | "FAILED",
+  status: TextTransferStatus,
 ): UiPresentationState {
   switch (status) {
     case "PENDING":
@@ -90,4 +91,9 @@ export function textItemPresentationState(
     case "FAILED":
       return "error";
   }
+}
+
+/** Which way a text or file travels, as its card names it. */
+export function directionLabel(direction: FileDirection): string {
+  return direction === "ANDROID_TO_BROWSER" ? "С телефона" : "На телефон";
 }

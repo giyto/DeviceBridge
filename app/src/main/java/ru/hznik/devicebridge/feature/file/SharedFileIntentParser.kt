@@ -10,14 +10,11 @@ enum class SharedFileIntentError {
 
 data class SharedFileDraftItem(
     val uri: String,
-    val mimeType: String?,
     val error: SharedFileIntentError?,
 )
 
 data class SharedFileDraft(
     val items: List<SharedFileDraftItem>,
-    val requiresConfirmation: Boolean = true,
-    val confirmed: Boolean = false,
     val requestId: Long = 0,
 )
 
@@ -38,7 +35,6 @@ object SharedFileIntentParser {
             items = distinctUris.map { uri ->
                 SharedFileDraftItem(
                     uri = uri.toString(),
-                    mimeType = intent.type,
                     error = if (uri.scheme == ContentScheme) {
                         null
                     } else {

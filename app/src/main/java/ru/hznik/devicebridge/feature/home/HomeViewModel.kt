@@ -98,30 +98,9 @@ class HomeViewModel @Inject constructor(
             ) { lifecycle, (sessions, connectedIds), textTransfers, fileTransfers, _ ->
                 HomeSourceState(lifecycle, sessions, connectedIds, textTransfers, fileTransfers)
             }.collectLatest { source ->
-                val state = source.lifecycle
-                mutableUiState.update { previous ->
-                    state.toUiState(
-                        source.sessions,
-                        source.connectedSessionIds,
-                        source.textTransfers,
-                        source.fileTransfers,
-                        monotonicClock.nowMs(),
-                        previous,
-                    )
-                }
-                if (state is ServerLifecycleState.Running) {
-                    uptimeTicker.ticks().collect {
-                        mutableUiState.update { previous ->
-                            state.toUiState(
-                                source.sessions,
-                                source.connectedSessionIds,
-                                source.textTransfers,
-                                source.fileTransfers,
-                                monotonicClock.nowMs(),
-                                previous,
-                            )
-                        }
-                    }
+                render(source)
+                if (source.lifecycle is ServerLifecycleState.Running) {
+                    uptimeTicker.ticks().collect { render(source) }
                 }
             }
         }
@@ -167,39 +146,54 @@ class HomeViewModel @Inject constructor(
         decision: suspend (PairingRequestId) -> Unit,
     ) {
         if (browserSessionState.value.pendingRequests.none { it.id == requestId }) return
-        if (!decidingRequestIds.add(requestId)) return
-        refreshSessionUi()
-        viewModelScope.launch {
-            try {
-                decision(requestId)
-            } finally {
-                decidingRequestIds.remove(requestId)
-                refreshSessionUi()
-            }
-        }
+        runWhilePending(decidingRequestIds, requestId) { decision(requestId) }
     }
 
     private fun revokeSession(sessionId: BrowserSessionId) {
         if (browserSessionState.value.sessions.none { it.id == sessionId }) return
-        if (!revokingSessionIds.add(sessionId)) return
+        runWhilePending(revokingSessionIds, sessionId) { revokeBrowserSession(sessionId) }
+    }
+
+    /**
+     * Keeps [id] in [pendingIds] while [operation] runs, so its buttons stay disabled and a
+     * second tap on the same item does nothing.
+     */
+    private fun <T> runWhilePending(
+        pendingIds: MutableSet<T>,
+        id: T,
+        operation: suspend () -> Unit,
+    ) {
+        if (!pendingIds.add(id)) return
         refreshSessionUi()
         viewModelScope.launch {
             try {
-                revokeBrowserSession(sessionId)
+                operation()
             } finally {
-                revokingSessionIds.remove(sessionId)
+                pendingIds.remove(id)
                 refreshSessionUi()
             }
         }
     }
 
     private fun refreshSessionUi() {
-        mutableUiState.update { previous ->
-            lifecycleState.value.toUiState(
+        render(
+            HomeSourceState(
+                lifecycleState.value,
                 browserSessionState.value,
                 connectedSessionIds.value,
                 textTransferState.value,
                 fileTransferState.value,
+            ),
+        )
+    }
+
+    private fun render(source: HomeSourceState) {
+        mutableUiState.update { previous ->
+            source.lifecycle.toUiState(
+                source.sessions,
+                source.connectedSessionIds,
+                source.textTransfers,
+                source.fileTransfers,
                 monotonicClock.nowMs(),
                 previous,
             )
@@ -352,7 +346,6 @@ class HomeViewModel @Inject constructor(
             activeFileTransfers = if (this is ServerLifecycleState.Running) {
                 fileTransfers.items.filterNot { it.phase.isTerminal }.map { item ->
                     HomeFileTransferUiState(
-                        id = item.metadata.id,
                         displayName = item.metadata.displayName,
                         sizeBytes = item.metadata.sizeBytes,
                         direction = item.metadata.direction,
@@ -374,14 +367,7 @@ class HomeViewModel @Inject constructor(
     }
 
     private fun TextTransferState.toHomeTextTransferStatus(): HomeTextTransferStatus {
-        if (
-            items.any {
-                it.status == TextTransferStatus.PENDING ||
-                    it.status == TextTransferStatus.SENDING
-            }
-        ) {
-            return HomeTextTransferStatus.Active
-        }
+        if (hasActiveTransfer) return HomeTextTransferStatus.Active
         return when (items.maxByOrNull { it.updatedAtEpochMillis }?.status) {
             TextTransferStatus.DELIVERED -> HomeTextTransferStatus.Completed
             TextTransferStatus.FAILED -> HomeTextTransferStatus.Failed

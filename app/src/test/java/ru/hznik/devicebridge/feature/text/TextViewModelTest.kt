@@ -345,10 +345,6 @@ class TextViewModelTest {
             return sendResult
         }
 
-        override suspend fun receive(
-            request: ru.hznik.devicebridge.domain.text.IncomingTextRequest,
-        ): TextTransferResult = error("Not used")
-
         override suspend fun retry(messageId: TextMessageId): TextTransferResult {
             retried += messageId
             return retryResult

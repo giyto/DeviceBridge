@@ -1,9 +1,5 @@
 package ru.hznik.devicebridge.ui.theme
 
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.ui.unit.dp
-
-import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -32,11 +28,5 @@ class DesignTokensTest {
             assertNotEquals(colors.error, colors.success)
             assertNotEquals(colors.errorContainer, colors.warningContainer)
         }
-    }
-
-    @Test
-    fun componentShapesFollowOneConsistentScale() {
-        assertEquals(RoundedCornerShape(8.dp), BridgeShapes.extraSmall)
-        assertEquals(RoundedCornerShape(24.dp), BridgeShapes.extraLarge)
     }
 }

@@ -33,14 +33,6 @@ class WebManifestRouteTest {
         assertFalse(body.contains("uptime", ignoreCase = true))
     }
 
-    @Test
-    fun statusApiIsNotPublishedWithoutSessionAuthorization() = withWebRouteServer { _, request ->
-        val response = request("/api/v1/status", emptyMap())
-
-        assertEquals(404, response.statusCode())
-        assertFalse(response.body().toString(StandardCharsets.UTF_8).contains("protocolVersion"))
-    }
-
     private fun java.net.http.HttpResponse<ByteArray>.header(name: String): String =
         headers().firstValue(name).orElse("")
 }

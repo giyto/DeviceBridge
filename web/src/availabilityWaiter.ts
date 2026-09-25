@@ -1,4 +1,4 @@
-import type { ControllerScheduler } from "./sessionController";
+import type { Scheduler } from "./scheduler";
 
 /** Whether the tab is on screen, and a way to hear when that changes. */
 export interface VisibilityPort {
@@ -29,10 +29,9 @@ export class AvailabilityWaiter {
 
   constructor(
     private readonly probe: (signal: AbortSignal) => Promise<boolean>,
-    private readonly scheduler: ControllerScheduler,
+    private readonly scheduler: Scheduler,
     private readonly visibility: VisibilityPort,
     private readonly online: OnlinePort,
-    private readonly onNextCheck: (delayMs: number) => void = () => undefined,
   ) {}
 
   get waiting(): boolean {
@@ -92,7 +91,6 @@ export class AvailabilityWaiter {
     this.clearTimer();
     if (this.inFlight) return;
     const delayMs = this.visibility.isVisible() ? VISIBLE_CHECK_DELAY_MS : HIDDEN_CHECK_DELAY_MS;
-    this.onNextCheck(delayMs);
     this.timer = this.scheduler.setTimeout(() => {
       this.timer = undefined;
       this.checkNow();

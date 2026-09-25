@@ -4,13 +4,10 @@ import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
-import androidx.datastore.preferences.core.emptyPreferences
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
-import java.io.IOException
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.map
 import ru.hznik.devicebridge.domain.file.HARD_MAX_FILE_BYTES
 import ru.hznik.devicebridge.domain.repository.SettingsRepository
@@ -21,6 +18,7 @@ import ru.hznik.devicebridge.domain.settings.NetworkName
 import ru.hznik.devicebridge.domain.settings.SettingsDefaults
 import ru.hznik.devicebridge.domain.settings.SettingsUpdateResult
 import ru.hznik.devicebridge.domain.settings.SettingsValidationError
+import ru.hznik.devicebridge.domain.settings.isValidDeviceName
 
 internal object SettingsPreferenceKeys {
     val deviceName = stringPreferencesKey("device_name")
@@ -36,30 +34,16 @@ internal object SettingsPreferenceKeys {
 class DataStoreSettingsRepository(
     private val dataStore: DataStore<Preferences>,
     defaultDeviceName: String = SettingsDefaults.DEFAULT_DEVICE_NAME,
-    private val allowDebugIdleTimeout: Boolean = false,
 ) : SettingsRepository {
-    private val initialDeviceName = defaultDeviceName.trim().takeIf { candidate ->
-        candidate.isNotBlank() &&
-            candidate.codePointCount(0, candidate.length) <= 40 &&
-            candidate.none(Char::isISOControl)
-    } ?: SettingsDefaults.DEFAULT_DEVICE_NAME
+    private val initialDeviceName = defaultDeviceName.trim().takeIf(::isValidDeviceName)
+        ?: SettingsDefaults.DEFAULT_DEVICE_NAME
     override val settings: Flow<DeviceSettings> = dataStore.data
-        .catch { failure ->
-            if (failure is IOException) {
-                emit(emptyPreferences())
-            } else {
-                throw failure
-            }
-        }
+        .orEmptyOnIoError()
         .map(::mapSettings)
 
     override suspend fun updateDeviceName(value: String): SettingsUpdateResult {
         val normalized = value.trim()
-        if (
-            normalized.isBlank() ||
-            normalized.codePointCount(0, normalized.length) > 40 ||
-            normalized.any(Char::isISOControl)
-        ) {
+        if (!isValidDeviceName(normalized)) {
             return SettingsUpdateResult.Invalid(SettingsValidationError.DEVICE_NAME)
         }
         return update { preferences ->
@@ -111,14 +95,10 @@ class DataStoreSettingsRepository(
         }
     }
 
-    override suspend fun updateIdleStopTimeout(value: IdleStopTimeout): SettingsUpdateResult {
-        if (value == IdleStopTimeout.DEBUG_1 && !allowDebugIdleTimeout) {
-            return SettingsUpdateResult.Invalid(SettingsValidationError.IDLE_STOP_TIMEOUT)
-        }
-        return update { preferences ->
+    override suspend fun updateIdleStopTimeout(value: IdleStopTimeout): SettingsUpdateResult =
+        update { preferences ->
             preferences[SettingsPreferenceKeys.idleStopTimeout] = value.storageValue
         }
-    }
 
     override suspend fun updateSecureMode(enabled: Boolean): SettingsUpdateResult =
         update { preferences ->
@@ -146,11 +126,7 @@ class DataStoreSettingsRepository(
         val defaults = DeviceSettings.defaults().copy(deviceName = initialDeviceName)
         val deviceName = preferences[SettingsPreferenceKeys.deviceName]
             ?.trim()
-            ?.takeIf { candidate ->
-                candidate.isNotBlank() &&
-                    candidate.codePointCount(0, candidate.length) <= 40 &&
-                    candidate.none(Char::isISOControl)
-            }
+            ?.takeIf(::isValidDeviceName)
             ?.takeUnless { candidate ->
                 candidate == SettingsDefaults.DEFAULT_DEVICE_NAME
             }
@@ -172,10 +148,7 @@ class DataStoreSettingsRepository(
             effectiveFileLimitBytes = effectiveFileLimitBytes,
             autoAcceptTrustedFiles =
                 preferences[SettingsPreferenceKeys.autoAcceptTrustedFiles] ?: false,
-            idleStopTimeout = IdleStopTimeout.fromStorage(
-                preferences[SettingsPreferenceKeys.idleStopTimeout],
-                allowDebug = allowDebugIdleTimeout,
-            ),
+            idleStopTimeout = IdleStopTimeout.fromStorage(preferences[SettingsPreferenceKeys.idleStopTimeout]),
             secureModeEnabled = preferences[SettingsPreferenceKeys.secureModeEnabled] ?: false,
             networkName = preferences[SettingsPreferenceKeys.networkName]
                 ?.let(NetworkName::parse)

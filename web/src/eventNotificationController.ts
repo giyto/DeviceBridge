@@ -1,6 +1,11 @@
 import type { NotificationPreference } from "./browserNotificationPreferenceStore";
-import type { FileMetadata, FileSnapshotItem, FileTransferStatus } from "./fileApiClient";
-import { formatBytes } from "./fileTransferView";
+import { formatBytes } from "./byteFormat";
+import {
+  isTerminalStatus,
+  type FileMetadata,
+  type FileSnapshotItem,
+  type FileTransferStatus,
+} from "./fileApiClient";
 import type { TextFeedItem } from "./sessionEventSocketClient";
 
 export type NotificationPermissionState = "default" | "granted" | "denied";
@@ -196,7 +201,7 @@ export class EventNotificationController {
       if (item.direction !== "BROWSER_TO_ANDROID") continue;
       const previous = this.uploadStatuses.get(item.transferId);
       this.uploadStatuses.set(item.transferId, item.status);
-      if (previous === undefined || isTerminal(previous)) continue;
+      if (previous === undefined || isTerminalStatus(previous)) continue;
       if (item.status === "COMPLETED") completed += 1;
       if (item.status === "FAILED") failed += 1;
     }
@@ -337,10 +342,6 @@ function remember(ids: Set<string>, id: string): boolean {
     if (oldest !== undefined) ids.delete(oldest);
   }
   return true;
-}
-
-function isTerminal(status: FileTransferStatus): boolean {
-  return status === "COMPLETED" || status === "FAILED" || status === "CANCELLED";
 }
 
 function preview(content: string): string {

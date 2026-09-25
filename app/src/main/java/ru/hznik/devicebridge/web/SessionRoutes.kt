@@ -115,55 +115,12 @@ fun Application.installSessionRoutes(
     }
     routing {
         post("/api/v1/session/challenge") {
-            if (!call.requireJsonApiRequest(allowedHosts())) return@post
-            val body = call.receiveBoundedJson()
-            if (body == null) {
-                call.respondSessionError(
-                    HttpStatusCode.BadRequest,
-                    SessionErrorCode.INVALID_PAYLOAD,
-                    "Некорректное или слишком большое тело запроса",
-                )
-                return@post
-            }
-            val request = runCatching {
-                SessionProtocolJson.decode<SessionChallengeRequest>(body)
-            }.getOrNull()
-            if (request == null) {
-                call.respondSessionError(
-                    HttpStatusCode.BadRequest,
-                    SessionErrorCode.INVALID_PAYLOAD,
-                    "Некорректное тело запроса",
-                )
-                return@post
-            }
-            when (SessionPayloadValidator.validate(request)) {
-                SessionValidationError.UNSUPPORTED_VERSION -> {
-                    call.respondSessionError(
-                        HttpStatusCode.BadRequest,
-                        SessionErrorCode.UNSUPPORTED_VERSION,
-                        "Версия протокола не поддерживается",
-                    )
-                    return@post
-                }
-                SessionValidationError.NONE -> Unit
-                else -> {
-                    call.respondSessionError(
-                        HttpStatusCode.BadRequest,
-                        SessionErrorCode.INVALID_PAYLOAD,
-                        "Недопустимые данные клиента",
-                    )
-                    return@post
-                }
-            }
-            val handle = generationHandle()
-            if (handle == null) {
-                call.respondSessionError(
-                    HttpStatusCode.ServiceUnavailable,
-                    SessionErrorCode.SESSION_CLOSED,
-                    "Серверная сессия не активна",
-                )
-                return@post
-            }
+            val (request, handle) = call.receiveSessionRequest<SessionChallengeRequest>(
+                allowedHosts(),
+                generationHandle,
+                invalidMessage = "Недопустимые данные клиента",
+                validate = SessionPayloadValidator::validate,
+            ) ?: return@post
             when (
                 val result = coordinator.createChallenge(
                     handle,
@@ -189,13 +146,7 @@ fun Application.installSessionRoutes(
                         ),
                     )
                 }
-                is ChallengeCreationResult.RateLimited -> call.respondSessionError(
-                    HttpStatusCode.TooManyRequests,
-                    SessionErrorCode.RATE_LIMITED,
-                    "Слишком много попыток",
-                    retryAfterSeconds = result.retryAfterMs.ceilSeconds(),
-                    attemptsRemaining = 0,
-                )
+                is ChallengeCreationResult.RateLimited -> call.respondRateLimited(result.retryAfterMs)
                 ChallengeCreationResult.InvalidMetadata -> call.respondSessionError(
                     HttpStatusCode.BadRequest,
                     SessionErrorCode.INVALID_PAYLOAD,
@@ -215,55 +166,12 @@ fun Application.installSessionRoutes(
         }
 
         post("/api/v1/session/confirm") {
-            if (!call.requireJsonApiRequest(allowedHosts())) return@post
-            val body = call.receiveBoundedJson()
-            if (body == null) {
-                call.respondSessionError(
-                    HttpStatusCode.BadRequest,
-                    SessionErrorCode.INVALID_PAYLOAD,
-                    "Некорректное или слишком большое тело запроса",
-                )
-                return@post
-            }
-            val request = runCatching {
-                SessionProtocolJson.decode<SessionConfirmRequest>(body)
-            }.getOrNull()
-            if (request == null) {
-                call.respondSessionError(
-                    HttpStatusCode.BadRequest,
-                    SessionErrorCode.INVALID_PAYLOAD,
-                    "Некорректное тело запроса",
-                )
-                return@post
-            }
-            when (SessionPayloadValidator.validate(request)) {
-                SessionValidationError.UNSUPPORTED_VERSION -> {
-                    call.respondSessionError(
-                        HttpStatusCode.BadRequest,
-                        SessionErrorCode.UNSUPPORTED_VERSION,
-                        "Версия протокола не поддерживается",
-                    )
-                    return@post
-                }
-                SessionValidationError.NONE -> Unit
-                else -> {
-                    call.respondSessionError(
-                        HttpStatusCode.BadRequest,
-                        SessionErrorCode.INVALID_PAYLOAD,
-                        "Недопустимые данные подтверждения",
-                    )
-                    return@post
-                }
-            }
-            val handle = generationHandle()
-            if (handle == null) {
-                call.respondSessionError(
-                    HttpStatusCode.ServiceUnavailable,
-                    SessionErrorCode.SESSION_CLOSED,
-                    "Серверная сессия не активна",
-                )
-                return@post
-            }
+            val (request, handle) = call.receiveSessionRequest<SessionConfirmRequest>(
+                allowedHosts(),
+                generationHandle,
+                invalidMessage = "Недопустимые данные подтверждения",
+                validate = SessionPayloadValidator::validate,
+            ) ?: return@post
             val result = coordinator.confirmAndAwait(
                 handle = handle,
                 challengeId = PairingChallengeId(request.challengeId),
@@ -292,13 +200,7 @@ fun Application.installSessionRoutes(
                     "Неверный код подключения",
                     attemptsRemaining = result.remainingAttempts,
                 )
-                is SessionConfirmationResult.RateLimited -> call.respondSessionError(
-                    HttpStatusCode.TooManyRequests,
-                    SessionErrorCode.RATE_LIMITED,
-                    "Слишком много попыток",
-                    retryAfterSeconds = result.retryAfterMs.ceilSeconds(),
-                    attemptsRemaining = 0,
-                )
+                is SessionConfirmationResult.RateLimited -> call.respondRateLimited(result.retryAfterMs)
                 SessionConfirmationResult.InvalidChallenge,
                 SessionConfirmationResult.InvalidMetadata,
                 -> call.respondSessionError(
@@ -335,55 +237,13 @@ fun Application.installSessionRoutes(
         }
 
         post("/api/v1/session/confirmation/status") {
-            if (!call.requireJsonApiRequest(allowedHosts())) return@post
-            val body = call.receiveBoundedJson()
-            if (body == null) {
-                call.respondSessionError(
-                    HttpStatusCode.BadRequest,
-                    SessionErrorCode.INVALID_PAYLOAD,
-                    "Некорректное или слишком большое тело запроса",
-                )
-                return@post
-            }
-            val request = runCatching {
-                SessionProtocolJson.decode<SessionConfirmationStatusRequest>(body)
-            }.getOrNull()
-            if (request == null) {
-                call.respondSessionError(
-                    HttpStatusCode.BadRequest,
-                    SessionErrorCode.INVALID_PAYLOAD,
-                    "Некорректное тело запроса",
-                )
-                return@post
-            }
-            when (SessionPayloadValidator.validate(request)) {
-                SessionValidationError.UNSUPPORTED_VERSION -> {
-                    call.respondSessionError(
-                        HttpStatusCode.BadRequest,
-                        SessionErrorCode.UNSUPPORTED_VERSION,
-                        "Версия протокола не поддерживается",
-                    )
-                    return@post
-                }
-                SessionValidationError.NONE -> Unit
-                else -> {
-                    call.respondSessionError(
-                        HttpStatusCode.BadRequest,
-                        SessionErrorCode.INVALID_PAYLOAD,
-                        "Недопустимые данные подтверждения",
-                    )
-                    return@post
-                }
-            }
-            val handle = generationHandle()
-            if (handle == null) {
-                call.respondSessionError(
-                    HttpStatusCode.ServiceUnavailable,
-                    SessionErrorCode.SESSION_CLOSED,
-                    "Серверная сессия не активна",
-                )
-                return@post
-            }
+            val (request, handle) =
+                call.receiveSessionRequest<SessionConfirmationStatusRequest>(
+                    allowedHosts(),
+                    generationHandle,
+                    invalidMessage = "Недопустимые данные подтверждения",
+                    validate = SessionPayloadValidator::validate,
+                ) ?: return@post
             when (
                 val result = coordinator.recoverConfirmation(
                     handle = handle,
@@ -392,15 +252,8 @@ fun Application.installSessionRoutes(
                     sourceIpv4 = sourceIpv4(call),
                 )
             ) {
-                SessionConfirmationRecoveryResult.Pending -> call.respondJson(
-                    HttpStatusCode.OK,
-                    SessionProtocolJson.encode(
-                        SessionConfirmationStatusResponse(
-                            protocolVersion = SESSION_PROTOCOL_VERSION,
-                            state = SessionConfirmationStatusState.PENDING,
-                        ),
-                    ),
-                )
+                SessionConfirmationRecoveryResult.Pending ->
+                    call.respondConfirmationState(SessionConfirmationStatusState.PENDING)
                 is SessionConfirmationRecoveryResult.Approved -> call.respondJson(
                     HttpStatusCode.OK,
                     SessionProtocolJson.encode(
@@ -416,24 +269,10 @@ fun Application.installSessionRoutes(
                         ),
                     ),
                 )
-                SessionConfirmationRecoveryResult.Denied -> call.respondJson(
-                    HttpStatusCode.OK,
-                    SessionProtocolJson.encode(
-                        SessionConfirmationStatusResponse(
-                            protocolVersion = SESSION_PROTOCOL_VERSION,
-                            state = SessionConfirmationStatusState.DENIED,
-                        ),
-                    ),
-                )
-                SessionConfirmationRecoveryResult.Expired -> call.respondJson(
-                    HttpStatusCode.OK,
-                    SessionProtocolJson.encode(
-                        SessionConfirmationStatusResponse(
-                            protocolVersion = SESSION_PROTOCOL_VERSION,
-                            state = SessionConfirmationStatusState.EXPIRED,
-                        ),
-                    ),
-                )
+                SessionConfirmationRecoveryResult.Denied ->
+                    call.respondConfirmationState(SessionConfirmationStatusState.DENIED)
+                SessionConfirmationRecoveryResult.Expired ->
+                    call.respondConfirmationState(SessionConfirmationStatusState.EXPIRED)
                 SessionConfirmationRecoveryResult.InvalidMetadata -> call.respondSessionError(
                     HttpStatusCode.BadRequest,
                     SessionErrorCode.INVALID_PAYLOAD,
@@ -453,65 +292,17 @@ fun Application.installSessionRoutes(
         }
 
         post("/api/v1/session/trusted") {
-            if (!call.requireJsonApiRequest(allowedHosts())) return@post
-            val body = call.receiveBoundedJson()
-            if (body == null) {
-                call.respondSessionError(
-                    HttpStatusCode.BadRequest,
-                    SessionErrorCode.INVALID_PAYLOAD,
-                    "Некорректное или слишком большое тело запроса",
-                )
-                return@post
-            }
-            val request = runCatching {
-                SessionProtocolJson.decode<TrustedSessionExchangeRequest>(body)
-            }.getOrNull()
-            if (request == null) {
-                call.respondSessionError(
-                    HttpStatusCode.BadRequest,
-                    SessionErrorCode.INVALID_PAYLOAD,
-                    "Некорректное тело запроса",
-                )
-                return@post
-            }
-            when (SessionPayloadValidator.validate(request)) {
-                SessionValidationError.UNSUPPORTED_VERSION -> {
-                    call.respondSessionError(
-                        HttpStatusCode.BadRequest,
-                        SessionErrorCode.UNSUPPORTED_VERSION,
-                        "Версия протокола не поддерживается",
-                    )
-                    return@post
-                }
-                SessionValidationError.NONE -> Unit
-                else -> {
-                    call.respondSessionError(
-                        HttpStatusCode.BadRequest,
-                        SessionErrorCode.INVALID_PAYLOAD,
-                        "Недопустимые данные доверенного браузера",
-                    )
-                    return@post
-                }
-            }
-            val handle = generationHandle()
-            if (handle == null) {
-                call.respondSessionError(
-                    HttpStatusCode.ServiceUnavailable,
-                    SessionErrorCode.SESSION_CLOSED,
-                    "Серверная сессия не активна",
-                )
-                return@post
-            }
+            val (request, handle) =
+                call.receiveSessionRequest<TrustedSessionExchangeRequest>(
+                    allowedHosts(),
+                    generationHandle,
+                    invalidMessage = "Недопустимые данные доверенного браузера",
+                    validate = SessionPayloadValidator::validate,
+                ) ?: return@post
             val source = sourceIpv4(call)
             when (val limit = trustedExchangeRateLimiter.check(source)) {
                 is RateLimitDecision.Blocked -> {
-                    call.respondSessionError(
-                        HttpStatusCode.TooManyRequests,
-                        SessionErrorCode.RATE_LIMITED,
-                        "Слишком много попыток",
-                        retryAfterSeconds = limit.retryAfterMs.ceilSeconds(),
-                        attemptsRemaining = 0,
-                    )
+                    call.respondRateLimited(limit.retryAfterMs)
                     return@post
                 }
                 is RateLimitDecision.Allowed -> Unit
@@ -540,13 +331,7 @@ fun Application.installSessionRoutes(
                 }
                 TrustedSessionExchangeResult.InvalidCredential -> {
                     when (val failure = trustedExchangeRateLimiter.recordFailure(source)) {
-                        is RateLimitDecision.Blocked -> call.respondSessionError(
-                            HttpStatusCode.TooManyRequests,
-                            SessionErrorCode.RATE_LIMITED,
-                            "Слишком много попыток",
-                            retryAfterSeconds = failure.retryAfterMs.ceilSeconds(),
-                            attemptsRemaining = 0,
-                        )
+                        is RateLimitDecision.Blocked -> call.respondRateLimited(failure.retryAfterMs)
                         is RateLimitDecision.Allowed -> call.respondSessionError(
                             HttpStatusCode.Unauthorized,
                             SessionErrorCode.UNAUTHORIZED,
@@ -839,16 +624,35 @@ internal suspend fun ApplicationCall.authorizeSession(
     return AuthorizedSession(session, handle)
 }
 
-private suspend fun ApplicationCall.requireJsonApiRequest(allowedHosts: Set<String>): Boolean {
+/**
+ * Checks Host, Origin, content type and declared length of a JSON API request and responds when
+ * it is rejected. Without [onTooLarge] an oversized body is an ordinary 400 session error; with it
+ * the body is rejected as 413 and [onTooLarge] gives the route's own answer.
+ */
+internal suspend fun ApplicationCall.requireJsonApi(
+    allowedHosts: Set<String>,
+    maxBodyBytes: Long = MAX_SESSION_JSON_BYTES.toLong(),
+    onTooLarge: (suspend () -> Unit)? = null,
+): Boolean {
     val result = SessionRequestSecurityPolicy.validateJsonApi(
         host = request.header(HttpHeaders.Host),
         origin = request.header(HttpHeaders.Origin),
         contentType = request.header(HttpHeaders.ContentType),
         contentLength = request.header(HttpHeaders.ContentLength)?.toLongOrNull(),
         allowedHosts = allowedHosts,
+        maxBodyBytes = maxBodyBytes,
+        bodyTooLargeStatus = if (onTooLarge == null) {
+            HttpStatusCode.BadRequest
+        } else {
+            HttpStatusCode.PayloadTooLarge
+        },
         originScheme = originScheme(),
     )
     if (result is RequestGuardResult.Rejected) {
+        if (onTooLarge != null && result.status == HttpStatusCode.PayloadTooLarge) {
+            onTooLarge()
+            return false
+        }
         respondSessionError(
             status = result.status,
             code = SessionErrorCode.INVALID_PAYLOAD,
@@ -861,6 +665,95 @@ private suspend fun ApplicationCall.requireJsonApiRequest(allowedHosts: Set<Stri
         return false
     }
     return true
+}
+
+private data class ReceivedSessionRequest<T>(
+    val request: T,
+    val handle: SessionGenerationHandle,
+)
+
+/**
+ * Shared prologue of the JSON session routes. Responds and returns null when the request is
+ * rejected or the server session is not active.
+ */
+private suspend inline fun <reified T : Any> ApplicationCall.receiveSessionRequest(
+    allowedHosts: Set<String>,
+    generationHandle: () -> SessionGenerationHandle?,
+    invalidMessage: String,
+    validate: (T) -> SessionValidationError,
+): ReceivedSessionRequest<T>? {
+    if (!requireJsonApi(allowedHosts)) return null
+    val body = receiveBoundedJson()
+    if (body == null) {
+        respondSessionError(
+            HttpStatusCode.BadRequest,
+            SessionErrorCode.INVALID_PAYLOAD,
+            "Некорректное или слишком большое тело запроса",
+        )
+        return null
+    }
+    val request = runCatching {
+        SessionProtocolJson.decode<T>(body)
+    }.getOrNull()
+    if (request == null) {
+        respondSessionError(
+            HttpStatusCode.BadRequest,
+            SessionErrorCode.INVALID_PAYLOAD,
+            "Некорректное тело запроса",
+        )
+        return null
+    }
+    when (validate(request)) {
+        SessionValidationError.UNSUPPORTED_VERSION -> {
+            respondSessionError(
+                HttpStatusCode.BadRequest,
+                SessionErrorCode.UNSUPPORTED_VERSION,
+                "Версия протокола не поддерживается",
+            )
+            return null
+        }
+        SessionValidationError.NONE -> Unit
+        else -> {
+            respondSessionError(
+                HttpStatusCode.BadRequest,
+                SessionErrorCode.INVALID_PAYLOAD,
+                invalidMessage,
+            )
+            return null
+        }
+    }
+    val handle = generationHandle()
+    if (handle == null) {
+        respondSessionError(
+            HttpStatusCode.ServiceUnavailable,
+            SessionErrorCode.SESSION_CLOSED,
+            "Серверная сессия не активна",
+        )
+        return null
+    }
+    return ReceivedSessionRequest(request, handle)
+}
+
+private suspend fun ApplicationCall.respondRateLimited(retryAfterMs: Long) {
+    respondSessionError(
+        HttpStatusCode.TooManyRequests,
+        SessionErrorCode.RATE_LIMITED,
+        "Слишком много попыток",
+        retryAfterSeconds = retryAfterMs.ceilSeconds(),
+        attemptsRemaining = 0,
+    )
+}
+
+private suspend fun ApplicationCall.respondConfirmationState(state: SessionConfirmationStatusState) {
+    respondJson(
+        HttpStatusCode.OK,
+        SessionProtocolJson.encode(
+            SessionConfirmationStatusResponse(
+                protocolVersion = SESSION_PROTOCOL_VERSION,
+                state = state,
+            ),
+        ),
+    )
 }
 
 internal suspend fun ApplicationCall.receiveBoundedJson(

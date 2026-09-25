@@ -93,7 +93,8 @@ internal fun String.safeNotificationName(): String {
     return safe.ifBlank { "Файл" }
 }
 
-private val BIDI_CONTROL_CHARACTERS = setOf(
+/** Bidirectional marks and overrides that could disguise text shown in a notification. */
+internal val BIDI_CONTROL_CHARACTERS = setOf(
     '\u061c', '\u200e', '\u200f',
     '\u202a', '\u202b', '\u202c', '\u202d', '\u202e',
     '\u2066', '\u2067', '\u2068', '\u2069',

@@ -19,12 +19,19 @@ class FileUiStateTest {
         val completed = item(FileTransferPhase.COMPLETED, bytesTransferred = 100)
 
         assertTrue(transferring.hasDeterminateProgress)
-        assertEquals(50, transferring.progressPercent)
+        assertEquals(50, transferring.percent)
         assertFalse(verifying.hasDeterminateProgress)
-        assertNull(verifying.progressPercent)
+        assertNull(verifying.percent)
         assertFalse(completed.hasActiveProgress)
-        assertNull(completed.progressPercent)
+        assertNull(completed.percent)
     }
+
+    // The card's progress math, read for one item.
+    private val FileTransferItemUiState.hasDeterminateProgress: Boolean
+        get() = determinateProgress(phase, sizeBytes, bytesTransferred) != null
+
+    private val FileTransferItemUiState.percent: Int?
+        get() = determinateProgress(phase, sizeBytes, bytesTransferred)?.let(::progressPercent)
 
     @Test
     fun keptPartsTurnRetryIntoContinueAndExplainWhatWasKept() {

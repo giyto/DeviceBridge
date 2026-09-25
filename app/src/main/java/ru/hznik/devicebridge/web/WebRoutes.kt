@@ -12,13 +12,6 @@ import io.ktor.server.response.respondOutputStream
 import io.ktor.server.response.respondText
 import io.ktor.server.routing.get
 import io.ktor.server.routing.routing
-import java.net.URI
-import java.util.Locale
-
-fun Application.installWebRoutes(
-    webAssetProvider: WebAssetProvider,
-    allowedHosts: Set<String>,
-) = installWebRoutes(webAssetProvider) { allowedHosts }
 
 fun Application.installWebRoutes(
     webAssetProvider: WebAssetProvider,
@@ -61,10 +54,14 @@ private suspend fun ApplicationCall.respondWebAsset(
     cacheControl: String,
 ) {
     addWebSecurityHeaders()
-    val normalizedAllowedHosts = allowedHosts().mapTo(mutableSetOf()) {
-        it.lowercase(Locale.ROOT)
-    }
-    if (normalizedAllowedHosts.isEmpty() || !isAllowedWebRequest(normalizedAllowedHosts)) {
+    val security = SessionRequestSecurityPolicy.validateProtectedHttp(
+        host = request.header(HttpHeaders.Host),
+        origin = request.header(HttpHeaders.Origin),
+        allowedHosts = allowedHosts(),
+        allowMissingOrigin = true,
+        originScheme = originScheme(),
+    )
+    if (security is RequestGuardResult.Rejected) {
         respondText(
             text = "Forbidden",
             contentType = ContentType.Text.Plain,
@@ -84,6 +81,11 @@ private suspend fun ApplicationCall.respondWebAsset(
     }
 
     response.header(HttpHeaders.CacheControl, cacheControl)
+    respondAsset(asset)
+}
+
+/** Streams a bundled web asset with its content type and length. */
+internal suspend fun ApplicationCall.respondAsset(asset: WebAssetResource) {
     respondOutputStream(
         contentType = ContentType.parse(asset.contentType),
         status = HttpStatusCode.OK,
@@ -91,20 +93,6 @@ private suspend fun ApplicationCall.respondWebAsset(
     ) {
         asset.openStream().use { input -> input.copyTo(this) }
     }
-}
-
-private fun ApplicationCall.isAllowedWebRequest(allowedHosts: Set<String>): Boolean {
-    val host = request.header(HttpHeaders.Host)?.lowercase(Locale.ROOT) ?: return false
-    if (host !in allowedHosts) return false
-
-    val origin = request.header(HttpHeaders.Origin) ?: return true
-    val originUri = runCatching { URI(origin) }.getOrNull() ?: return false
-    return originUri.scheme?.lowercase(Locale.ROOT) == originScheme() &&
-        originUri.rawAuthority?.lowercase(Locale.ROOT) == host &&
-        originUri.userInfo == null &&
-        originUri.rawQuery == null &&
-        originUri.rawFragment == null &&
-        (originUri.rawPath.isNullOrEmpty() || originUri.rawPath == "/")
 }
 
 private fun ApplicationCall.addWebSecurityHeaders() {

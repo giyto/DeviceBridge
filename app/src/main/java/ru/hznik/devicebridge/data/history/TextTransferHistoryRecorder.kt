@@ -1,15 +1,10 @@
 package ru.hznik.devicebridge.data.history
 
-import java.security.MessageDigest
 import java.util.UUID
-import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.launch
 import ru.hznik.devicebridge.data.text.TextTerminalHistoryRecorder
 import ru.hznik.devicebridge.domain.history.HistoryDirection
 import ru.hznik.devicebridge.domain.history.HistoryKind
-import ru.hznik.devicebridge.domain.history.HistoryOperationId
-import ru.hznik.devicebridge.domain.history.HistoryPersistenceEvent
 import ru.hznik.devicebridge.domain.history.HistoryRecord
 import ru.hznik.devicebridge.domain.history.HistoryRecordId
 import ru.hznik.devicebridge.domain.history.HistoryStatus
@@ -39,7 +34,7 @@ class TextTransferHistoryRecorder(
         }
         val record = HistoryRecord(
                 id = newRecordId(),
-                operationId = HistoryOperationId(item.stableHistoryOperationId()),
+                operationId = historyOperationId(item.generationId, item.sessionId, item.id.value),
                 kind = when (item.contentKind) {
                     TextContentKind.TEXT -> HistoryKind.TEXT
                     TextContentKind.LINK -> HistoryKind.LINK
@@ -57,29 +52,8 @@ class TextTransferHistoryRecorder(
                 file = null,
                 failureReason = item.failureReason?.name?.lowercase(),
         )
-        applicationScope.launch {
-            try {
-                repository.insert(record)
-            } catch (failure: CancellationException) {
-                throw failure
-            } catch (_: Throwable) {
-                failureReporter.report(
-                    HistoryPersistenceEvent.WriteFailed(record.kind),
-                )
-            }
+        applicationScope.persistBestEffort(record, failureReporter) {
+            repository.insert(it)
         }
-    }
-
-    private fun TextTransferItem.stableHistoryOperationId(): String {
-        val source = buildString {
-            append(generationId.value)
-            append(':')
-            append(sessionId.value)
-            append(':')
-            append(id.value)
-        }
-        return MessageDigest.getInstance("SHA-256")
-            .digest(source.encodeToByteArray())
-            .joinToString(separator = "") { byte -> "%02x".format(byte) }
     }
 }

@@ -46,7 +46,6 @@ import ru.hznik.devicebridge.core.protocol.file.FileSnapshotItem
 import ru.hznik.devicebridge.core.protocol.file.FileTransferStatusDto
 import ru.hznik.devicebridge.core.protocol.file.FileUploadOffsetRequest
 import ru.hznik.devicebridge.core.protocol.file.FileUploadOffsetResponse
-import ru.hznik.devicebridge.core.protocol.session.SessionErrorCode
 import ru.hznik.devicebridge.data.file.DownloadResume
 import ru.hznik.devicebridge.data.file.FileTransferCoordinator
 import ru.hznik.devicebridge.data.file.FileDownloadSourceFactory
@@ -124,13 +123,9 @@ fun Application.installFileRoutes(
                 call.respondFileError(HttpStatusCode.BadRequest, FileProtocolErrorCode.INVALID_PAYLOAD, wallClockMs, offer.messageId)
                 return@post
             }
-            val validationLimitSnapshot =
-                ru.hznik.devicebridge.domain.file.effectiveFileLimitBytes(
-                    effectiveFileLimitBytes(),
-                )
             val validation = FileMetadataValidator.validateBatch(
                 offer.items.map { it.toCandidate() },
-                validationLimitSnapshot,
+                effectiveFileLimitBytes(),
             )
             val metadata = when (validation) {
                 is FileBatchValidation.Valid -> validation.items
@@ -202,21 +197,9 @@ fun Application.installFileRoutes(
                 generationHandle = generationHandle,
                 allowedHosts = allowedHosts,
             ) ?: return@post
-            val transferId = call.parameters["transferId"]
-                ?.let { value -> runCatching { FileTransferId(value) }.getOrNull() }
-            if (transferId == null) {
-                call.respondFileError(HttpStatusCode.NotFound, FileProtocolErrorCode.INVALID_PAYLOAD, wallClockMs)
-                return@post
-            }
-            val item = fileCoordinator.ownedTransfer(
-                authorized.handle.generationId,
-                authorized.session.id,
-                transferId,
-            )
-            if (item == null) {
-                call.respondFileError(HttpStatusCode.NotFound, FileProtocolErrorCode.INVALID_PAYLOAD, wallClockMs)
-                return@post
-            }
+            val item = call.ownedTransferOrNotFound(fileCoordinator, authorized, wallClockMs)
+                ?: return@post
+            val transferId = item.metadata.id
             if (
                 item.metadata.direction != FileTransferDirection.BROWSER_TO_ANDROID ||
                 item.phase != FileTransferPhase.TRANSFERRING
@@ -271,6 +254,8 @@ fun Application.installFileRoutes(
             // The body is read in its own job, so a cancel on the phone stops the reading while
             // this call can still answer, and close the connection the browser keeps writing to.
             val body = call.receiveChannel()
+            // What the processor measured over the whole file, checked again by the coordinator.
+            var received: ReceivedFileDigest? = null
             val uploadResult = try {
                 coroutineScope {
                     val reading = async {
@@ -285,6 +270,7 @@ fun Application.installFileRoutes(
                                     FileTransferEvent.Progressed(bytes, uploadSpeed.update(bytes)),
                                 )
                             },
+                            onReceived = { digest -> received = digest },
                         )
                     }
                     managedResources.job = reading
@@ -303,13 +289,14 @@ fun Application.installFileRoutes(
                 call.respondFileError(HttpStatusCode.Conflict, FileProtocolErrorCode.CANCELLED, wallClockMs, transferId.value)
                 return@post
             }
-            if (uploadResult == RawFileUploadResult.Completed) {
+            val measured = received
+            if (uploadResult == RawFileUploadResult.Completed && measured != null) {
                 fileCoordinator.transition(transferId, FileTransferEvent.Verifying)
                 fileCoordinator.verify(
                     VerifyFileTransferRequest(
                         transferId = transferId,
-                        sizeBytes = item.metadata.sizeBytes,
-                        sha256 = item.metadata.sha256,
+                        sizeBytes = measured.sizeBytes,
+                        sha256 = measured.sha256,
                     ),
                 )
                 call.respondOwnedFileSnapshot(fileCoordinator, authorized, transferId.value, wallClockMs)
@@ -322,7 +309,8 @@ fun Application.installFileRoutes(
                     RawFileUploadResult.PrematureEof,
                     RawFileUploadResult.Failed,
                     -> FileTransferFailure.StreamFailed
-                    RawFileUploadResult.Completed -> error("Handled above")
+                    // Completed without a measurement: nothing to verify it by, so it is not trusted.
+                    RawFileUploadResult.Completed -> FileTransferFailure.ChecksumMismatch
                 }
                 fileCoordinator.transition(
                     transferId,
@@ -339,15 +327,9 @@ fun Application.installFileRoutes(
                 allowedHosts = allowedHosts,
             ) ?: return@post
             if (!call.requireFileJsonRequest(allowedHosts(), wallClockMs)) return@post
-            val transferId = call.parameters["transferId"]
-                ?.let { value -> runCatching { FileTransferId(value) }.getOrNull() }
-            val item = transferId?.let {
-                fileCoordinator.ownedTransfer(authorized.handle.generationId, authorized.session.id, it)
-            }
-            if (transferId == null || item == null) {
-                call.respondFileError(HttpStatusCode.NotFound, FileProtocolErrorCode.INVALID_PAYLOAD, wallClockMs)
-                return@post
-            }
+            val item = call.ownedTransferOrNotFound(fileCoordinator, authorized, wallClockMs)
+                ?: return@post
+            val transferId = item.metadata.id
             val request = call.receiveBoundedJson(MAX_FILE_CONTROL_JSON_BYTES)
                 ?.let { body -> runCatching { FileProtocolJson.decode<FileUploadOffsetRequest>(body) }.getOrNull() }
             if (request == null || FileProtocolValidator.validate(request) != FileProtocolValidationError.NONE) {
@@ -395,18 +377,10 @@ fun Application.installFileRoutes(
                 allowedHosts = allowedHosts,
             ) ?: return@post
             if (!call.requireFileJsonRequest(allowedHosts(), wallClockMs)) return@post
-            val transferId = call.parameters["transferId"]
-                ?.let { value -> runCatching { FileTransferId(value) }.getOrNull() }
-            if (transferId == null) {
-                call.respondFileError(HttpStatusCode.NotFound, FileProtocolErrorCode.INVALID_PAYLOAD, wallClockMs)
-                return@post
-            }
-            val owned = fileCoordinator.ownedTransfer(
-                authorized.handle.generationId,
-                authorized.session.id,
-                transferId,
-            )
-            if (owned == null || owned.metadata.direction != FileTransferDirection.ANDROID_TO_BROWSER) {
+            val owned = call.ownedTransferOrNotFound(fileCoordinator, authorized, wallClockMs)
+                ?: return@post
+            val transferId = owned.metadata.id
+            if (owned.metadata.direction != FileTransferDirection.ANDROID_TO_BROWSER) {
                 call.respondFileError(HttpStatusCode.NotFound, FileProtocolErrorCode.INVALID_PAYLOAD, wallClockMs)
                 return@post
             }
@@ -449,19 +423,10 @@ fun Application.installFileRoutes(
                 generationHandle = generationHandle,
                 allowedHosts = allowedHosts,
             ) ?: return@delete
-            val transferId = call.parameters["transferId"]
-                ?.let { value -> runCatching { FileTransferId(value) }.getOrNull() }
-            val item = transferId?.let {
-                fileCoordinator.ownedTransfer(
-                    authorized.handle.generationId,
-                    authorized.session.id,
-                    it,
-                )
-            }
-            if (transferId == null || item == null) {
-                call.respondFileError(HttpStatusCode.NotFound, FileProtocolErrorCode.INVALID_PAYLOAD, wallClockMs)
-                return@delete
-            }
+            val transferId = call.ownedTransferOrNotFound(fileCoordinator, authorized, wallClockMs)
+                ?.metadata
+                ?.id
+                ?: return@delete
             when (fileCoordinator.cancel(transferId)) {
                 FileTransferOperationResult.Accepted -> call.respondOwnedFileSnapshot(
                     fileCoordinator,
@@ -490,23 +455,10 @@ fun Application.installFileRoutes(
                 allowedHosts = allowedHosts,
             ) ?: return@post
             if (!call.requireFileJsonRequest(allowedHosts(), wallClockMs)) return@post
-            val transferId = call.parameters["transferId"]
-                ?.let { value -> runCatching { FileTransferId(value) }.getOrNull() }
-            val item = transferId?.let {
-                fileCoordinator.ownedTransfer(
-                    authorized.handle.generationId,
-                    authorized.session.id,
-                    it,
-                )
-            }
-            if (transferId == null || item == null) {
-                call.respondFileError(
-                    HttpStatusCode.NotFound,
-                    FileProtocolErrorCode.INVALID_PAYLOAD,
-                    wallClockMs,
-                )
-                return@post
-            }
+            val transferId = call.ownedTransferOrNotFound(fileCoordinator, authorized, wallClockMs)
+                ?.metadata
+                ?.id
+                ?: return@post
             when (val result = fileCoordinator.retry(transferId)) {
                 FileTransferOperationResult.Accepted -> call.respondOwnedFileSnapshot(
                     fileCoordinator,
@@ -549,8 +501,7 @@ fun Application.installFileRoutes(
                 return@get
             }
             val handle = generationHandle()
-            val transferId = call.parameters["transferId"]
-                ?.let { value -> runCatching { FileTransferId(value) }.getOrNull() }
+            val transferId = call.transferIdParam()
             val grantToken = call.request.queryParameters["grant"]
                 ?.takeIf { it.matches(Regex("^[A-Za-z0-9_-]{22}$")) }
             if (handle == null || transferId == null || grantToken == null) {
@@ -629,25 +580,24 @@ fun Application.installFileRoutes(
                 return@get
             }
             val size = item.metadata.sizeBytes
-            val ranged = resumed
             // Last byte (inclusive) this response delivers; a bounded range may stop early.
             val end = (range as? ByteRangeRequest.Single)
-                ?.takeIf { ranged }
+                ?.takeIf { resumed }
                 ?.end
                 ?.coerceAtMost(size - 1)
                 ?: (size - 1)
-            if (!ranged) fileCoordinator.transition(transferId, FileTransferEvent.Started)
+            if (!resumed) fileCoordinator.transition(transferId, FileTransferEvent.Started)
             call.response.header("Referrer-Policy", "no-referrer")
             call.response.header(HttpHeaders.CacheControl, "no-store")
             call.response.header(HttpHeaders.AcceptRanges, "bytes")
             call.response.header(HttpHeaders.ETag, "\"sha256-" + item.metadata.sha256.lowercase() + "\"")
             call.response.header(HttpHeaders.ContentDisposition, safeAttachmentHeader(item.metadata.displayName, transferId.value))
-            if (ranged) call.response.header(HttpHeaders.ContentRange, "bytes $offset-$end/$size")
+            if (resumed) call.response.header(HttpHeaders.ContentRange, "bytes $offset-$end/$size")
             try {
                 call.respondOutputStream(
                     contentType = runCatching { ContentType.parse(item.metadata.mimeType) }
                         .getOrDefault(ContentType.Application.OctetStream),
-                    status = if (ranged) HttpStatusCode.PartialContent else HttpStatusCode.OK,
+                    status = if (resumed) HttpStatusCode.PartialContent else HttpStatusCode.OK,
                     contentLength = end - offset + 1,
                 ) {
                     val input = source.inputStream()
@@ -737,34 +687,30 @@ private suspend fun ApplicationCall.prepareUploadResources(
 private suspend fun ApplicationCall.requireFileJsonRequest(
     allowedHosts: Set<String>,
     wallClockMs: () -> Long,
-): Boolean {
-    val result = SessionRequestSecurityPolicy.validateJsonApi(
-        host = request.header(HttpHeaders.Host),
-        origin = request.header(HttpHeaders.Origin),
-        contentType = request.header(HttpHeaders.ContentType),
-        contentLength = request.header(HttpHeaders.ContentLength)?.toLongOrNull(),
-        allowedHosts = allowedHosts,
-        maxBodyBytes = MAX_FILE_CONTROL_JSON_BYTES.toLong(),
-        bodyTooLargeStatus = HttpStatusCode.PayloadTooLarge,
-        originScheme = originScheme(),
-    )
-    if (result is RequestGuardResult.Rejected) {
-        if (result.status == HttpStatusCode.PayloadTooLarge) {
-            respondFileError(result.status, FileProtocolErrorCode.INVALID_PAYLOAD, wallClockMs)
-        } else {
-            respondSessionError(
-                result.status,
-                SessionErrorCode.INVALID_PAYLOAD,
-                if (result.status == HttpStatusCode.Forbidden) {
-                    "Запрос отклонён политикой локального источника"
-                } else {
-                    "Некорректный запрос"
-                },
-            )
-        }
-        return false
+): Boolean = requireJsonApi(allowedHosts, MAX_FILE_CONTROL_JSON_BYTES.toLong()) {
+    respondFileError(HttpStatusCode.PayloadTooLarge, FileProtocolErrorCode.INVALID_PAYLOAD, wallClockMs)
+}
+
+private fun ApplicationCall.transferIdParam(): FileTransferId? =
+    parameters["transferId"]?.let { value -> runCatching { FileTransferId(value) }.getOrNull() }
+
+/** The caller's own transfer named by the path; responds 404 and returns null otherwise. */
+private suspend fun ApplicationCall.ownedTransferOrNotFound(
+    fileCoordinator: FileTransferCoordinator,
+    authorized: AuthorizedSession,
+    wallClockMs: () -> Long,
+): FileTransferState? {
+    val item = transferIdParam()?.let { transferId ->
+        fileCoordinator.ownedTransfer(
+            authorized.handle.generationId,
+            authorized.session.id,
+            transferId,
+        )
     }
-    return true
+    if (item == null) {
+        respondFileError(HttpStatusCode.NotFound, FileProtocolErrorCode.INVALID_PAYLOAD, wallClockMs)
+    }
+    return item
 }
 
 private fun safeAttachmentHeader(displayName: String, fallbackId: String): String {
@@ -788,7 +734,7 @@ private suspend fun ApplicationCall.respondFileError(
                 messageId = "server-error",
                 type = FILE_ERROR_TYPE,
                 timestamp = wallClockMs(),
-                relatedMessageId = relatedMessageId?.takeIf { it.matches(Regex("^[A-Za-z0-9_-]{1,64}$")) },
+                relatedMessageId = relatedMessageId?.takeIf(::isValidRelatedMessageId),
                 code = code,
             ),
         ),

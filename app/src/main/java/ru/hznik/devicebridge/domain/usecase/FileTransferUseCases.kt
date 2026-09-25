@@ -6,7 +6,6 @@ import ru.hznik.devicebridge.domain.file.FileDestinationId
 import ru.hznik.devicebridge.domain.file.FileTransferId
 import ru.hznik.devicebridge.domain.file.FileTransferOperationResult
 import ru.hznik.devicebridge.domain.file.FileTransferSnapshot
-import ru.hznik.devicebridge.domain.file.VerifyFileTransferRequest
 import ru.hznik.devicebridge.domain.repository.FileTransferRepository
 
 class ObserveFileTransfersUseCase(

@@ -20,6 +20,4 @@ interface HistoryRepository {
     suspend fun delete(recordId: HistoryRecordId): Boolean
 
     suspend fun clear(): Int
-
-    suspend fun deleteOlderThan(cutoffEpochMillis: Long): Int
 }

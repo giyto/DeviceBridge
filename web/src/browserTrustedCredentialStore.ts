@@ -1,3 +1,5 @@
+import { hasExactKeys } from "./versionedRecord";
+
 const STORAGE_KEY = "devicebridge.trusted-browser.v1";
 const FORMAT_VERSION = 1;
 const MAX_CREDENTIAL_LENGTH = 256;
@@ -57,14 +59,12 @@ function isStoredCredential(
   readonly credential: string;
   readonly expiresAtEpochMillis: number;
 } {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
-  const record = value as Record<string, unknown>;
-  if (Object.keys(record).sort().join(",") !== "credential,expiresAtEpochMillis,version") return false;
-  return record.version === FORMAT_VERSION
-    && typeof record.credential === "string"
-    && isCredential(record.credential)
-    && typeof record.expiresAtEpochMillis === "number"
-    && isFutureEpoch(record.expiresAtEpochMillis, nowEpochMillis);
+  if (!hasExactKeys(value, ["credential", "expiresAtEpochMillis", "version"])) return false;
+  return value.version === FORMAT_VERSION
+    && typeof value.credential === "string"
+    && isCredential(value.credential)
+    && typeof value.expiresAtEpochMillis === "number"
+    && isFutureEpoch(value.expiresAtEpochMillis, nowEpochMillis);
 }
 
 function isCredential(value: string): boolean {

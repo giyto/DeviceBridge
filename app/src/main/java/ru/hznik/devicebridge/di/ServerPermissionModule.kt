@@ -9,6 +9,7 @@ import android.os.Build
 import javax.inject.Singleton
 import ru.hznik.devicebridge.data.permission.AndroidPermissionChangeRegistrar
 import ru.hznik.devicebridge.data.permission.AndroidServerPermissionGateway
+import ru.hznik.devicebridge.data.permission.LOCAL_NETWORK_PERMISSION_MIN_SDK
 import ru.hznik.devicebridge.data.permission.LocalNetworkPermissionObserver
 import ru.hznik.devicebridge.data.permission.PermissionChangeRegistrar
 import ru.hznik.devicebridge.data.permission.PermissionRevocationObserver
@@ -52,7 +53,9 @@ abstract class ServerPermissionModule {
         ): PermissionRevocationObserver =
             LocalNetworkPermissionObserver(
                 registrar = registrar,
-                isPermissionRequired = { Build.VERSION.SDK_INT >= 37 },
+                isPermissionRequired = {
+                    Build.VERSION.SDK_INT >= LOCAL_NETWORK_PERMISSION_MIN_SDK
+                },
                 isLocalNetworkGranted = {
                     gateway.snapshot().localNetworkGranted
                 },

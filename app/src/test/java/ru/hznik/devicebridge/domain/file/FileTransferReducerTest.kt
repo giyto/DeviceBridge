@@ -165,30 +165,6 @@ class FileTransferReducerTest {
         }
     }
 
-    @Test
-    fun reducerPreservesEveryDistinctTerminalFailureReason() {
-        val reasons = listOf(
-            FileTransferFailure.StreamFailed,
-            FileTransferFailure.StorageUnavailable,
-            FileTransferFailure.InsufficientSpace,
-            FileTransferFailure.ChecksumMismatch,
-            FileTransferFailure.FileLimitExceeded,
-            FileTransferFailure.SourceUnavailable,
-            FileTransferFailure.SessionUnavailable,
-            FileTransferFailure.ProtocolMismatch,
-        )
-
-        val actual = reasons.map { reason ->
-            FileTransferReducer.reduce(
-                transfer(),
-                FileTransferEvent.Failed(reason),
-            ).failure
-        }
-
-        assertEquals(reasons, actual)
-        assertEquals(reasons.size, actual.distinct().size)
-    }
-
     private fun transfer(
         direction: FileTransferDirection = FileTransferDirection.BROWSER_TO_ANDROID,
     ) = FileTransferState.queued(

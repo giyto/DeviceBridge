@@ -2,6 +2,7 @@ package ru.hznik.devicebridge.server
 
 import android.os.Build
 import javax.inject.Inject
+import ru.hznik.devicebridge.core.text.ruPlural
 import ru.hznik.devicebridge.domain.file.FileTransferDirection
 import ru.hznik.devicebridge.domain.file.FileTransferId
 import ru.hznik.devicebridge.domain.session.BrowserSessionId
@@ -193,7 +194,7 @@ class EventNotificationModelFactory internal constructor(private val sdkInt: Int
     }
 
     private fun String.preview(): String {
-        val clean = filterNot { it in BIDI_OVERRIDES }
+        val clean = filterNot { it in BIDI_CONTROL_CHARACTERS }
             .map { if (it.isISOControl() && it != '\n') ' ' else it }
             .joinToString("")
             .trim()
@@ -201,28 +202,14 @@ class EventNotificationModelFactory internal constructor(private val sdkInt: Int
     }
 
     private fun String.safeLabel(): String =
-        filterNot { it.isISOControl() || it in BIDI_OVERRIDES }.trim().take(64).ifBlank { "Браузер" }
+        filterNot { it.isISOControl() || it in BIDI_CONTROL_CHARACTERS }.trim().take(64).ifBlank { "Браузер" }
 
     private companion object {
         const val PREVIEW_LENGTH = 500
-        val BIDI_OVERRIDES = setOf(
-            '؜', '‎', '‏',
-            '‪', '‫', '‬', '‭', '‮',
-            '⁦', '⁧', '⁨', '⁩',
-        )
     }
 }
 
-internal fun countOfFiles(count: Int): String {
-    val lastTwo = count % 100
-    val last = count % 10
-    val word = when {
-        lastTwo in 11..14 -> "файлов"
-        last == 1 -> "файл"
-        last in 2..4 -> "файла"
-        else -> "файлов"
-    }
-    return "$count $word"
-}
+internal fun countOfFiles(count: Int): String =
+    "$count ${ruPlural(count, "файл", "файла", "файлов")}"
 
 private fun isSingular(count: Int): Boolean = count % 10 == 1 && count % 100 != 11

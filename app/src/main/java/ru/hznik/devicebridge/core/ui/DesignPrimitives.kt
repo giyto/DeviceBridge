@@ -4,19 +4,13 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
@@ -136,59 +130,6 @@ fun MetadataRow(
             style = MaterialTheme.typography.bodyMedium,
             fontFamily = if (monospace) FontFamily.Monospace else FontFamily.Default,
         )
-    }
-}
-
-@Composable
-fun OperationalItem(
-    statusLabel: String,
-    title: String,
-    metadata: String,
-    modifier: Modifier = Modifier,
-    tone: StateTone = StateTone.NEUTRAL,
-    content: @Composable ColumnScope.() -> Unit = {},
-    actions: @Composable ColumnScope.() -> Unit = {},
-) {
-    val colors = stateSurfaceColors(tone)
-    Column(
-        modifier = modifier
-            .fillMaxWidth()
-            .background(MaterialTheme.colorScheme.surface)
-            .semantics(mergeDescendants = true) {
-                contentDescription = "$statusLabel. $title. $metadata"
-            }
-            .padding(vertical = BridgeSpacing.medium),
-        verticalArrangement = Arrangement.spacedBy(BridgeSpacing.small),
-    ) {
-        Row(
-            horizontalArrangement = Arrangement.spacedBy(BridgeSpacing.small),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            androidx.compose.foundation.layout.Box(
-                modifier = Modifier
-                    .size(8.dp)
-                    .background(colors.accent, CircleShape),
-            )
-            Text(
-                text = statusLabel,
-                color = colors.accent,
-                style = MaterialTheme.typography.labelMedium,
-                fontWeight = FontWeight.Bold,
-            )
-        }
-        Text(
-            text = title,
-            style = MaterialTheme.typography.titleLarge,
-            fontWeight = FontWeight.SemiBold,
-        )
-        Text(
-            text = metadata,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            style = MaterialTheme.typography.bodyMedium,
-        )
-        content()
-        actions()
-        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
     }
 }
 

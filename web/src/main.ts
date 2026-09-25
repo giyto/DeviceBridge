@@ -52,9 +52,9 @@ const themeControl = createThemeControl(
 );
 themeController = new ThemeController(
   new BrowserThemePreferenceStore(),
-  (application) => {
-    documentThemeApplication(application);
-    themeControl.render(application);
+  (theme) => {
+    documentThemeApplication(theme);
+    themeControl.render(theme);
   },
   window,
 );
@@ -108,7 +108,7 @@ textController = new TextTransferController(
   (state) => textView.render(state),
   createProtocolMessageId,
   () => Date.now(),
-  () => controller.handleTextUnauthorized(),
+  () => controller.handleTransferUnauthorized(),
   new BrowserTextDraftStore(),
 );
 fileController = new FileTransferController(
@@ -130,7 +130,7 @@ fileController = new FileTransferController(
   },
   createProtocolMessageId,
   () => Date.now(),
-  () => controller.handleFileUnauthorized(),
+  () => controller.handleTransferUnauthorized(),
 );
 
 // Events from the phone also reach the notifications; the controllers stay unaware of them.

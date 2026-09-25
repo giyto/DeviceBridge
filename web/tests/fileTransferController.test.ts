@@ -19,7 +19,7 @@ describe("FileTransferController", () => {
     const states: unknown[] = [];
     const controller = createController(api, uploader, states);
     controller.activate("token");
-    controller.selectFiles([
+    controller.addFiles([
       new File(["one"], "one.txt", { type: "text/plain" }),
       new File(["two"], "two.txt", { type: "text/plain" }),
     ]);
@@ -43,7 +43,7 @@ describe("FileTransferController", () => {
       states,
     );
     controller.activate("token");
-    controller.selectFiles([new File(["draft"], "draft.txt", { type: "text/plain" })]);
+    controller.addFiles([new File(["draft"], "draft.txt", { type: "text/plain" })]);
 
     controller.setConnectionAvailable(false);
     await controller.confirmSelection();
@@ -62,7 +62,7 @@ describe("FileTransferController", () => {
       states,
     );
     controller.activate("old-token");
-    controller.selectFiles([new File(["draft"], "draft.txt", { type: "text/plain" })]);
+    controller.addFiles([new File(["draft"], "draft.txt", { type: "text/plain" })]);
 
     controller.suspendSession();
     controller.activate("new-token");
@@ -144,7 +144,7 @@ describe("FileTransferController", () => {
     const states: unknown[] = [];
     const controller = createController(api, uploader, states);
     controller.activate("token");
-    controller.selectFiles([new File(["one"], "one.txt")]);
+    controller.addFiles([new File(["one"], "one.txt")]);
     await controller.confirmSelection();
     const id = api.offer.mock.calls[0]![1].items[0]!.transferId;
 
@@ -180,7 +180,7 @@ describe("FileTransferController", () => {
     const states: unknown[] = [];
     const controller = createController(api, uploader, states);
     controller.activate("token");
-    controller.selectFiles([new File([new Uint8Array(size)], "movie.mp4", { type: "video/mp4" })]);
+    controller.addFiles([new File([new Uint8Array(size)], "movie.mp4", { type: "video/mp4" })]);
     await controller.confirmSelection();
     const offered = api.offer.mock.calls[0]![1].items;
     const id = offered[0]!.transferId;
@@ -214,7 +214,7 @@ describe("FileTransferController", () => {
     const states: unknown[] = [];
     const controller = createController(api, uploader, states);
     controller.activate("token");
-    controller.selectFiles([new File(["one"], "one.txt")]);
+    controller.addFiles([new File(["one"], "one.txt")]);
     await controller.confirmSelection();
     const offered = api.offer.mock.calls[0]![1].items;
     const id = offered[0]!.transferId;
@@ -241,7 +241,7 @@ describe("FileTransferController", () => {
       answerOffer = () => resolve(snapshotOffered(command.items, ["CONNECTING"]));
     }));
     controller.activate("token");
-    controller.selectFiles([new File(["one"], "one.txt")]);
+    controller.addFiles([new File(["one"], "one.txt")]);
     const confirming = controller.confirmSelection();
     await vi.waitFor(() => expect(api.offer).toHaveBeenCalledOnce());
     const id = api.offer.mock.calls[0]![1].items[0]!.transferId;
@@ -262,7 +262,7 @@ describe("FileTransferController", () => {
     api.offer.mockImplementation(async (_token: string, command: FileOfferCommand) =>
       snapshotOffered(command.items, ["TRANSFERRING"]));
     controller.activate("token");
-    controller.selectFiles([new File(["one"], "one.txt")]);
+    controller.addFiles([new File(["one"], "one.txt")]);
 
     await controller.confirmSelection();
 
@@ -275,7 +275,7 @@ describe("FileTransferController", () => {
     const states: unknown[] = [];
     const controller = createController(api, uploader, states);
     controller.activate("token");
-    controller.selectFiles([new File(["one"], "one.txt")]);
+    controller.addFiles([new File(["one"], "one.txt")]);
     await controller.confirmSelection();
     const offered = api.offer.mock.calls[0]![1].items;
     const id = offered[0]!.transferId;
@@ -307,7 +307,7 @@ describe("FileTransferController", () => {
     const states: unknown[] = [];
     const controller = createController(api, uploader, states);
     controller.activate("token");
-    controller.selectFiles([new File(["one"], "one.txt")]);
+    controller.addFiles([new File(["one"], "one.txt")]);
     await controller.confirmSelection();
     const id = api.offer.mock.calls[0]![1].items[0]!.transferId;
     controller.receiveProgress(progress(id, "TRANSFERRING", 1));
@@ -334,7 +334,7 @@ describe("FileTransferController", () => {
     const states: unknown[] = [];
     const controller = createController(api, uploader, states);
     controller.activate("token");
-    controller.selectFiles([new File(["one"], "one.txt")]);
+    controller.addFiles([new File(["one"], "one.txt")]);
     await controller.confirmSelection();
     const id = api.offer.mock.calls[0]![1].items[0]!.transferId;
     controller.receiveProgress(progress(id, "TRANSFERRING", 1));
@@ -356,7 +356,7 @@ describe("FileTransferController", () => {
     const states: unknown[] = [];
     const controller = createController(api, uploader, states);
     controller.activate("token");
-    controller.selectFiles([new File(["one"], "one.txt")]);
+    controller.addFiles([new File(["one"], "one.txt")]);
     await controller.confirmSelection();
     const id = api.offer.mock.calls[0]![1].items[0]!.transferId;
     controller.receiveProgress(progress(id, "TRANSFERRING", 1));
@@ -375,7 +375,7 @@ describe("FileTransferController", () => {
     const states: unknown[] = [];
     const controller = createController(api, uploader, states);
     controller.activate("token");
-    controller.selectFiles([new File(["one"], "one.txt")]);
+    controller.addFiles([new File(["one"], "one.txt")]);
     await controller.confirmSelection();
     const id = api.offer.mock.calls[0]![1].items[0]!.transferId;
 
@@ -406,7 +406,7 @@ describe("FileTransferController", () => {
     const states: unknown[] = [];
     const controller = createController(api, uploader, states);
     controller.activate("token");
-    controller.selectFiles([new File(["one"], "one.txt")]);
+    controller.addFiles([new File(["one"], "one.txt")]);
     await controller.confirmSelection();
     const offered = api.offer.mock.calls[0]![1].items;
     const id = offered[0]!.transferId;
@@ -445,7 +445,7 @@ describe("FileTransferController", () => {
       },
     );
     controller.activate("token");
-    controller.selectFiles([new File(["abcd"], "report.bin")]);
+    controller.addFiles([new File(["abcd"], "report.bin")]);
     await controller.confirmSelection();
     const offered = api.offer.mock.calls[0]![1].items;
     const id = offered[0]!.transferId;
@@ -533,7 +533,7 @@ describe("FileTransferController", () => {
       states,
     );
     controller.activate("token");
-    controller.selectFiles([
+    controller.addFiles([
       new File(["one"], "one.txt"),
       new File(["two"], "two.txt"),
     ]);
@@ -589,7 +589,7 @@ describe("FileTransferController", () => {
       hasher,
     );
     controller.activate("token");
-    controller.selectFiles([
+    controller.addFiles([
       new File(["data"], "report.bin", { type: "application/octet-stream" }),
     ]);
     await controller.confirmSelection();
@@ -622,7 +622,7 @@ describe("FileTransferController", () => {
       onUnauthorized,
     );
     controller.activate("expired-token");
-    controller.selectFiles([new File(["one"], "one.txt")]);
+    controller.addFiles([new File(["one"], "one.txt")]);
 
     await controller.confirmSelection();
 
@@ -643,7 +643,7 @@ describe("FileTransferController", () => {
     const unsupported = new File([], "x".repeat(256));
     controller.activate("token");
 
-    controller.selectFiles([new File(["ok"], "ok.txt"), oversized, unsupported]);
+    controller.addFiles([new File(["ok"], "ok.txt"), oversized, unsupported]);
     expect(lastActive(states).selection.filter((item) => item.error !== undefined)).toHaveLength(2);
 
     await controller.confirmSelection();
@@ -662,7 +662,7 @@ describe("FileTransferController", () => {
     );
     controller.activate("token", 4);
 
-    controller.selectFiles([new File(["12345"], "five-bytes.txt")]);
+    controller.addFiles([new File(["12345"], "five-bytes.txt")]);
 
     expect(lastActive(states).selection).toMatchObject([
       {

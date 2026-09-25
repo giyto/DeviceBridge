@@ -1,3 +1,4 @@
+import { required } from "./dom";
 import type { EventNotificationPanelState } from "./eventNotificationController";
 
 export interface EventNotificationViewCallbacks {
@@ -19,13 +20,41 @@ export function createEventNotificationView(
   documentRef: Document,
   callbacks: EventNotificationViewCallbacks,
 ) {
-  const panel = required<HTMLElement>(documentRef, '[data-role="notification-panel"]');
-  const status = required<HTMLElement>(documentRef, '[data-role="notification-status"]');
-  const enable = required<HTMLButtonElement>(documentRef, '[data-action="enable-notifications"]');
-  const disable = required<HTMLButtonElement>(documentRef, '[data-action="disable-notifications"]');
-  const options = required<HTMLElement>(documentRef, '[data-role="notification-options"]');
-  const hideContent = required<HTMLInputElement>(documentRef, '[data-role="hide-notification-content"]');
-  const announcer = required<HTMLElement>(documentRef, '[data-role="preference-announcer"]');
+  const panel = required<HTMLElement>(
+    documentRef,
+    '[data-role="notification-panel"]',
+    "notification",
+  );
+  const status = required<HTMLElement>(
+    documentRef,
+    '[data-role="notification-status"]',
+    "notification",
+  );
+  const enable = required<HTMLButtonElement>(
+    documentRef,
+    '[data-action="enable-notifications"]',
+    "notification",
+  );
+  const disable = required<HTMLButtonElement>(
+    documentRef,
+    '[data-action="disable-notifications"]',
+    "notification",
+  );
+  const options = required<HTMLElement>(
+    documentRef,
+    '[data-role="notification-options"]',
+    "notification",
+  );
+  const hideContent = required<HTMLInputElement>(
+    documentRef,
+    '[data-role="hide-notification-content"]',
+    "notification",
+  );
+  const announcer = required<HTMLElement>(
+    documentRef,
+    '[data-role="preference-announcer"]',
+    "notification",
+  );
   let previous: EventNotificationPanelState | null = null;
 
   const onEnable = () => callbacks.onEnable();
@@ -78,10 +107,4 @@ function announcementFor(
   if (next.kind === "denied") return "Уведомления запрещены в браузере";
   if (next.kind === "off" && previous.kind === "enabled") return "Уведомления выключены";
   return null;
-}
-
-function required<T extends Element>(documentRef: Document, selector: string): T {
-  const element = documentRef.querySelector<T>(selector);
-  if (element === null) throw new Error("Missing DeviceBridge notification element: " + selector);
-  return element;
 }

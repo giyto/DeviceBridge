@@ -9,6 +9,13 @@ object SettingsDefaults {
     const val MAX_RETENTION_DAYS = 365
 }
 
+const val MAX_DEVICE_NAME_CODE_POINTS = 40
+
+fun isValidDeviceName(value: String): Boolean =
+    value.isNotBlank() &&
+        value.codePointCount(0, value.length) <= MAX_DEVICE_NAME_CODE_POINTS &&
+        value.none(Char::isISOControl)
+
 /**
  * The label of the phone's name on the local network: `<label>.local`. Latin letters, digits
  * and hyphens, 1..40 characters, no hyphen at either end, always lower case.
@@ -55,9 +62,7 @@ data class DeviceSettings(
     val networkName: NetworkName = NetworkName.DEFAULT,
 ) {
     init {
-        require(deviceName.isNotBlank())
-        require(deviceName.codePointCount(0, deviceName.length) <= 40)
-        require(deviceName.none(Char::isISOControl))
+        require(isValidDeviceName(deviceName))
         require(retentionDays in SettingsDefaults.MIN_RETENTION_DAYS..SettingsDefaults.MAX_RETENTION_DAYS)
         require(effectiveFileLimitBytes in 1..HARD_MAX_FILE_BYTES)
     }
@@ -92,18 +97,13 @@ enum class IdleStopTimeout(val minutes: Int?, val storageValue: String) {
     MIN_15(15, "15"),
     MIN_30(30, "30"),
     MIN_60(60, "60"),
-
-    /** Only offered by debug builds so E2E checks do not wait 15 minutes. */
-    DEBUG_1(1, "debug_1"),
     ;
 
     companion object {
         val DEFAULT = MIN_30
         val USER_CHOICES = listOf(OFF, MIN_15, MIN_30, MIN_60)
 
-        fun fromStorage(value: String?, allowDebug: Boolean): IdleStopTimeout {
-            val parsed = entries.firstOrNull { it.storageValue == value } ?: return DEFAULT
-            return if (parsed == DEBUG_1 && !allowDebug) DEFAULT else parsed
-        }
+        fun fromStorage(value: String?): IdleStopTimeout =
+            entries.firstOrNull { it.storageValue == value } ?: DEFAULT
     }
 }

@@ -4,9 +4,7 @@ import android.content.Intent
 import android.net.Uri
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
-import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import ru.hznik.devicebridge.feature.text.SharedTextIntentParser
@@ -23,8 +21,6 @@ class SharedFileIntentParserTest {
         val draft = SharedFileIntentParser.parse(intent)
 
         assertEquals(listOf("content://provider/image"), draft?.items?.map { it.uri })
-        assertTrue(draft?.requiresConfirmation == true)
-        assertFalse(draft?.confirmed == true)
     }
 
     @Test

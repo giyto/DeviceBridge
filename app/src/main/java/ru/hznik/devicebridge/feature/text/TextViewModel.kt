@@ -28,6 +28,11 @@ import ru.hznik.devicebridge.domain.usecase.ObserveBrowserSessionsUseCase
 import ru.hznik.devicebridge.domain.usecase.ObserveTextTransfersUseCase
 import ru.hznik.devicebridge.domain.usecase.RetryTextTransferUseCase
 import ru.hznik.devicebridge.domain.usecase.SendTextToBrowserUseCase
+import ru.hznik.devicebridge.feature.common.RECIPIENT_DISCONNECTED_MESSAGE
+import ru.hznik.devicebridge.feature.common.RecipientReconciliation
+import ru.hznik.devicebridge.feature.common.connectedRecipient
+import ru.hznik.devicebridge.feature.common.reconcileRecipientChoice
+import ru.hznik.devicebridge.feature.common.toRecipients
 
 @HiltViewModel
 class TextViewModel @Inject constructor(
@@ -147,19 +152,20 @@ class TextViewModel @Inject constructor(
     }
     private fun reconcileRecipient(sessions: List<BrowserSession>) {
         localState.update { local ->
-            val selected = local.selectedSessionId
-            when {
-                selected != null && sessions.none { it.id == selected } -> local.copy(
+            when (
+                val change = reconcileRecipientChoice(local.selectedSessionId, local.recipientWasLost, sessions)
+            ) {
+                RecipientReconciliation.Lost -> local.copy(
                     selectedSessionId = null,
                     recipientWasLost = true,
                     isSending = false,
                     errorMessage = RECIPIENT_DISCONNECTED_MESSAGE,
                     successMessage = null,
                 )
-                selected == null && sessions.size == 1 && !local.recipientWasLost -> local.copy(
-                    selectedSessionId = sessions.single().id,
+                is RecipientReconciliation.AutoSelected -> local.copy(
+                    selectedSessionId = change.sessionId,
                 )
-                else -> local
+                RecipientReconciliation.Unchanged -> local
             }
         }
     }
@@ -268,7 +274,7 @@ class TextViewModel @Inject constructor(
         transfers: TextTransferState,
         local: LocalState,
     ): TextUiState {
-        val selected = local.selectedSessionId?.takeIf { id -> sessions.any { it.id == id } }
+        val selected = sessions.connectedRecipient(local.selectedSessionId)
         val validation = TextContentValidator.validate(local.draft)
         val preview = when (validation) {
             is TextContentValidation.Valid -> TextPreviewUiState(
@@ -290,14 +296,7 @@ class TextViewModel @Inject constructor(
         val activeSessionIds = sessions.mapTo(mutableSetOf(), BrowserSession::id)
         return TextUiState(
             draft = local.draft,
-            recipients = sessions.map { session ->
-                TextRecipientUiState(
-                    id = session.id,
-                    browserLabel = session.browserLabel,
-                    sourceIpv4 = session.sourceIpv4,
-                    selected = session.id == selected,
-                )
-            },
+            recipients = sessions.toRecipients(selected),
             selectedSessionId = selected,
             recipientSelectionRequired =
                 local.recipientWasLost || (sessions.size > 1 && selected == null),
@@ -344,7 +343,6 @@ class TextViewModel @Inject constructor(
         isRetrying: Boolean,
     ): TextItemUiState = TextItemUiState(
         id = id,
-        sessionId = sessionId,
         browserLabel = browserLabel,
         content = content,
         contentKind = contentKind,
@@ -393,7 +391,5 @@ class TextViewModel @Inject constructor(
     private companion object {
         const val DRAFT_KEY = "text_draft"
         const val DRAFT_GENERATION_KEY = "text_draft_generation"
-        const val RECIPIENT_DISCONNECTED_MESSAGE =
-            "Выбранный браузер отключён. Выберите получателя."
     }
 }

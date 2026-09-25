@@ -2,13 +2,9 @@ package ru.hznik.devicebridge.feature.home
 
 import android.content.ClipData
 import android.content.res.Configuration
-import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.relocation.BringIntoViewRequester
-import androidx.compose.foundation.relocation.bringIntoViewRequester
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -16,12 +12,9 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -30,27 +23,17 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.remember
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.platform.LocalClipboard
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.platform.toClipEntry
-import androidx.compose.ui.semantics.LiveRegionMode
-import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.liveRegion
-import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
@@ -66,6 +49,7 @@ import ru.hznik.devicebridge.ui.theme.BridgeSpacing
 import ru.hznik.devicebridge.ui.theme.DeviceBridgeTheme
 import ru.hznik.devicebridge.feature.file.TransferRecordCard
 import ru.hznik.devicebridge.feature.file.TransferProgress
+import ru.hznik.devicebridge.feature.file.TransferSenderLine
 
 @Composable
 fun HomeScreen(
@@ -239,85 +223,6 @@ fun HomeScreen(
 }
 
 @Composable
-private fun ConnectionGuideCard(
-    uiState: ServerSessionUiState,
-    expanded: Boolean,
-    onToggle: () -> Unit,
-) {
-    Card(
-        onClick = onToggle,
-        modifier = Modifier
-            .fillMaxWidth()
-            .animateContentSize()
-            .semantics {
-                role = Role.Button
-                contentDescription = if (expanded) {
-                    "Скрыть инструкцию подключения"
-                } else {
-                    "Показать инструкцию подключения"
-                }
-            },
-        shape = RoundedCornerShape(22.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.primaryContainer,
-        ),
-    ) {
-        Column(
-            modifier = Modifier.padding(18.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
-        ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(
-                    text = "Как подключить компьютер",
-                    style = MaterialTheme.typography.titleLarge,
-                    fontWeight = FontWeight.SemiBold,
-                    modifier = Modifier.weight(1f),
-                )
-                Icon(
-                    imageVector = BridgeIcons.ExpandMore,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.onPrimaryContainer,
-                    modifier = Modifier
-                        .size(28.dp)
-                        .rotate(if (expanded) 180f else 0f),
-                )
-            }
-
-            if (expanded) {
-                Text("Подключите телефон и компьютер к одной доверенной Wi-Fi сети.")
-
-                if (uiState.status != HomeServerStatus.Running) {
-                    Text("Запустите сервер на телефоне.")
-                } else {
-                    Text(
-                        text = "Откройте адрес на компьютере",
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.SemiBold,
-                    )
-                    Text("Скопируйте актуальный адрес из блока ниже и откройте его в браузере.")
-                    if (!uiState.hasConnectedBrowser) {
-                        uiState.pairingCode?.let { code ->
-                            Text("Введите код $code и подтвердите браузер на телефоне.")
-                        }
-                    } else {
-                        Text("Браузер подключён. Можно передавать текст и файлы.")
-                    }
-                }
-
-                Text(
-                    text = "Аккаунт и отдельная программа для компьютера не нужны.",
-                    color = MaterialTheme.colorScheme.onPrimaryContainer,
-                )
-            }
-        }
-    }
-}
-
-@Composable
 private fun ActiveFileTransfersSection(items: List<HomeFileTransferUiState>) {
     Column(verticalArrangement = Arrangement.spacedBy(BridgeSpacing.small)) {
         SectionHeader(
@@ -342,249 +247,12 @@ private fun ActiveFileTransfersSection(items: List<HomeFileTransferUiState>) {
                     )
                 },
                 footer = {
-                    val sender = item.senderLabel
-                    if (item.autoAccepted || sender != null) {
-                        Text(
-                            text = when {
-                                item.autoAccepted && sender != null -> "Принят автоматически от $sender"
-                                item.autoAccepted -> "Принят автоматически"
-                                else -> sender.orEmpty()
-                            },
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = if (item.autoAccepted) {
-                                MaterialTheme.colorScheme.primary
-                            } else {
-                                MaterialTheme.colorScheme.onSurfaceVariant
-                            },
-                        )
-                    }
+                    TransferSenderLine(
+                        autoAccepted = item.autoAccepted,
+                        senderLabel = item.senderLabel,
+                    )
                 },
             )
-        }
-    }
-}
-
-@Composable
-private fun PairingCodeCard(
-    code: String,
-    expiresInSeconds: Long,
-) {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(24.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.primaryContainer,
-        ),
-    ) {
-        Column(
-            modifier = Modifier.padding(20.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            Text(
-                text = "Код подключения",
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.SemiBold,
-            )
-            Text(
-                text = code,
-                style = MaterialTheme.typography.displayMedium,
-                fontFamily = FontFamily.Monospace,
-                fontWeight = FontWeight.Bold,
-                modifier = Modifier.semantics {
-                    contentDescription = "Код подключения $code"
-                    liveRegion = LiveRegionMode.Polite
-                },
-            )
-            Text(
-                text = "Код обновится через ${formatCountdown(expiresInSeconds)}",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onPrimaryContainer,
-            )
-            Text(
-                text = "Откройте адрес сервера на компьютере, введите этот код и подтвердите браузер здесь.",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onPrimaryContainer,
-            )
-        }
-    }
-}
-
-@Composable
-private fun PendingBrowsersSection(
-    requests: List<PendingBrowserUiState>,
-    onAction: (HomeAction) -> Unit,
-) {
-    // A new request is the one thing to do here, including after "Открыть" in its notification:
-    // it sits below the address and code, so it is scrolled into view.
-    val bringIntoView = remember { BringIntoViewRequester() }
-    LaunchedEffect(requests.lastOrNull()?.id) {
-        bringIntoView.bringIntoView()
-    }
-    Column(
-        modifier = Modifier.bringIntoViewRequester(bringIntoView),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
-        Text(
-            text = "Запросы на подключение",
-            style = MaterialTheme.typography.titleLarge,
-            fontWeight = FontWeight.SemiBold,
-        )
-        requests.forEach { request ->
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(22.dp),
-                colors = CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.secondaryContainer,
-                ),
-            ) {
-                Column(
-                    modifier = Modifier.padding(18.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    Text(
-                        text = request.browserLabel,
-                        fontWeight = FontWeight.SemiBold,
-                        modifier = Modifier.semantics {
-                            contentDescription =
-                                "Новый запрос на подключение: ${request.browserLabel}, ${request.sourceIpv4}"
-                            liveRegion = LiveRegionMode.Polite
-                        },
-                    )
-                    Text(
-                        text = request.sourceIpv4,
-                        style = MaterialTheme.typography.bodyMedium,
-                        fontFamily = FontFamily.Monospace,
-                    )
-                    Text(
-                        text = "Запрос истечёт через ${formatCountdown(request.expiresInSeconds)}",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSecondaryContainer,
-                    )
-                    if (request.rememberBrowserRequested) {
-                        Text(
-                            text = "Браузер просит сохранить доступ на этом устройстве на срок до 30 дней.",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSecondaryContainer,
-                        )
-                    }
-                    HorizontalDivider()
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(10.dp),
-                    ) {
-                        OutlinedButton(
-                            onClick = {
-                                onAction(HomeAction.DenyBrowser(request.id))
-                            },
-                            enabled = !request.actionPending,
-                            modifier = Modifier
-                                .weight(1f)
-                                .semantics {
-                                    contentDescription =
-                                        "Отклонить ${request.browserLabel} с адреса ${request.sourceIpv4}"
-                                },
-                        ) { Text("Отклонить") }
-                        Button(
-                            onClick = {
-                                onAction(HomeAction.ApproveBrowser(request.id))
-                            },
-                            enabled = !request.actionPending,
-                            modifier = Modifier
-                                .weight(1f)
-                                .semantics {
-                                    contentDescription =
-                                        "Разрешить ${request.browserLabel} с адреса ${request.sourceIpv4}"
-                                },
-                        ) {
-                            Text(if (request.rememberBrowserRequested) "Один раз" else "Разрешить")
-                        }
-                    }
-                    if (request.rememberBrowserRequested) {
-                        Button(
-                            onClick = {
-                                onAction(HomeAction.ApproveAndRememberBrowser(request.id))
-                            },
-                            enabled = !request.actionPending,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .semantics {
-                                    contentDescription =
-                                        "Разрешить и запомнить ${request.browserLabel} с адреса ${request.sourceIpv4}"
-                                },
-                        ) { Text("Разрешить и запомнить") }
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun ActiveBrowsersSection(
-    sessions: List<ActiveBrowserUiState>,
-    connectedCount: Int,
-    onAction: (HomeAction) -> Unit,
-) {
-    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Text(
-            text = "Подключённые браузеры: $connectedCount",
-            style = MaterialTheme.typography.titleLarge,
-            fontWeight = FontWeight.SemiBold,
-            modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
-        )
-        sessions.forEach { session ->
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(22.dp),
-                colors = CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.surfaceContainer,
-                ),
-            ) {
-                Column(
-                    modifier = Modifier.padding(18.dp),
-                    verticalArrangement = Arrangement.spacedBy(6.dp),
-                ) {
-                    Column(
-                        modifier = if (session.connected) {
-                            Modifier
-                        } else {
-                            Modifier.semantics(mergeDescendants = true) {
-                                contentDescription =
-                                    "${session.browserLabel}, ${session.sourceIpv4}, не в сети"
-                            }
-                        },
-                        verticalArrangement = Arrangement.spacedBy(6.dp),
-                    ) {
-                        Text(session.browserLabel, fontWeight = FontWeight.SemiBold)
-                        Text(
-                            text = session.sourceIpv4,
-                            style = MaterialTheme.typography.bodyMedium,
-                            fontFamily = FontFamily.Monospace,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                        if (!session.connected) {
-                            Text(
-                                text = "Не в сети",
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                    }
-                    OutlinedButton(
-                        onClick = {
-                            onAction(HomeAction.RevokeBrowser(session.id))
-                        },
-                        enabled = !session.actionPending,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .semantics {
-                                contentDescription =
-                                    "Отключить ${session.browserLabel} с адреса ${session.sourceIpv4}" +
-                                    if (session.connected) "" else ", не в сети"
-                            },
-                    ) { Text("Отключить") }
-                }
-            }
         }
     }
 }
@@ -610,46 +278,41 @@ private fun LifecycleButton(
             contentPadding = PaddingValues(vertical = 15.dp),
         ) { Text("Остановка…") }
 
-        else -> Button(
-            onClick = {
-                when {
-                    uiState.status != HomeServerStatus.Error ->
-                        onAction(HomeAction.StartClicked)
-                    RecoveryAction.REQUEST_PERMISSION in
-                        uiState.failure?.recoveryActions.orEmpty() ->
-                        onAction(HomeAction.RequestPermissionClicked)
-                    RecoveryAction.OPEN_SETTINGS in
-                        uiState.failure?.recoveryActions.orEmpty() ->
-                        onAction(HomeAction.OpenSettingsClicked)
-                    RecoveryAction.RESET_CERTIFICATE in
-                        uiState.failure?.recoveryActions.orEmpty() ->
-                        onOpenSettings()
-                    else -> onAction(HomeAction.StartAgainClicked)
-                }
-            },
-            enabled = uiState.canStart,
-            modifier = Modifier.fillMaxWidth(),
-            contentPadding = PaddingValues(vertical = 15.dp),
-        ) {
-            Text(
-                when (uiState.status) {
-                    HomeServerStatus.Starting -> "Запуск…"
-                    HomeServerStatus.Error -> when {
-                        RecoveryAction.REQUEST_PERMISSION in
-                            uiState.failure?.recoveryActions.orEmpty() ->
-                            "Запросить разрешение"
-                        RecoveryAction.OPEN_SETTINGS in
-                            uiState.failure?.recoveryActions.orEmpty() ->
-                            "Открыть настройки"
-                        RecoveryAction.RESET_CERTIFICATE in
-                            uiState.failure?.recoveryActions.orEmpty() ->
-                            "Открыть настройки HTTPS"
-                        uiState.failure != null -> "Запустить снова"
-                        else -> "Повторить запуск"
-                    }
-                    else -> "Запустить сервер"
-                },
-            )
+        else -> {
+            val (label, onClick) = startButtonContent(uiState, onAction, onOpenSettings)
+            Button(
+                onClick = onClick,
+                enabled = uiState.canStart,
+                modifier = Modifier.fillMaxWidth(),
+                contentPadding = PaddingValues(vertical = 15.dp),
+            ) {
+                Text(label)
+            }
+        }
+    }
+}
+
+/** The start button's label and what it does: a plain start, or the failure's first recovery. */
+private fun startButtonContent(
+    uiState: ServerSessionUiState,
+    onAction: (HomeAction) -> Unit,
+    onOpenSettings: () -> Unit,
+): Pair<String, () -> Unit> {
+    if (uiState.status != HomeServerStatus.Error) {
+        val label = if (uiState.status == HomeServerStatus.Starting) "Запуск…" else "Запустить сервер"
+        return label to { onAction(HomeAction.StartClicked) }
+    }
+    val recoveryActions = uiState.failure?.recoveryActions.orEmpty()
+    return when {
+        RecoveryAction.REQUEST_PERMISSION in recoveryActions ->
+            "Запросить разрешение" to { onAction(HomeAction.RequestPermissionClicked) }
+        RecoveryAction.OPEN_SETTINGS in recoveryActions ->
+            "Открыть настройки" to { onAction(HomeAction.OpenSettingsClicked) }
+        RecoveryAction.RESET_CERTIFICATE in recoveryActions ->
+            "Открыть настройки HTTPS" to onOpenSettings
+        else -> {
+            val label = if (uiState.failure != null) "Запустить снова" else "Повторить запуск"
+            label to { onAction(HomeAction.StartAgainClicked) }
         }
     }
 }
@@ -715,35 +378,6 @@ private fun ServerDetailsCard(
         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
     }
 }
-@Composable
-private fun MessageCard(
-    title: String,
-    message: String,
-    actionLabel: String,
-    onAction: () -> Unit,
-    isWarning: Boolean,
-) {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(22.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = if (isWarning) {
-                MaterialTheme.colorScheme.tertiaryContainer
-            } else {
-                MaterialTheme.colorScheme.errorContainer
-            },
-        ),
-    ) {
-        Column(
-            modifier = Modifier.padding(18.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            Text(title, fontWeight = FontWeight.SemiBold)
-            Text(message, style = MaterialTheme.typography.bodyMedium)
-            TextButton(onClick = onAction) { Text(actionLabel) }
-        }
-    }
-}
 
 @Composable
 private fun statusContent(uiState: ServerSessionUiState): StatusContent =
@@ -788,33 +422,6 @@ private data class StatusContent(
     val color: androidx.compose.ui.graphics.Color,
     val containerColor: androidx.compose.ui.graphics.Color,
 )
-
-internal fun formatIdleMinutes(minutes: Int): String {
-    val lastTwo = minutes % 100
-    val last = minutes % 10
-    val word = when {
-        lastTwo in 11..14 -> "минут"
-        last == 1 -> "минута"
-        last in 2..4 -> "минуты"
-        else -> "минут"
-    }
-    return "$minutes $word"
-}
-
-internal fun formatUptime(totalSeconds: Long): String {
-    val safeSeconds = totalSeconds.coerceAtLeast(0)
-    val hours = safeSeconds / 3_600
-    val minutes = (safeSeconds % 3_600) / 60
-    val seconds = safeSeconds % 60
-    return "%02d:%02d:%02d".format(hours, minutes, seconds)
-}
-
-internal fun formatCountdown(totalSeconds: Long): String {
-    val safeSeconds = totalSeconds.coerceAtLeast(0)
-    val minutes = safeSeconds / 60
-    val seconds = safeSeconds % 60
-    return "%02d:%02d".format(minutes, seconds)
-}
 
 private fun HomeTextTransferStatus.supportingText(): String = when (this) {
     HomeTextTransferStatus.Idle -> "Отправить заметку или ссылку"

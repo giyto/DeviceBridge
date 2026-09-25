@@ -1,9 +1,9 @@
 package ru.hznik.devicebridge.server
 
+import ru.hznik.devicebridge.core.text.ruPlural
 import ru.hznik.devicebridge.domain.file.FileTransferSnapshot
 import ru.hznik.devicebridge.domain.model.ServerLifecycleState
 import ru.hznik.devicebridge.domain.text.TextTransferState
-import ru.hznik.devicebridge.domain.text.TextTransferStatus
 
 enum class ServerTileAppearance {
     ACTIVE,
@@ -71,19 +71,8 @@ object ServerTilePolicy {
     }
 
     fun hasActiveOperations(texts: TextTransferState, files: FileTransferSnapshot): Boolean =
-        texts.items.any {
-            it.status == TextTransferStatus.PENDING || it.status == TextTransferStatus.SENDING
-        } || files.items.any { !it.phase.isTerminal }
+        texts.hasActiveTransfer || files.hasUnfinishedTransfer
 
-    internal fun formatBrowserCount(count: Int): String {
-        val lastTwo = count % 100
-        val last = count % 10
-        val word = when {
-            lastTwo in 11..14 -> "браузеров"
-            last == 1 -> "браузер"
-            last in 2..4 -> "браузера"
-            else -> "браузеров"
-        }
-        return "$count $word"
-    }
+    internal fun formatBrowserCount(count: Int): String =
+        "$count ${ruPlural(count, "браузер", "браузера", "браузеров")}"
 }

@@ -3,29 +3,37 @@ import {
   SessionApiError,
   type SessionChallenge,
   type SessionConfirmation,
-  type SessionConfirmationRecovery,
   type SessionStatus,
 } from "./sessionApiClient";
 import { ManifestCompatibilityError, type WebManifest } from "./webManifestClient";
+import { AvailabilityWaiter } from "./availabilityWaiter";
+import { isAbortError } from "./protocolGuards";
+import { browserScheduler, type Scheduler } from "./scheduler";
 import {
-  AvailabilityWaiter,
-  documentVisibilityPort,
-  windowOnlinePort,
-  type OnlinePort,
-  type VisibilityPort,
-} from "./availabilityWaiter";
-import type {
-  FileErrorEvent,
-  FileOfferEvent,
-  FileProgressEvent,
-  FileSnapshotEvent,
-} from "./fileApiClient";
-import type {
-  SessionEventLossReason,
-  TextErrorEvent,
-  TextReceivedEvent,
-  TextSnapshotEvent,
-} from "./sessionEventSocketClient";
+  defaultWaitingPorts,
+  noFileSession,
+  noTextSession,
+  noTrustedCredentialStore,
+  type FileSessionLifecycle,
+  type ManifestLoader,
+  type SessionApi,
+  type SessionEventChannel,
+  type SessionTokenStore,
+  type TextSessionLifecycle,
+  type TrustedCredentialStore,
+  type WaitingPorts,
+} from "./sessionPorts";
+
+export type {
+  FileSessionLifecycle,
+  ManifestLoader,
+  SessionApi,
+  SessionEventChannel,
+  SessionTokenStore,
+  TextSessionLifecycle,
+  TrustedCredentialStore,
+  WaitingPorts,
+} from "./sessionPorts";
 
 export type SessionUiState =
   | Readonly<{ kind: "checking" }>
@@ -67,137 +75,11 @@ export type SessionUiEffect = Readonly<{
   id: string;
   kind: "clearPairingForm";
 }>;
-export interface ManifestLoader {
-  load(signal?: AbortSignal): Promise<WebManifest>;
-}
-
-export interface SessionApi {
-  createChallenge(
-    clientLabel: string,
-    rememberBrowserRequested?: boolean,
-    signal?: AbortSignal,
-  ): Promise<SessionChallenge>;
-  confirm(
-    challengeId: string,
-    code: string,
-    clientLabel: string,
-    signal?: AbortSignal,
-  ): Promise<SessionConfirmation>;
-  recoverConfirmation(
-    challengeId: string,
-    clientLabel: string,
-    signal?: AbortSignal,
-  ): Promise<SessionConfirmationRecovery>;
-  exchangeTrusted(
-    trustedCredential: string,
-    signal?: AbortSignal,
-  ): Promise<SessionConfirmation>;
-  status(token: string, signal?: AbortSignal): Promise<SessionStatus>;
-  close(token: string, signal?: AbortSignal): Promise<void>;
-}
-
-export interface SessionTokenStore {
-  read(): string | undefined;
-  save(token: string): void;
-  clear(): void;
-}
-
-export interface TrustedCredentialStore {
-  read(): { readonly credential: string; readonly expiresAtEpochMillis: number } | undefined;
-  save(value: { readonly credential: string; readonly expiresAtEpochMillis: number }): void;
-  clear(): void;
-}
-
-export interface SessionEventChannel {
-  connect(token: string, callbacks: {
-    readonly onSessionLost: (reason: SessionEventLossReason) => void;
-    readonly onAuthenticated?: () => void;
-    readonly onReconnecting?: (attempt: number, delayMs: number) => void;
-    readonly onTextReceived?: (event: TextReceivedEvent) => void;
-    readonly onTextSnapshot?: (event: TextSnapshotEvent) => void;
-    readonly onTextError?: (event: TextErrorEvent) => void;
-    readonly onFileOffer?: (event: FileOfferEvent) => void;
-    readonly onFileProgress?: (event: FileProgressEvent) => void;
-    readonly onFileSnapshot?: (event: FileSnapshotEvent) => void;
-    readonly onFileError?: (event: FileErrorEvent) => void;
-  }): void;
-  disconnect(): void;
-}
-
-export interface TextSessionLifecycle {
-  activate(token: string, sessionScopeId: string): void;
-  deactivate(): void;
-  suspendSession(): void;
-  dispose(): void;
-  setConnectionAvailable(available: boolean): void;
-  receive(event: TextReceivedEvent): void;
-  applySnapshot(event: TextSnapshotEvent): void;
-  receiveError(event: TextErrorEvent): void;
-}
-
-export interface FileSessionLifecycle {
-  activate(token: string, effectiveFileLimitBytes: number): void;
-  deactivate(): void;
-  /** Ends the session but keeps the files chosen for sending for the next one. */
-  suspendSession(): void;
-  setConnectionAvailable(available: boolean): void;
-  receiveOffer(event: FileOfferEvent): void;
-  receiveProgress(event: FileProgressEvent): void;
-  applySnapshot(event: FileSnapshotEvent): void;
-  receiveError(event: FileErrorEvent): void;
-}
-
-export interface ControllerScheduler {
-  setTimeout(callback: () => void, delayMs: number): unknown;
-  clearTimeout(handle: unknown): void;
-}
 
 const RETRY_DELAYS_MS = [1_000, 2_000, 4_000] as const;
 const OFFLINE_MESSAGE = "Не удаётся связаться с DeviceBridge.";
-const browserScheduler: ControllerScheduler = {
-  setTimeout: (callback, delayMs) => globalThis.setTimeout(callback, delayMs),
-  clearTimeout: (handle) => globalThis.clearTimeout(handle as number),
-};
-const noTextSession: TextSessionLifecycle = {
-  activate: () => undefined,
-  deactivate: () => undefined,
-  suspendSession: () => undefined,
-  dispose: () => undefined,
-  setConnectionAvailable: () => undefined,
-  receive: () => undefined,
-  applySnapshot: () => undefined,
-  receiveError: () => undefined,
-};
-const noFileSession: FileSessionLifecycle = {
-  activate: () => undefined,
-  deactivate: () => undefined,
-  suspendSession: () => undefined,
-  setConnectionAvailable: () => undefined,
-  receiveOffer: () => undefined,
-  receiveProgress: () => undefined,
-  applySnapshot: () => undefined,
-  receiveError: () => undefined,
-};
-const noTrustedCredentialStore: TrustedCredentialStore = {
-  read: () => undefined,
-  save: () => undefined,
-  clear: () => undefined,
-};
-
-export interface WaitingPorts {
-  readonly visibility: VisibilityPort;
-  readonly online: OnlinePort;
-}
-
-function defaultWaitingPorts(): WaitingPorts {
-  if (typeof document === "undefined" || typeof window === "undefined") {
-    return {
-      visibility: { isVisible: () => true, onChange: () => () => undefined },
-      online: { onOnline: () => () => undefined },
-    };
-  }
-  return { visibility: documentVisibilityPort(document), online: windowOnlinePort(window) };
-}
+const INCOMPATIBLE_VERSION_MESSAGE = "Версия DeviceBridge несовместима с этой страницей.";
+const SESSION_ENDED_MESSAGE = "Сессия завершена на телефоне. Подключитесь снова.";
 
 export class SessionController {
   private generation = 0;
@@ -228,7 +110,7 @@ export class SessionController {
     private readonly textSession: TextSessionLifecycle = noTextSession,
     private readonly fileSession: FileSessionLifecycle = noFileSession,
     private readonly trustedCredentialStore: TrustedCredentialStore = noTrustedCredentialStore,
-    private readonly scheduler: ControllerScheduler = browserScheduler,
+    private readonly scheduler: Scheduler = browserScheduler,
     waitingPorts: WaitingPorts = defaultWaitingPorts(),
   ) {
     this.waiter = new AvailabilityWaiter(
@@ -281,16 +163,13 @@ export class SessionController {
     const generation = this.generation;
     const manifest = this.currentState.manifest;
     this.busy = true;
-    const controller = new AbortController();
-    this.abortController = controller;
-    void this.api.close(token, controller.signal)
-      .catch(() => undefined)
-      .then(async () => {
-        if (!this.isCurrent(generation)) return;
-        this.clearSession();
-        this.busy = false;
-        await this.createChallenge(generation, manifest);
-      });
+    void this.withRequest(async (signal) => {
+      await this.api.close(token, signal).catch(() => undefined);
+      if (!this.isCurrent(generation)) return;
+      this.clearSession();
+      this.busy = false;
+      await this.createChallenge(generation, manifest);
+    });
   }
 
   dispose(): void {
@@ -301,26 +180,13 @@ export class SessionController {
     this.fileSession.deactivate();
   }
 
-  handleTextUnauthorized(): void {
-    this.handleTransferUnauthorized();
-  }
-
-  handleFileUnauthorized(): void {
-    this.handleTransferUnauthorized();
-  }
-
-  private handleTransferUnauthorized(): void {
+  handleTransferUnauthorized(): void {
     if (this.currentState.kind !== "connected") return;
     const manifest = this.currentState.manifest;
     this.generation += 1;
     this.cancelPending();
-    this.clearSession(true);
     this.busy = false;
-    this.emit({
-      kind: "sessionLost",
-      manifest,
-      message: "Сессия завершена на телефоне. Подключитесь снова.",
-    });
+    this.loseSession(manifest);
   }
 
   private beginNewCycle(keepFileDraft = false): void {
@@ -342,8 +208,7 @@ export class SessionController {
    * Nothing the person did is repeated; the drafts stay for the next session.
    */
   private waitForPhone(): void {
-    this.textSession.setConnectionAvailable(false);
-    this.fileSession.setConnectionAvailable(false);
+    this.setTransfersAvailable(false);
     this.emit({ kind: "waiting" });
     this.waiter.start(() => {
       this.phoneReturned = true;
@@ -353,77 +218,66 @@ export class SessionController {
 
   private async boot(generation: number, retryIndex: number): Promise<void> {
     if (!this.isCurrent(generation)) return;
-    const controller = new AbortController();
-    this.abortController = controller;
-    this.emit({ kind: "checking" });
-    try {
-      const manifest = await this.manifestLoader.load(controller.signal);
-      if (!this.isCurrent(generation)) return;
-      if (manifest.protocolVersion !== SESSION_PROTOCOL_VERSION) {
-        this.clearSession();
-        this.emit({
-          kind: "sessionLost",
-          manifest,
-          message: "Версия DeviceBridge несовместима с этой страницей.",
-        });
-        return;
-      }
-      const token = this.tokenStore.read();
-      if (token !== undefined) {
-        try {
-          const status = await this.api.status(token, controller.signal);
-          if (!this.isCurrent(generation)) return;
-          this.connect(manifest, token, status);
+    await this.withRequest(async (signal) => {
+      this.emit({ kind: "checking" });
+      try {
+        const manifest = await this.manifestLoader.load(signal);
+        if (!this.isCurrent(generation)) return;
+        if (manifest.protocolVersion !== SESSION_PROTOCOL_VERSION) {
+          this.loseToIncompatibleVersion(manifest);
           return;
-        } catch (error: unknown) {
-          if (!isUnauthorized(error)) throw error;
-          this.clearSession(true);
         }
-      }
-      const trusted = this.trustedCredentialStore.read();
-      let trustRejected = false;
-      if (trusted !== undefined && !this.trustedExchangeAttempted) {
-        this.trustedExchangeAttempted = true;
-        try {
-          const confirmation = await this.api.exchangeTrusted(
-            trusted.credential,
-            controller.signal,
-          );
-          if (!this.isCurrent(generation)) return;
-          this.tokenStore.save(confirmation.token);
-          this.activeToken = confirmation.token;
-          const status = await this.api.status(confirmation.token, controller.signal);
-          if (!this.isCurrent(generation)) return;
-          this.connect(manifest, confirmation.token, status);
-          return;
-        } catch (error: unknown) {
-          if (isTrustedCredentialRejected(error)) {
-            this.trustedCredentialStore.clear();
-            trustRejected = true;
-          } else {
-            throw error;
+        const token = this.tokenStore.read();
+        if (token !== undefined) {
+          try {
+            const status = await this.api.status(token, signal);
+            if (!this.isCurrent(generation)) return;
+            this.connect(manifest, token, status);
+            return;
+          } catch (error: unknown) {
+            if (!isUnauthorized(error)) throw error;
+            this.clearSession(true);
           }
         }
+        const trusted = this.trustedCredentialStore.read();
+        let trustRejected = false;
+        if (trusted !== undefined && !this.trustedExchangeAttempted) {
+          this.trustedExchangeAttempted = true;
+          try {
+            const confirmation = await this.api.exchangeTrusted(
+              trusted.credential,
+              signal,
+            );
+            if (!this.isCurrent(generation)) return;
+            this.tokenStore.save(confirmation.token);
+            this.activeToken = confirmation.token;
+            const status = await this.api.status(confirmation.token, signal);
+            if (!this.isCurrent(generation)) return;
+            this.connect(manifest, confirmation.token, status);
+            return;
+          } catch (error: unknown) {
+            if (isTrustedCredentialRejected(error)) {
+              this.trustedCredentialStore.clear();
+              trustRejected = true;
+            } else {
+              throw error;
+            }
+          }
+        }
+        const notice: ReadyNotice | undefined = trustRejected
+          ? "trustRejected"
+          : this.phoneReturned ? "phoneReturned" : undefined;
+        this.phoneReturned = false;
+        await this.createChallenge(generation, manifest, true, notice);
+      } catch (error: unknown) {
+        if (!this.isCurrent(generation) || isAbortError(error)) return;
+        if (error instanceof ManifestCompatibilityError) {
+          this.loseToIncompatibleVersion();
+          return;
+        }
+        this.scheduleOfflineRetry(generation, retryIndex);
       }
-      const notice: ReadyNotice | undefined = trustRejected
-        ? "trustRejected"
-        : this.phoneReturned ? "phoneReturned" : undefined;
-      this.phoneReturned = false;
-      await this.createChallenge(generation, manifest, true, notice);
-    } catch (error: unknown) {
-      if (!this.isCurrent(generation) || isAbortError(error)) return;
-      if (error instanceof ManifestCompatibilityError) {
-        this.clearSession();
-        this.emit({
-          kind: "sessionLost",
-          message: "Версия DeviceBridge несовместима с этой страницей.",
-        });
-        return;
-      }
-      this.scheduleOfflineRetry(generation, retryIndex);
-    } finally {
-      if (this.abortController === controller) this.abortController = undefined;
-    }
+    });
   }
 
   private async createChallenge(
@@ -460,130 +314,128 @@ export class SessionController {
   ): Promise<void> {
     await Promise.resolve();
     if (!this.isCurrent(generation)) return;
-    const controller = new AbortController();
-    this.abortController = controller;
-    try {
-      let activeChallengeId = challengeId;
-      if (rememberBrowserRequested !== this.challengeRememberRequested) {
-        const challenge = await this.api.createChallenge(
+    await this.withRequest(async (signal) => {
+      try {
+        let activeChallengeId = challengeId;
+        if (rememberBrowserRequested !== this.challengeRememberRequested) {
+          const challenge = await this.api.createChallenge(
+            this.clientLabel,
+            rememberBrowserRequested,
+            signal,
+          );
+          if (!this.isCurrent(generation)) return;
+          this.challenge = challenge;
+          this.challengeRememberRequested = rememberBrowserRequested;
+          activeChallengeId = challenge.challengeId;
+        }
+        this.emit({ kind: "awaiting", manifest });
+        this.pairingRecovery = {
+          manifest,
+          challengeId: activeChallengeId,
+        };
+        const confirmation = await this.api.confirm(
+          activeChallengeId,
+          code,
           this.clientLabel,
-          rememberBrowserRequested,
-          controller.signal,
+          signal,
         );
         if (!this.isCurrent(generation)) return;
-        this.challenge = challenge;
-        this.challengeRememberRequested = rememberBrowserRequested;
-        activeChallengeId = challenge.challengeId;
+        await this.acceptConfirmation(generation, manifest, confirmation, signal);
+      } catch (error: unknown) {
+        if (!this.isCurrent(generation) || isAbortError(error)) return;
+        if (error instanceof SessionApiError) {
+          this.pairingRecovery = undefined;
+          this.emitError(manifest, error);
+        } else {
+          this.emit({
+            kind: "uncertain",
+            manifest,
+            message: "Ответ о подключении не получен. Проверьте исходный запрос.",
+            checking: false,
+          });
+        }
+      } finally {
+        this.busy = false;
       }
-      this.emit({ kind: "awaiting", manifest });
-      this.pairingRecovery = {
-        manifest,
-        challengeId: activeChallengeId,
-      };
-      const confirmation = await this.api.confirm(
-        activeChallengeId,
-        code,
-        this.clientLabel,
-        controller.signal,
-      );
-      if (!this.isCurrent(generation)) return;
-      await this.acceptConfirmation(generation, manifest, confirmation, controller);
-    } catch (error: unknown) {
-      if (!this.isCurrent(generation) || isAbortError(error)) return;
-      if (error instanceof SessionApiError) {
-        this.pairingRecovery = undefined;
-        this.emitError(manifest, error);
-      } else {
-        this.emit({
-          kind: "uncertain",
-          manifest,
-          message: "Ответ о подключении не получен. Проверьте исходный запрос.",
-          checking: false,
-        });
-      }
-    } finally {
-      this.busy = false;
-      if (this.abortController === controller) this.abortController = undefined;
-    }
+    });
   }
 
   private async recoverPairingConfirmation(
     generation: number,
     recovery: Readonly<{ manifest: WebManifest; challengeId: string }>,
   ): Promise<void> {
-    const controller = new AbortController();
-    this.abortController = controller;
-    this.emit({
-      kind: "uncertain",
-      manifest: recovery.manifest,
-      message: "Проверяем результат исходного запроса…",
-      checking: true,
-    });
-    try {
-      const result = await this.api.recoverConfirmation(
-        recovery.challengeId,
-        this.clientLabel,
-        controller.signal,
-      );
-      if (!this.isCurrent(generation)) return;
-      switch (result.state) {
-        case "PENDING":
+    await this.withRequest(async (signal) => {
+      this.emit({
+        kind: "uncertain",
+        manifest: recovery.manifest,
+        message: "Проверяем результат исходного запроса…",
+        checking: true,
+      });
+      try {
+        const result = await this.api.recoverConfirmation(
+          recovery.challengeId,
+          this.clientLabel,
+          signal,
+        );
+        if (!this.isCurrent(generation)) return;
+        switch (result.state) {
+          case "PENDING":
+            this.emit({
+              kind: "uncertain",
+              manifest: recovery.manifest,
+              message: "Запрос всё ещё ожидает решения на телефоне.",
+              checking: false,
+            });
+            break;
+          case "DENIED":
+            this.pairingRecovery = undefined;
+            this.emit({
+              kind: "denied",
+              manifest: recovery.manifest,
+              message: "Подключение отклонено на телефоне.",
+            });
+            break;
+          case "EXPIRED":
+            this.pairingRecovery = undefined;
+            this.emit({
+              kind: "expired",
+              manifest: recovery.manifest,
+              message: "Код или запрос истёк.",
+            });
+            break;
+          case "APPROVED":
+            await this.acceptConfirmation(
+              generation,
+              recovery.manifest,
+              result,
+              signal,
+            );
+            break;
+        }
+      } catch (error: unknown) {
+        if (!this.isCurrent(generation) || isAbortError(error)) return;
+        if (error instanceof SessionApiError) {
+          this.pairingRecovery = undefined;
+          this.emitError(recovery.manifest, error);
+        } else {
           this.emit({
             kind: "uncertain",
             manifest: recovery.manifest,
-            message: "Запрос всё ещё ожидает решения на телефоне.",
+            message: "Результат пока недоступен. Проверьте сеть и повторите проверку.",
             checking: false,
           });
-          break;
-        case "DENIED":
-          this.pairingRecovery = undefined;
-          this.emit({
-            kind: "denied",
-            manifest: recovery.manifest,
-            message: "Подключение отклонено на телефоне.",
-          });
-          break;
-        case "EXPIRED":
-          this.pairingRecovery = undefined;
-          this.emit({
-            kind: "expired",
-            manifest: recovery.manifest,
-            message: "Код или запрос истёк.",
-          });
-          break;
-        case "APPROVED":
-          await this.acceptConfirmation(
-            generation,
-            recovery.manifest,
-            result,
-            controller,
-          );
-          break;
+        }
+      } finally {
+        this.busy = false;
       }
-    } catch (error: unknown) {
-      if (!this.isCurrent(generation) || isAbortError(error)) return;
-      if (error instanceof SessionApiError) {
-        this.pairingRecovery = undefined;
-        this.emitError(recovery.manifest, error);
-      } else {
-        this.emit({
-          kind: "uncertain",
-          manifest: recovery.manifest,
-          message: "Результат пока недоступен. Проверьте сеть и повторите проверку.",
-          checking: false,
-        });
-      }
-    } finally {
-      this.busy = false;
-      if (this.abortController === controller) this.abortController = undefined;
-    }
+    });
   }
 
   private async acceptConfirmation(
     generation: number,
     manifest: WebManifest,
     confirmation: SessionConfirmation,
-    controller: AbortController,
+    signal: AbortSignal,
   ): Promise<void> {
     if (
       confirmation.trustedCredential !== undefined &&
@@ -600,7 +452,7 @@ export class SessionController {
     }
     this.tokenStore.save(confirmation.token);
     this.activeToken = confirmation.token;
-    const status = await this.api.status(confirmation.token, controller.signal);
+    const status = await this.api.status(confirmation.token, signal);
     if (!this.isCurrent(generation)) return;
     this.pairingRecovery = undefined;
     this.connect(manifest, confirmation.token, status);
@@ -608,10 +460,7 @@ export class SessionController {
 
   private connect(manifest: WebManifest, token: string, status: SessionStatus): void {
     this.activeToken = token;
-    this.textSession.activate(token, status.sessionId);
-    this.fileSession.activate(token, status.effectiveFileLimitBytes);
-    this.textSession.setConnectionAvailable(true);
-    this.fileSession.setConnectionAvailable(true);
+    this.activateTransfers(token, status);
     this.onEffect({
       id: `clear-pairing-form:${status.sessionId}`,
       kind: "clearPairingForm",
@@ -623,8 +472,7 @@ export class SessionController {
       onReconnecting: (attempt, delayMs) => {
         if (!this.isCurrent(generation)) return;
         recovering = true;
-        this.textSession.setConnectionAvailable(false);
-        this.fileSession.setConnectionAvailable(false);
+        this.setTransfersAvailable(false);
         this.emit({
           kind: "reconnecting",
           manifest,
@@ -640,8 +488,7 @@ export class SessionController {
       },
       onSessionLost: (reason) => {
         if (!this.isCurrent(generation)) return;
-        this.textSession.setConnectionAvailable(false);
-        this.fileSession.setConnectionAvailable(false);
+        this.setTransfersAvailable(false);
         if (reason === "reconnect_exhausted") {
           recovering = false;
           this.events.disconnect();
@@ -680,37 +527,27 @@ export class SessionController {
     token: string,
     previousStatus: SessionStatus,
   ): Promise<void> {
-    const controller = new AbortController();
-    this.abortController = controller;
-    try {
-      const status = await this.api.status(token, controller.signal);
-      if (!this.isCurrent(generation)) return;
-      this.activeToken = token;
-      this.textSession.activate(token, status.sessionId);
-      this.fileSession.activate(token, status.effectiveFileLimitBytes);
-      this.textSession.setConnectionAvailable(true);
-      this.fileSession.setConnectionAvailable(true);
-      this.emit({ kind: "connected", manifest, status });
-    } catch (error: unknown) {
-      if (!this.isCurrent(generation) || isAbortError(error)) return;
-      if (isUnauthorized(error)) {
-        this.clearSession(true);
+    await this.withRequest(async (signal) => {
+      try {
+        const status = await this.api.status(token, signal);
+        if (!this.isCurrent(generation)) return;
+        this.activeToken = token;
+        this.activateTransfers(token, status);
+        this.emit({ kind: "connected", manifest, status });
+      } catch (error: unknown) {
+        if (!this.isCurrent(generation) || isAbortError(error)) return;
+        if (isUnauthorized(error)) {
+          this.loseSession(manifest);
+          return;
+        }
         this.emit({
-          kind: "sessionLost",
+          kind: "needsUserAction",
           manifest,
-          message: "Сессия завершена на телефоне. Подключитесь снова.",
+          status: previousStatus,
+          message: "Соединение восстановлено, но проверить сессию не удалось. Повторите попытку.",
         });
-        return;
       }
-      this.emit({
-        kind: "needsUserAction",
-        manifest,
-        status: previousStatus,
-        message: "Соединение восстановлено, но проверить сессию не удалось. Повторите попытку.",
-      });
-    } finally {
-      if (this.abortController === controller) this.abortController = undefined;
-    }
+    });
   }
 
   private async revalidateSessionAfterEventLoss(
@@ -718,27 +555,57 @@ export class SessionController {
     manifest: WebManifest,
     token: string,
   ): Promise<void> {
+    await this.withRequest(async (signal) => {
+      try {
+        const status = await this.api.status(token, signal);
+        if (!this.isCurrent(generation)) return;
+        this.connect(manifest, token, status);
+      } catch (error: unknown) {
+        if (!this.isCurrent(generation) || isAbortError(error)) return;
+        if (isUnauthorized(error)) {
+          this.loseSession(manifest);
+          return;
+        }
+        this.scheduleOfflineRetry(generation, 0);
+      }
+    });
+  }
+
+  /** Runs one request under the controller [cancelPending] aborts, and forgets it when done. */
+  private async withRequest(run: (signal: AbortSignal) => Promise<void>): Promise<void> {
     const controller = new AbortController();
     this.abortController = controller;
     try {
-      const status = await this.api.status(token, controller.signal);
-      if (!this.isCurrent(generation)) return;
-      this.connect(manifest, token, status);
-    } catch (error: unknown) {
-      if (!this.isCurrent(generation) || isAbortError(error)) return;
-      if (isUnauthorized(error)) {
-        this.clearSession(true);
-        this.emit({
-          kind: "sessionLost",
-          manifest,
-          message: "Сессия завершена на телефоне. Подключитесь снова.",
-        });
-        return;
-      }
-      this.scheduleOfflineRetry(generation, 0);
+      await run(controller.signal);
     } finally {
       if (this.abortController === controller) this.abortController = undefined;
     }
+  }
+
+  private activateTransfers(token: string, status: SessionStatus): void {
+    this.textSession.activate(token, status.sessionId);
+    this.fileSession.activate(token, status.effectiveFileLimitBytes);
+    this.setTransfersAvailable(true);
+  }
+
+  private setTransfersAvailable(available: boolean): void {
+    this.textSession.setConnectionAvailable(available);
+    this.fileSession.setConnectionAvailable(available);
+  }
+
+  /** The phone no longer knows this session: keep the text draft and ask to pair again. */
+  private loseSession(manifest: WebManifest): void {
+    this.clearSession(true);
+    this.emit({ kind: "sessionLost", manifest, message: SESSION_ENDED_MESSAGE });
+  }
+
+  private loseToIncompatibleVersion(manifest?: WebManifest): void {
+    this.clearSession();
+    this.emit({
+      kind: "sessionLost",
+      ...(manifest === undefined ? {} : { manifest }),
+      message: INCOMPATIBLE_VERSION_MESSAGE,
+    });
   }
 
   private emitError(manifest: WebManifest, error: unknown): void {
@@ -838,8 +705,4 @@ function isUnauthorized(error: unknown): boolean {
 function isTrustedCredentialRejected(error: unknown): boolean {
   return error instanceof SessionApiError &&
     (error.code === "UNAUTHORIZED" || error.code === "EXPIRED");
-}
-
-function isAbortError(error: unknown): boolean {
-  return error instanceof DOMException && error.name === "AbortError";
 }

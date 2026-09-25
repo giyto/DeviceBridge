@@ -40,7 +40,7 @@ data class SettingsUiState(
     val deviceNameInput: String = DeviceSettings.defaults().deviceName,
     val retentionInput: String = DeviceSettings.defaults().retentionDays.toString(),
     val fileLimitMiBInput: String =
-        (DeviceSettings.defaults().effectiveFileLimitBytes / (1024 * 1024)).toString(),
+        bytesToMebibytesInput(DeviceSettings.defaults().effectiveFileLimitBytes),
     val deviceNameState: SettingsFieldState = SettingsFieldState(),
     val networkNameInput: String = DeviceSettings.defaults().networkName.value,
     val networkNameState: SettingsFieldState = SettingsFieldState(),
@@ -82,6 +82,16 @@ data class SettingsUiState(
             else -> AutoAcceptStatus.ON
         }
 }
+
+private const val BYTES_PER_MIB = 1024L * 1024
+
+/** The file limit field's MiB as bytes, or null when it is not a whole number or overflows. */
+internal fun mebibytesInputToBytes(input: String): Long? = input.toLongOrNull()?.let { mebibytes ->
+    runCatching { Math.multiplyExact(mebibytes, BYTES_PER_MIB) }.getOrNull()
+}
+
+/** A byte limit as the whole MiB shown in the file limit field. */
+internal fun bytesToMebibytesInput(bytes: Long): String = (bytes / BYTES_PER_MIB).toString()
 
 sealed interface SecureModeChange {
     data class Toggle(val enabled: Boolean) : SecureModeChange

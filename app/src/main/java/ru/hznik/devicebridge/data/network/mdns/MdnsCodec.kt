@@ -30,8 +30,6 @@ class MdnsRecord(
     val ttlSeconds: Long,
     val data: ByteArray,
 ) {
-    fun sameData(other: MdnsRecord): Boolean = type == other.type && data.contentEquals(other.data)
-
     override fun equals(other: Any?): Boolean =
         other is MdnsRecord && name == other.name && type == other.type &&
             cacheFlush == other.cacheFlush && ttlSeconds == other.ttlSeconds && data.contentEquals(other.data)

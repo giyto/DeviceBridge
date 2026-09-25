@@ -1,3 +1,10 @@
+import {
+  isProtocolId,
+  isRecord,
+  requireJsonResponse,
+  requireSessionToken,
+} from "./protocolGuards";
+
 export const TEXT_PROTOCOL_VERSION = 1;
 export const TEXT_SEND_TYPE = "text.send";
 export const TEXT_ACCEPTED_TYPE = "text.accepted";
@@ -50,7 +57,7 @@ export class TextApiClient {
     command: TextSendCommand,
     signal?: AbortSignal,
   ): Promise<TextAccepted> {
-    requireToken(token);
+    requireSessionToken(token);
     const response = await this.fetcher("/api/v1/text", {
       method: "POST",
       headers: {
@@ -69,7 +76,7 @@ export class TextApiClient {
     if (!response.ok) {
       throw await parseError(response);
     }
-    requireJsonResponse(response);
+    requireJsonResponse(response, "DeviceBridge returned a non-JSON text response");
     return parseAccepted(await response.json() as unknown);
   }
 }
@@ -129,13 +136,6 @@ function parseAccepted(value: unknown): TextAccepted {
   };
 }
 
-function requireJsonResponse(response: Response): void {
-  const contentType = response.headers.get("Content-Type") ?? "";
-  if (!contentType.toLowerCase().startsWith("application/json")) {
-    throw new Error("DeviceBridge returned a non-JSON text response");
-  }
-}
-
 function fallbackCode(status: number): TextApiErrorCode {
   if (status === 401) return "UNAUTHORIZED";
   if (status === 409) return "MESSAGE_CONFLICT";
@@ -144,26 +144,13 @@ function fallbackCode(status: number): TextApiErrorCode {
   return "INVALID_PAYLOAD";
 }
 
-function requireToken(token: string): void {
-  if (token.length < 1 || token.length > 256 || /\s/.test(token)) {
-    throw new Error("Invalid session credential");
-  }
-}
-
 function requireRecord(value: unknown): Record<string, unknown> {
   if (!isRecord(value)) throw new Error("Invalid DeviceBridge text response");
   return value;
 }
 
 function requireProtocolId(value: unknown): string {
-  if (
-    typeof value !== "string" ||
-    value.length < 1 ||
-    value.length > 64 ||
-    !/^[A-Za-z0-9_-]+$/.test(value)
-  ) {
-    throw new Error("Invalid DeviceBridge text response");
-  }
+  if (!isProtocolId(value)) throw new Error("Invalid DeviceBridge text response");
   return value;
 }
 
@@ -189,25 +176,32 @@ function requirePositiveInteger(value: unknown): number {
 }
 
 function requireContentKind(value: unknown): TextContentKind {
-  if (value !== "TEXT" && value !== "LINK") {
+  if (!isTextContentKind(value)) {
     throw new Error("Invalid DeviceBridge text response");
   }
   return value;
 }
 
 function requireTransferStatus(value: unknown): TextTransferStatus {
-  if (
-    value !== "PENDING" &&
-    value !== "SENDING" &&
-    value !== "DELIVERED" &&
-    value !== "FAILED"
-  ) {
+  if (!isTextTransferStatus(value)) {
     throw new Error("Invalid DeviceBridge text response");
   }
   return value;
 }
 
-function isTextErrorCode(value: unknown): value is TextApiErrorCode {
+export function isTextContentKind(value: unknown): value is TextContentKind {
+  return value === "TEXT" || value === "LINK";
+}
+
+/** Statuses the phone reports; `UNCERTAIN` is only ever set by this browser. */
+export function isTextTransferStatus(value: unknown): value is TextTransferStatus {
+  return value === "PENDING" ||
+    value === "SENDING" ||
+    value === "DELIVERED" ||
+    value === "FAILED";
+}
+
+export function isTextErrorCode(value: unknown): value is TextApiErrorCode {
   return typeof value === "string" && [
     "INVALID_PAYLOAD",
     "UNSUPPORTED_VERSION",
@@ -217,8 +211,4 @@ function isTextErrorCode(value: unknown): value is TextApiErrorCode {
     "UNAUTHORIZED",
     "SESSION_CLOSED",
   ].includes(value);
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
 }

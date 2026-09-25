@@ -4,7 +4,6 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
-import ru.hznik.devicebridge.core.protocol.error.ProtocolErrorDetails
 import ru.hznik.devicebridge.core.protocol.error.toFailureCode
 
 const val FILE_PROTOCOL_VERSION = 1
@@ -196,7 +195,6 @@ data class FileErrorEvent(
     val transferId: String? = null,
     val code: FileProtocolErrorCode,
     val errorCode: String = code.toFailureCode().wireValue,
-    val details: ProtocolErrorDetails? = null,
 )
 
 object FileProtocolJson {

@@ -1,13 +1,10 @@
 package ru.hznik.devicebridge.web
 
-import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.server.application.Application
 import io.ktor.server.application.ApplicationCall
-import io.ktor.server.request.header
 import io.ktor.server.routing.post
 import io.ktor.server.routing.routing
-import ru.hznik.devicebridge.core.protocol.session.SessionErrorCode
 import ru.hznik.devicebridge.core.protocol.text.MAX_TEXT_JSON_BYTES
 import ru.hznik.devicebridge.core.protocol.text.TEXT_ACCEPTED_TYPE
 import ru.hznik.devicebridge.core.protocol.text.TEXT_ERROR_TYPE
@@ -45,7 +42,14 @@ fun Application.installTextRoutes(
                 generationHandle = generationHandle,
                 allowedHosts = allowedHosts,
             ) ?: return@post
-            if (!call.requireTextJsonRequest(allowedHosts(), wallClockMs)) return@post
+            val jsonAccepted = call.requireJsonApi(allowedHosts(), MAX_TEXT_JSON_BYTES.toLong()) {
+                call.respondTextError(
+                    status = HttpStatusCode.PayloadTooLarge,
+                    code = TextProtocolErrorCode.CONTENT_TOO_LARGE,
+                    wallClockMs = wallClockMs,
+                )
+            }
+            if (!jsonAccepted) return@post
 
             val body = call.receiveBoundedJson(MAX_TEXT_JSON_BYTES)
             if (body == null) {
@@ -130,43 +134,6 @@ fun Application.installTextRoutes(
     }
 }
 
-private suspend fun ApplicationCall.requireTextJsonRequest(
-    allowedHosts: Set<String>,
-    wallClockMs: () -> Long,
-): Boolean {
-    val result = SessionRequestSecurityPolicy.validateJsonApi(
-        host = request.header(HttpHeaders.Host),
-        origin = request.header(HttpHeaders.Origin),
-        contentType = request.header(HttpHeaders.ContentType),
-        contentLength = request.header(HttpHeaders.ContentLength)?.toLongOrNull(),
-        allowedHosts = allowedHosts,
-        maxBodyBytes = MAX_TEXT_JSON_BYTES.toLong(),
-        bodyTooLargeStatus = HttpStatusCode.PayloadTooLarge,
-        originScheme = originScheme(),
-    )
-    if (result is RequestGuardResult.Rejected) {
-        if (result.status == HttpStatusCode.PayloadTooLarge) {
-            respondTextError(
-                status = result.status,
-                code = TextProtocolErrorCode.CONTENT_TOO_LARGE,
-                wallClockMs = wallClockMs,
-            )
-        } else {
-            respondSessionError(
-                status = result.status,
-                code = SessionErrorCode.INVALID_PAYLOAD,
-                message = if (result.status == HttpStatusCode.Forbidden) {
-                    "Запрос отклонён политикой локального источника"
-                } else {
-                    "Некорректный запрос"
-                },
-            )
-        }
-        return false
-    }
-    return true
-}
-
 private suspend fun ApplicationCall.respondTextRejection(
     rejection: TextTransferRejection,
     relatedMessageId: String,
@@ -208,8 +175,10 @@ private suspend fun ApplicationCall.respondTextError(
     )
 }
 
-private fun isValidRelatedMessageId(value: String): Boolean =
-    value.length in 1..64 && value.matches(Regex("^[A-Za-z0-9_-]+$"))
+/** Whether a client message id may be echoed back as `relatedMessageId`. */
+internal fun isValidRelatedMessageId(value: String): Boolean = RELATED_MESSAGE_ID.matches(value)
+
+private val RELATED_MESSAGE_ID = Regex("^[A-Za-z0-9_-]{1,64}$")
 
 internal fun TextContentKind.toDto(): TextContentKindDto = when (this) {
     TextContentKind.TEXT -> TextContentKindDto.TEXT

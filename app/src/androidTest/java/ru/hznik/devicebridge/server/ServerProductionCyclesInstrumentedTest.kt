@@ -78,7 +78,8 @@ class ServerProductionCyclesInstrumentedTest {
         socket.soTimeout = TEST_TIMEOUT_MILLIS.toInt()
         val writer = socket.getOutputStream().bufferedWriter()
         writer.write("GET $path HTTP/1.1\r\n")
-        writer.write("Host: ${state.endpoint.host}:${state.endpoint.port}\r\n")
+        // The address the phone serves: its name while it holds one, otherwise its IP.
+        writer.write("Host: ${state.endpoint.authorities.single()}\r\n")
         writer.write("Connection: close\r\n\r\n")
         writer.flush()
         socket.getInputStream().bufferedReader().readText()

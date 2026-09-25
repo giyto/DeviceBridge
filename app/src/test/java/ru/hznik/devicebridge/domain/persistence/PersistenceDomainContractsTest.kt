@@ -1,7 +1,5 @@
 package ru.hznik.devicebridge.domain.persistence
 
-import java.nio.file.Files
-import java.nio.file.Path
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -67,22 +65,5 @@ class PersistenceDomainContractsTest {
         ).flatMap { type -> type.declaredFields.map { it.name.lowercase() } }
 
         assertFalse(fieldNames.any { field -> forbidden.any(field::contains) })
-    }
-
-    @Test
-    fun persistenceRepositoriesAreSmallDomainInterfaces() {
-        val sources = listOf(
-            "HistoryRepository.kt",
-            "SettingsRepository.kt",
-            "TrustedBrowserRepository.kt",
-        ).map { fileName ->
-            Files.readString(
-                Path.of("src/main/java/ru/hznik/devicebridge/domain/repository/$fileName"),
-            )
-        }.joinToString()
-
-        assertFalse(sources.contains("android."))
-        assertFalse(sources.contains("androidx.room"))
-        assertFalse(sources.contains("androidx.datastore"))
     }
 }

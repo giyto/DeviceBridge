@@ -210,7 +210,5 @@ class HistoryViewModelTest {
             records.value = emptyList()
             return count
         }
-
-        override suspend fun deleteOlderThan(cutoffEpochMillis: Long): Int = 0
     }
 }

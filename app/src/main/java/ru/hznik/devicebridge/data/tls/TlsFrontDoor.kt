@@ -28,7 +28,11 @@ data class RelayedPeer(
     val address: String,
     /** Whether the browser reached the front door over TLS. */
     val secure: Boolean,
-)
+) {
+    /** The scheme the browser used to reach the front door. */
+    val scheme: String
+        get() = if (secure) "https" else "http"
+}
 
 /**
  * Connections the front door currently relays, keyed by the local port of its socket to the

@@ -1,5 +1,6 @@
 import type { BrowserSecurityWarningPreferenceStore } from "./browserSecurityWarningPreferenceStore";
 import type { CertificateTrust } from "./certificateTrustProbe";
+import { required } from "./dom";
 
 /** How a page served over HTTPS in secure mode checks that the browser trusts the phone. */
 export interface SecureConnection {
@@ -34,14 +35,17 @@ export function createSecurityWarningController(
   const warning = required<HTMLButtonElement>(
     documentRef,
     '[data-role="security-warning"]',
+    "security warning",
   );
   const detail = required<HTMLElement>(
     documentRef,
     '[data-role="security-warning-detail"]',
+    "security warning",
   );
   const announcer = required<HTMLElement>(
     documentRef,
     '[data-role="preference-announcer"]',
+    "security warning",
   );
   let started = false;
 
@@ -93,16 +97,22 @@ async function showSecureConnection(
     new Promise<CertificateTrust>((resolve) => setTimeout(() => resolve("unknown"), TRUST_PROBE_TIMEOUT_MS)),
   ]);
   if (trust === "untrusted") {
-    required<HTMLAnchorElement>(documentRef, '[data-role="install-certificate-link"]').href =
+    required<HTMLAnchorElement>(
+      documentRef,
+      '[data-role="install-certificate-link"]',
+      "security warning",
+    ).href =
       connection.setupUrl;
-    required<HTMLElement>(documentRef, '[data-role="untrusted-certificate-note"]').hidden = false;
+    required<HTMLElement>(
+      documentRef,
+      '[data-role="untrusted-certificate-note"]',
+      "security warning",
+    ).hidden = false;
   } else {
-    required<HTMLElement>(documentRef, '[data-role="secure-connection-note"]').hidden = false;
+    required<HTMLElement>(
+      documentRef,
+      '[data-role="secure-connection-note"]',
+      "security warning",
+    ).hidden = false;
   }
-}
-
-function required<T extends Element>(documentRef: Document, selector: string): T {
-  const element = documentRef.querySelector<T>(selector);
-  if (element === null) throw new Error('Missing security warning element: ' + selector);
-  return element;
 }

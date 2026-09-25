@@ -34,6 +34,9 @@ describe("web accessibility structure", () => {
     const textAnnouncer = document.querySelector('[data-role="text-announcer"]');
     const fileAnnouncer = document.querySelector('[data-role="file-announcer"]');
     expect(connection).toMatchObject({ role: "status", ariaLive: "polite" });
+    expect(document.querySelector('[data-role="status-title"]')?.textContent).toContain(
+      "Проверяем",
+    );
     expect(textAnnouncer).toMatchObject({ ariaLive: "polite" });
     expect(fileAnnouncer).toMatchObject({ ariaLive: "polite" });
     expect(document.querySelector('[data-role="text-feed"]')?.hasAttribute("aria-live"))

@@ -27,7 +27,6 @@ import ru.hznik.devicebridge.domain.repository.BrowserSessionRepository
 import ru.hznik.devicebridge.domain.usecase.ApproveBrowserRequestUseCase
 import ru.hznik.devicebridge.domain.usecase.DenyBrowserRequestUseCase
 import ru.hznik.devicebridge.domain.session.ServerGenerationId
-import ru.hznik.devicebridge.domain.text.IncomingTextRequest
 import ru.hznik.devicebridge.domain.text.SendTextRequest
 import ru.hznik.devicebridge.domain.text.TextContentKind
 import ru.hznik.devicebridge.domain.text.TextMessageId
@@ -219,7 +218,6 @@ class EventNotificationActionHandlerTest {
     private class FakeTexts : TextTransferRepository {
         override val state = MutableStateFlow(TextTransferState.empty())
         override suspend fun send(request: SendTextRequest) = error("Not used")
-        override suspend fun receive(request: IncomingTextRequest) = error("Not used")
         override suspend fun retry(messageId: TextMessageId) = error("Not used")
     }
 

@@ -46,6 +46,7 @@ internal class SessionRouteTestServer(
     effectiveFileLimitBytes: Long = ru.hznik.devicebridge.domain.file.HARD_MAX_FILE_BYTES,
     effectiveFileLimitProvider: (() -> Long)? = null,
     deviceNameProvider: () -> String = { "Test Android" },
+    uploadProcessor: RawFileUploadProcessor = RawFileUploadProcessor(),
 ) : AutoCloseable {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val clock = FixedClock(1_000)
@@ -156,6 +157,7 @@ internal class SessionRouteTestServer(
                 allowedHosts = { setOf(authority) },
                 wallClockMs = { 1_000_000 },
                 uploadTargetFactory = uploadTargetFactory,
+                uploadProcessor = uploadProcessor,
                 downloadSourceFactory = downloadSourceFactory,
                 effectiveFileLimitBytes = {
                     effectiveFileLimitProvider?.invoke() ?: effectiveFileLimitBytes
@@ -348,6 +350,7 @@ internal inline fun <T> withSessionRouteServer(
     enableFileEvents: Boolean = false,
     effectiveFileLimitBytes: Long = ru.hznik.devicebridge.domain.file.HARD_MAX_FILE_BYTES,
     noinline effectiveFileLimitProvider: (() -> Long)? = null,
+    uploadProcessor: RawFileUploadProcessor = RawFileUploadProcessor(),
     block: (SessionRouteTestServer) -> T,
 ): T = SessionRouteTestServer(
     maxChallenges,
@@ -358,4 +361,5 @@ internal inline fun <T> withSessionRouteServer(
     enableFileEvents,
     effectiveFileLimitBytes,
     effectiveFileLimitProvider,
+    uploadProcessor = uploadProcessor,
 ).use(block)
