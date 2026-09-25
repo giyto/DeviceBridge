@@ -1,6 +1,7 @@
 package ru.hznik.devicebridge.data.session
 
 import ru.hznik.devicebridge.core.protocol.session.MAX_CLIENT_LABEL_LENGTH
+import ru.hznik.devicebridge.domain.session.isCanonicalIpv4
 
 data class NormalizedClientMetadata(
     val browserLabel: String,
@@ -33,14 +34,6 @@ object ClientMetadataNormalizer {
         return ClientMetadataResult.Valid(NormalizedClientMetadata(label, sourceIpv4))
     }
 
-    private fun isCanonicalIpv4(value: String): Boolean {
-        val octets = value.split('.')
-        return octets.size == 4 && octets.all { octet ->
-            octet.isNotEmpty() &&
-                octet.length <= 3 &&
-                octet.all(Char::isDigit) &&
-                (octet.length == 1 || octet.first() != '0') &&
-                octet.toInt() in 0..255
-        }
-    }
+    fun normalizeOrNull(browserLabel: String, sourceIpv4: String): NormalizedClientMetadata? =
+        (normalize(browserLabel, sourceIpv4) as? ClientMetadataResult.Valid)?.metadata
 }

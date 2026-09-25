@@ -5,7 +5,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
-import ru.hznik.devicebridge.domain.model.ServerLifecycleState
 import ru.hznik.devicebridge.domain.model.ServerStopReason
 import ru.hznik.devicebridge.domain.repository.ServerLifecycleRepository
 import ru.hznik.devicebridge.domain.settings.SettingsUpdateResult
@@ -77,9 +76,7 @@ class SecureModeController(
     private suspend fun restart() {
         lifecycle.stop(ServerStopReason.UserRequested)
         withTimeoutOrNull(restartWaitMillis) {
-            lifecycle.state.first {
-                it is ServerLifecycleState.Stopped || it is ServerLifecycleState.Error
-            }
+            lifecycle.state.first { it.isIdle }
         }
         lifecycle.start()
     }

@@ -1,11 +1,11 @@
 package ru.hznik.devicebridge.data.file
 
-import java.security.MessageDigest
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import ru.hznik.devicebridge.core.text.sha256Hex
 import ru.hznik.devicebridge.domain.file.CreateFileTransfersRequest
 import ru.hznik.devicebridge.domain.file.FileCommandId
 import ru.hznik.devicebridge.domain.file.FileDestinationId
@@ -113,11 +113,7 @@ class FileTransferCoordinator(
         if (activeGenerationId != request.generationId) {
             return@withLock FileTransferOperationResult.InvalidState
         }
-        val ownsSession = browserSessionState().sessions.any {
-            it.id == request.ownerSessionId &&
-                it.generationId == request.generationId
-        }
-        if (!ownsSession) {
+        if (!ownsLiveSession(request.ownerSessionId, request.generationId)) {
             return@withLock FileTransferOperationResult.Rejected(
                 FileTransferFailure.SessionUnavailable,
             )
@@ -206,10 +202,7 @@ class FileTransferCoordinator(
         ) {
             return@withLock FileTransferOperationResult.InvalidState
         }
-        val ownsSession = browserSessionState().sessions.any { session ->
-            session.id == item.ownerSessionId && session.generationId == item.generationId
-        }
-        if (!ownsSession) {
+        if (!ownsLiveSession(item.ownerSessionId, item.generationId)) {
             return@withLock FileTransferOperationResult.Rejected(
                 FileTransferFailure.SessionUnavailable,
             )
@@ -288,11 +281,7 @@ class FileTransferCoordinator(
         sessionId: BrowserSessionId,
         transferId: FileTransferId,
     ): FileTransferState? = mutex.withLock {
-        state.value.item(transferId)?.takeIf { item ->
-            activeGenerationId == generationId &&
-                item.generationId == generationId &&
-                item.ownerSessionId == sessionId
-        }
+        ownedItemLocked(generationId, sessionId, transferId)
     }
 
     suspend fun destinationFor(
@@ -300,17 +289,7 @@ class FileTransferCoordinator(
         sessionId: BrowserSessionId,
         transferId: FileTransferId,
     ): FileDestinationId? = mutex.withLock {
-        val item = state.value.item(transferId)
-        if (
-            item != null &&
-            activeGenerationId == generationId &&
-            item.generationId == generationId &&
-            item.ownerSessionId == sessionId
-        ) {
-            destinations[transferId]
-        } else {
-            null
-        }
+        ownedItemLocked(generationId, sessionId, transferId)?.let { destinations[transferId] }
     }
 
     suspend fun issueDownloadGrant(
@@ -318,11 +297,8 @@ class FileTransferCoordinator(
         sessionId: BrowserSessionId,
         transferId: FileTransferId,
     ): IssuedDownloadGrant? = mutex.withLock {
-        val item = state.value.item(transferId) ?: return@withLock null
+        val item = ownedItemLocked(generationId, sessionId, transferId) ?: return@withLock null
         if (
-            activeGenerationId != generationId ||
-            item.generationId != generationId ||
-            item.ownerSessionId != sessionId ||
             item.metadata.direction != FileTransferDirection.ANDROID_TO_BROWSER ||
             item.phase != FileTransferPhase.CONNECTING
         ) {
@@ -494,12 +470,12 @@ class FileTransferCoordinator(
         }
 
         val updated = scheduler.transition(transferId, event)
-        if (previous?.phase != FileTransferPhase.TRANSFERRING &&
+        if (previous.phase != FileTransferPhase.TRANSFERRING &&
             updated?.phase == FileTransferPhase.TRANSFERRING
         ) {
             wifiLock.acquire(transferId)
         } else if (
-            previous?.phase == FileTransferPhase.TRANSFERRING &&
+            previous.phase == FileTransferPhase.TRANSFERRING &&
             updated?.phase != FileTransferPhase.TRANSFERRING
         ) {
             wifiLock.release(transferId)
@@ -601,6 +577,23 @@ class FileTransferCoordinator(
     private fun isCurrent(item: FileTransferState): Boolean =
         item.generationId == activeGenerationId
 
+    private fun ownsLiveSession(
+        sessionId: BrowserSessionId,
+        generationId: ServerGenerationId,
+    ): Boolean = browserSessionState().sessions.any { session ->
+        session.id == sessionId && session.generationId == generationId
+    }
+
+    private fun ownedItemLocked(
+        generationId: ServerGenerationId,
+        sessionId: BrowserSessionId,
+        transferId: FileTransferId,
+    ): FileTransferState? = state.value.item(transferId)?.takeIf { item ->
+        activeGenerationId == generationId &&
+            item.generationId == generationId &&
+            item.ownerSessionId == sessionId
+    }
+
     private fun CreateFileTransfersRequest.fingerprint(): String {
         val canonical = batchId + "\u0002" + files.joinToString(separator = "\u0000") { file ->
             listOf(
@@ -612,9 +605,7 @@ class FileTransferCoordinator(
                 file.direction.name,
             ).joinToString(separator = "\u0001")
         }
-        return MessageDigest.getInstance("SHA-256")
-            .digest(canonical.encodeToByteArray())
-            .joinToString(separator = "") { byte -> "%02x".format(byte) }
+        return canonical.sha256Hex()
     }
 }
 

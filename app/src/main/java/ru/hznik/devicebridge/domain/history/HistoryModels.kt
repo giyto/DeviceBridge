@@ -2,7 +2,6 @@ package ru.hznik.devicebridge.domain.history
 
 private const val MAX_HISTORY_ID_LENGTH = 96
 private const val MAX_BROWSER_LABEL_LENGTH = 64
-private const val MAX_TEXT_PREVIEW_CODE_POINTS = 200
 private const val MAX_FAILURE_REASON_CODE_POINTS = 200
 private val SHA_256 = Regex("^[a-fA-F0-9]{64}$")
 
@@ -73,7 +72,7 @@ data class HistoryRecord(
         require(browserLabel.length <= MAX_BROWSER_LABEL_LENGTH)
         require(browserLabel.none(Char::isISOControl))
         require(timestampEpochMillis > 0)
-        require(textPreview == null || textPreview.codePointCount() <= MAX_TEXT_PREVIEW_CODE_POINTS)
+        require(textPreview == null || textPreview.codePointCount() <= MAX_HISTORY_TEXT_PREVIEW_CODE_POINTS)
         require(failureReason == null || failureReason.codePointCount() <= MAX_FAILURE_REASON_CODE_POINTS)
         require(failureReason == null || failureReason.none(Char::isISOControl))
 

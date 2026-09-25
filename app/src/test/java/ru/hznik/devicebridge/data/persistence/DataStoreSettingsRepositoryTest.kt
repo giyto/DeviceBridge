@@ -211,18 +211,18 @@ class DataStoreSettingsRepositoryTest {
     }
 
     @Test
-    fun debugIdleStopIsRejectedAndIgnoredOutsideDebugBuilds() = runTest {
+    fun storedRemovedDebugIdleStopFallsBackToDefault() = runTest {
         val dataStore = InMemoryPreferencesDataStore()
-        val release = DataStoreSettingsRepository(dataStore)
-        val debug = DataStoreSettingsRepository(dataStore, allowDebugIdleTimeout = true)
+        dataStore.updateData { preferences ->
+            preferences.toMutablePreferences().apply {
+                this[stringPreferencesKey("idle_stop_timeout")] = "debug_1"
+            }
+        }
 
         assertEquals(
-            SettingsUpdateResult.Invalid(SettingsValidationError.IDLE_STOP_TIMEOUT),
-            release.updateIdleStopTimeout(IdleStopTimeout.DEBUG_1),
+            IdleStopTimeout.MIN_30,
+            DataStoreSettingsRepository(dataStore).settings.first().idleStopTimeout,
         )
-        assertTrue(debug.updateIdleStopTimeout(IdleStopTimeout.DEBUG_1) is SettingsUpdateResult.Updated)
-        assertEquals(IdleStopTimeout.DEBUG_1, debug.settings.first().idleStopTimeout)
-        assertEquals(IdleStopTimeout.MIN_30, release.settings.first().idleStopTimeout)
     }
 
     @Test

@@ -142,308 +142,267 @@ class KtorServerRuntimeFactory @Inject constructor(
         require(preferredPort in 0..65_535)
     }
 
-    override fun create(): ServerRuntime = KtorServerRuntime(
-        networkSnapshotProvider = networkSnapshotProvider,
-        endpointResolver = endpointResolver,
-        webAssetProvider = webAssetProvider,
-        browserSessionCoordinator = browserSessionCoordinator,
-        textTransferCoordinator = textTransferCoordinator,
-        sessionEventDispatcher = sessionEventDispatcher,
-        fileTransferCoordinator = fileTransferCoordinator,
-        uploadTargetFactory = uploadTargetFactory,
-        downloadSourceFactory = downloadSourceFactory,
-        fileSourceRegistry = fileSourceRegistry,
-        completedFileRegistry = completedFileRegistry,
-        destinationLeaseRegistry = destinationLeaseRegistry,
-        monotonicClock = monotonicClock,
-        effectiveFileLimitBytes = effectiveFileLimitProvider::currentBytes,
-        deviceName = effectiveFileLimitProvider::currentDeviceName,
-        preferredPort = preferredPort,
-        autoAccept = autoAccept,
-        secureTransport = secureTransport,
-        localNamePublisher = localNamePublisher,
-        networkName = effectiveFileLimitProvider::currentNetworkName,
-    )
-}
+    override fun create(): ServerRuntime = KtorServerRuntime()
 
-private class KtorServerRuntime(
-    private val networkSnapshotProvider: LanNetworkSnapshotProvider,
-    private val endpointResolver: LanEndpointResolver,
-    private val webAssetProvider: WebAssetProvider,
-    private val browserSessionCoordinator: BrowserSessionCoordinator,
-    private val textTransferCoordinator: TextTransferCoordinator,
-    private val sessionEventDispatcher: SessionEventDispatcher,
-    private val fileTransferCoordinator: FileTransferCoordinator,
-    private val uploadTargetFactory: FileUploadTargetFactory,
-    private val downloadSourceFactory: FileDownloadSourceFactory,
-    private val fileSourceRegistry: FileSourceRegistry,
-    private val completedFileRegistry: CompletedFileRegistry,
-    private val destinationLeaseRegistry: FileDestinationLeaseRegistry,
-    private val monotonicClock: MonotonicClock,
-    private val effectiveFileLimitBytes: () -> Long,
-    private val deviceName: () -> String,
-    private val preferredPort: Int,
-    private val autoAccept: AutoAcceptLifecycle,
-    private val secureTransport: SecureTransport,
-    private val localNamePublisher: LocalNamePublisher,
-    private val networkName: () -> String,
-) : ServerRuntime {
+    /** One server run; reads its dependencies from the factory that created it. */
+    private inner class KtorServerRuntime : ServerRuntime {
 
-    private var stopServer: (() -> Unit)? = null
-    private var startedNetworkFingerprint: String? = null
-    private val sessionHandle = AtomicReference<SessionGenerationHandle?>(null)
-    private val allowedAuthorities = AtomicReference<Set<String>>(emptySet())
-    private val addressRedirect = AtomicReference<AddressRedirect?>(null)
-    private val currentEndpoint = MutableStateFlow<ServerEndpoint?>(null)
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+        private var stopServer: (() -> Unit)? = null
+        private var startedNetworkFingerprint: String? = null
+        private val sessionHandle = AtomicReference<SessionGenerationHandle?>(null)
+        private val allowedAuthorities = AtomicReference<Set<String>>(emptySet())
+        private val addressRedirect = AtomicReference<AddressRedirect?>(null)
+        private val currentEndpoint = MutableStateFlow<ServerEndpoint?>(null)
+        private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
-    @Volatile
-    private var nameSession: LocalNameSession? = null
+        @Volatile
+        private var nameSession: LocalNameSession? = null
 
-    @Volatile
-    private var nameLostBeforePublish = false
+        @Volatile
+        private var nameLostBeforePublish = false
 
-    override val networkFingerprint: String?
-        get() = startedNetworkFingerprint
+        override val networkFingerprint: String?
+            get() = startedNetworkFingerprint
 
-    override val endpointChanges: Flow<ServerEndpoint> = currentEndpoint.filterNotNull()
+        override val endpointChanges: Flow<ServerEndpoint> = currentEndpoint.filterNotNull()
 
-    override suspend fun start(): ServerEndpoint {
-        check(stopServer == null) { "Server runtime is already started" }
-        val candidate = when (
-            val resolution = endpointResolver.resolve(networkSnapshotProvider.snapshot())
-        ) {
-            is LanEndpointResolution.Resolved -> resolution.candidate
-            is LanEndpointResolution.Failed ->
-                throw ServerRuntimeStartException(resolution.error)
-        }
-        val secure = secureTransport.isEnabled()
-        // The name is claimed first: the server certificate has to carry it.
-        val name = claimLocalName(candidate, secure)
-        nameSession = name.session
-        // In secure mode the server only listens on loopback; browsers reach it through the
-        // TLS front door on the published port, which records who each connection came from.
-        val tls = try {
-            if (secure) prepareTls(candidate.host, name.localName) else null
-        } catch (failure: Throwable) {
-            closeName()
-            throw failure
-        }
-        val relayed = RelayedConnectionRegistry()
-        val engine = embeddedServer(
-            factory = CIO,
-            host = if (tls != null) TlsFrontDoor.BACKEND_HOST.hostAddress!! else ALL_LOCAL_INTERFACES,
-            port = if (tls != null) 0 else preferredPort,
-            module = {
-                // First of all: a request by IP while the name works goes to the name.
-                installAddressRedirect(
-                    redirect = { addressRedirect.get() },
-                    schemeFor = { call ->
-                        if (tls == null) {
-                            "http"
-                        } else {
-                            relayed.peerFor(call.request.local.remotePort)?.let { if (it.secure) "https" else "http" }
-                        }
-                    },
-                )
-                if (tls != null) {
-                    installSecureModeGuard(
-                        peerFor = relayed::peerFor,
-                        rootCertificate = { tls.root.encoded },
+        override suspend fun start(): ServerEndpoint {
+            check(stopServer == null) { "Server runtime is already started" }
+            val candidate = when (
+                val resolution = endpointResolver.resolve(networkSnapshotProvider.snapshot())
+            ) {
+                is LanEndpointResolution.Resolved -> resolution.candidate
+                is LanEndpointResolution.Failed ->
+                    throw ServerRuntimeStartException(resolution.error)
+            }
+            val secure = secureTransport.isEnabled()
+            // The name is claimed first: the server certificate has to carry it.
+            val name = claimLocalName(candidate, secure)
+            nameSession = name.session
+            // In secure mode the server only listens on loopback; browsers reach it through the
+            // TLS front door on the published port, which records who each connection came from.
+            val tls = try {
+                if (secure) prepareTls(candidate.host, name.localName) else null
+            } catch (failure: Throwable) {
+                closeName()
+                throw failure
+            }
+            val relayed = RelayedConnectionRegistry()
+            val engine = embeddedServer(
+                factory = CIO,
+                host = if (tls != null) TlsFrontDoor.BACKEND_HOST.hostAddress!! else ALL_LOCAL_INTERFACES,
+                port = if (tls != null) 0 else preferredPort,
+                module = {
+                    // First of all: a request by IP while the name works goes to the name.
+                    installAddressRedirect(
+                        redirect = { addressRedirect.get() },
+                        schemeFor = { call ->
+                            if (tls == null) {
+                                "http"
+                            } else {
+                                relayed.peerFor(call.request.local.remotePort)?.scheme
+                            }
+                        },
+                    )
+                    if (tls != null) {
+                        installSecureModeGuard(
+                            peerFor = relayed::peerFor,
+                            rootCertificate = { tls.root.encoded },
+                            webAssetProvider = webAssetProvider,
+                            allowedHosts = { allowedAuthorities.get() },
+                        )
+                    }
+                    installWebRoutes(
                         webAssetProvider = webAssetProvider,
                         allowedHosts = { allowedAuthorities.get() },
                     )
-                }
-                installWebRoutes(
-                    webAssetProvider = webAssetProvider,
-                    allowedHosts = { allowedAuthorities.get() },
-                )
-                installSessionRoutes(
-                    coordinator = browserSessionCoordinator,
-                    generationHandle = { sessionHandle.get() },
-                    allowedHosts = { allowedAuthorities.get() },
-                    sourceIpv4 = { call ->
-                        val remote = if (tls != null) {
-                            relayed.peerFor(call.request.local.remotePort)?.address.orEmpty()
-                        } else {
-                            call.request.local.remoteHost
-                        }
-                        RemoteClientAddress.canonicalIpv4(remote)
-                    },
-                    monotonicClockMs = monotonicClock::nowMs,
-                    wallClockMs = System::currentTimeMillis,
-                    textCoordinator = textTransferCoordinator,
-                    eventDispatcher = sessionEventDispatcher,
-                    fileCoordinator = fileTransferCoordinator,
-                    effectiveFileLimitBytes = effectiveFileLimitBytes,
-                    deviceName = deviceName,
-                )
-                installTextRoutes(
-                    sessionCoordinator = browserSessionCoordinator,
-                    textCoordinator = textTransferCoordinator,
-                    generationHandle = { sessionHandle.get() },
-                    allowedHosts = { allowedAuthorities.get() },
-                    wallClockMs = System::currentTimeMillis,
-                )
-                installFileRoutes(
-                    sessionCoordinator = browserSessionCoordinator,
-                    fileCoordinator = fileTransferCoordinator,
-                    generationHandle = { sessionHandle.get() },
-                    allowedHosts = { allowedAuthorities.get() },
-                    wallClockMs = System::currentTimeMillis,
-                    uploadTargetFactory = uploadTargetFactory,
-                    downloadSourceFactory = downloadSourceFactory,
-                    effectiveFileLimitBytes = effectiveFileLimitBytes,
-                )
-            },
-        )
-
-        engine.start(wait = false)
-        var frontDoor: TlsFrontDoor? = null
-        return try {
-            val connector = engine.engine.resolvedConnectors().single()
-            val publishedPort = if (tls != null) {
-                val door = TlsFrontDoor(TlsFrontDoor.serverContext(tls), connector.port, relayed)
-                frontDoor = door
-                door.start(InetAddress.getByName(ALL_LOCAL_INTERFACES), preferredPort)
-            } else {
-                connector.port
-            }
-            val claimed = ServerEndpoint(
-                host = candidate.host,
-                port = publishedPort,
-                secure = tls != null,
-                localName = name.localName,
-                nameStatus = name.status,
+                    installSessionRoutes(
+                        coordinator = browserSessionCoordinator,
+                        generationHandle = { sessionHandle.get() },
+                        allowedHosts = { allowedAuthorities.get() },
+                        sourceIpv4 = { call ->
+                            val remote = if (tls != null) {
+                                relayed.peerFor(call.request.local.remotePort)?.address.orEmpty()
+                            } else {
+                                call.request.local.remoteHost
+                            }
+                            RemoteClientAddress.canonicalIpv4(remote)
+                        },
+                        monotonicClockMs = monotonicClock::nowMs,
+                        wallClockMs = System::currentTimeMillis,
+                        textCoordinator = textTransferCoordinator,
+                        eventDispatcher = sessionEventDispatcher,
+                        fileCoordinator = fileTransferCoordinator,
+                        effectiveFileLimitBytes = effectiveFileLimitProvider::currentBytes,
+                        deviceName = effectiveFileLimitProvider::currentDeviceName,
+                    )
+                    installTextRoutes(
+                        sessionCoordinator = browserSessionCoordinator,
+                        textCoordinator = textTransferCoordinator,
+                        generationHandle = { sessionHandle.get() },
+                        allowedHosts = { allowedAuthorities.get() },
+                        wallClockMs = System::currentTimeMillis,
+                    )
+                    installFileRoutes(
+                        sessionCoordinator = browserSessionCoordinator,
+                        fileCoordinator = fileTransferCoordinator,
+                        generationHandle = { sessionHandle.get() },
+                        allowedHosts = { allowedAuthorities.get() },
+                        wallClockMs = System::currentTimeMillis,
+                        uploadTargetFactory = uploadTargetFactory,
+                        downloadSourceFactory = downloadSourceFactory,
+                        effectiveFileLimitBytes = effectiveFileLimitProvider::currentBytes,
+                    )
+                },
             )
-            val endpoint = if (nameLostBeforePublish && claimed.localName != null) claimed.withNameLost() else claimed
-            allowedAuthorities.set(endpoint.authorities)
-            addressRedirect.set(endpoint.redirectFromIp())
-            currentEndpoint.value = endpoint
-            startedNetworkFingerprint = candidate.networkFingerprint
-            name.session?.let { session -> scope.launch { session.announce() } }
-            stopServer = {
-                // Goodbye first, so computers stop using the name before the port closes.
+
+            engine.start(wait = false)
+            var frontDoor: TlsFrontDoor? = null
+            return try {
+                val connector = engine.engine.resolvedConnectors().single()
+                val publishedPort = if (tls != null) {
+                    val door = TlsFrontDoor(TlsFrontDoor.serverContext(tls), connector.port, relayed)
+                    frontDoor = door
+                    door.start(InetAddress.getByName(ALL_LOCAL_INTERFACES), preferredPort)
+                } else {
+                    connector.port
+                }
+                val claimed = ServerEndpoint(
+                    host = candidate.host,
+                    port = publishedPort,
+                    secure = tls != null,
+                    localName = name.localName,
+                    nameStatus = name.status,
+                )
+                val endpoint = if (nameLostBeforePublish && claimed.localName != null) claimed.withNameLost() else claimed
+                allowedAuthorities.set(endpoint.authorities)
+                addressRedirect.set(endpoint.redirectFromIp())
+                currentEndpoint.value = endpoint
+                startedNetworkFingerprint = candidate.networkFingerprint
+                name.session?.let { session -> scope.launch { session.announce() } }
+                stopServer = {
+                    // Goodbye first, so computers stop using the name before the port closes.
+                    closeName()
+                    frontDoor?.close()
+                    engine.stop(
+                        gracePeriodMillis = STOP_GRACE_PERIOD_MILLIS,
+                        timeoutMillis = STOP_TIMEOUT_MILLIS,
+                    )
+                }
+                endpoint
+            } catch (throwable: Throwable) {
                 closeName()
                 frontDoor?.close()
                 engine.stop(
-                    gracePeriodMillis = STOP_GRACE_PERIOD_MILLIS,
+                    gracePeriodMillis = 0,
                     timeoutMillis = STOP_TIMEOUT_MILLIS,
                 )
+                throw throwable
             }
-            endpoint
-        } catch (throwable: Throwable) {
-            closeName()
-            frontDoor?.close()
-            engine.stop(
-                gracePeriodMillis = 0,
-                timeoutMillis = STOP_TIMEOUT_MILLIS,
-            )
-            throw throwable
         }
-    }
 
-    private fun prepareTls(host: String, localName: String?): ServerTlsMaterial = try {
-        secureTransport.serverMaterial(InetAddress.getByName(host) as Inet4Address, localName)
-    } catch (failure: TlsMaterialException) {
-        throw ServerRuntimeStartException(ServerLifecycleError.SecureCertificateUnavailable)
-    }
-
-    private class NameOutcome(
-        val session: LocalNameSession?,
-        val localName: String?,
-        val status: LocalNameStatus,
-    )
-
-    /** Claims the name from the settings; any failure leaves the server working by IP. */
-    private suspend fun claimLocalName(candidate: ServerEndpointCandidate, secure: Boolean): NameOutcome {
-        if (localNamePublisher === LocalNamePublisher.Disabled) {
-            return NameOutcome(null, null, LocalNameStatus.NotUsed)
+        private fun prepareTls(host: String, localName: String?): ServerTlsMaterial = try {
+            secureTransport.serverMaterial(InetAddress.getByName(host) as Inet4Address, localName)
+        } catch (failure: TlsMaterialException) {
+            throw ServerRuntimeStartException(ServerLifecycleError.SecureCertificateUnavailable)
         }
-        val label = NetworkName.parse(networkName())?.value ?: NetworkName.DEFAULT.value
-        fun unavailable(reason: LocalNameStatus.Reason) = NameOutcome(null, null, LocalNameStatus.Unavailable(reason, label))
-        // An address by name that the certificate does not cover would end on an error page.
-        if (secure && !secureTransport.permitsName("$label.local")) {
-            return unavailable(LocalNameStatus.Reason.CERTIFICATE)
-        }
-        val interfaceName = candidate.networkFingerprint.substringBefore('|')
-        val session = localNamePublisher.open(candidate.host, interfaceName, ::onNameLost)
-            ?: return unavailable(LocalNameStatus.Reason.NETWORK)
-        return when (val claim = session.claim(label)) {
-            is LocalNameClaim.Claimed ->
-                if (secure && !secureTransport.permitsName(claim.name)) {
+
+        /** Claims the name from the settings; any failure leaves the server working by IP. */
+        private suspend fun claimLocalName(candidate: ServerEndpointCandidate, secure: Boolean): NameOutcome {
+            if (localNamePublisher === LocalNamePublisher.Disabled) {
+                return NameOutcome(null, null, LocalNameStatus.NotUsed)
+            }
+            val label = NetworkName.parse(effectiveFileLimitProvider.currentNetworkName())?.value
+                ?: NetworkName.DEFAULT.value
+            fun unavailable(reason: LocalNameStatus.Reason) = NameOutcome(null, null, LocalNameStatus.Unavailable(reason, label))
+            // An address by name that the certificate does not cover would end on an error page.
+            if (secure && !secureTransport.permitsName("$label.local")) {
+                return unavailable(LocalNameStatus.Reason.CERTIFICATE)
+            }
+            val interfaceName = candidate.networkFingerprint.substringBefore('|')
+            val session = localNamePublisher.open(candidate.host, interfaceName, ::onNameLost)
+                ?: return unavailable(LocalNameStatus.Reason.NETWORK)
+            return when (val claim = session.claim(label)) {
+                is LocalNameClaim.Claimed ->
+                    if (secure && !secureTransport.permitsName(claim.name)) {
+                        session.close()
+                        unavailable(LocalNameStatus.Reason.CERTIFICATE)
+                    } else {
+                        NameOutcome(session, claim.name, LocalNameStatus.Claimed(label, claim.requestedTaken))
+                    }
+
+                LocalNameClaim.AllTaken -> {
                     session.close()
-                    unavailable(LocalNameStatus.Reason.CERTIFICATE)
-                } else {
-                    NameOutcome(session, claim.name, LocalNameStatus.Claimed(label, claim.requestedTaken))
+                    unavailable(LocalNameStatus.Reason.TAKEN)
                 }
-
-            LocalNameClaim.AllTaken -> {
-                session.close()
-                unavailable(LocalNameStatus.Reason.TAKEN)
             }
         }
-    }
 
-    /** Another device answers to our name: stop using it until the next start. */
-    private fun onNameLost() {
-        val endpoint = currentEndpoint.value
-        if (endpoint == null) {
-            nameLostBeforePublish = true
-            return
+        /** Another device answers to our name: stop using it until the next start. */
+        private fun onNameLost() {
+            val endpoint = currentEndpoint.value
+            if (endpoint == null) {
+                nameLostBeforePublish = true
+                return
+            }
+            if (endpoint.localName == null) return
+            val lost = endpoint.withNameLost()
+            // Without the name the IP is the way in again.
+            addressRedirect.set(null)
+            allowedAuthorities.set(lost.authorities)
+            currentEndpoint.value = lost
         }
-        if (endpoint.localName == null) return
-        val lost = endpoint.withNameLost()
-        // Without the name the IP is the way in again.
-        addressRedirect.set(null)
-        allowedAuthorities.set(lost.authorities)
-        currentEndpoint.value = lost
-    }
 
-    private fun ServerEndpoint.redirectFromIp(): AddressRedirect? =
-        localName?.let { name -> AddressRedirect(ipAuthority, "$name:$port") }
+        private fun ServerEndpoint.redirectFromIp(): AddressRedirect? =
+            localName?.let { name -> AddressRedirect(ipAuthority, "$name:$port") }
 
-    private fun closeName() {
-        nameSession?.close()
-        nameSession = null
-    }
-
-    override suspend fun activateSessionGeneration(generation: Long) {
-        check(stopServer != null) { "Listener must be started before session generation" }
-        check(sessionHandle.get() == null) { "Session generation is already active" }
-        val generationId = ServerGenerationId(generation)
-        val handle = browserSessionCoordinator.activate(generationId)
-        textTransferCoordinator.activate(generationId)
-        fileTransferCoordinator.activate(generationId)
-        sessionHandle.set(handle)
-        autoAccept.activate()
-    }
-
-    override suspend fun closeSessionGeneration() {
-        val handle = sessionHandle.getAndSet(null) ?: return
-        autoAccept.deactivate()
-        fileTransferCoordinator.close(handle.generationId)
-        textTransferCoordinator.close(handle.generationId)
-        browserSessionCoordinator.closeGeneration(handle)
-        fileSourceRegistry.clear()
-        completedFileRegistry.clear()
-        destinationLeaseRegistry.releaseAll()
-    }
-
-    override suspend fun stop() {
-        closeSessionGeneration()
-        val stop = stopServer ?: return
-        stopServer = null
-        startedNetworkFingerprint = null
-        withContext(NonCancellable) {
-            stop()
+        private fun closeName() {
+            nameSession?.close()
+            nameSession = null
         }
-        scope.cancel()
-    }
 
-    private companion object {
-        const val ALL_LOCAL_INTERFACES = "0.0.0.0"
-        const val STOP_GRACE_PERIOD_MILLIS = 500L
-        const val STOP_TIMEOUT_MILLIS = 2_000L
+        override suspend fun activateSessionGeneration(generation: Long) {
+            check(stopServer != null) { "Listener must be started before session generation" }
+            check(sessionHandle.get() == null) { "Session generation is already active" }
+            val generationId = ServerGenerationId(generation)
+            val handle = browserSessionCoordinator.activate(generationId)
+            textTransferCoordinator.activate(generationId)
+            fileTransferCoordinator.activate(generationId)
+            sessionHandle.set(handle)
+            autoAccept.activate()
+        }
+
+        override suspend fun closeSessionGeneration() {
+            val handle = sessionHandle.getAndSet(null) ?: return
+            autoAccept.deactivate()
+            fileTransferCoordinator.close(handle.generationId)
+            textTransferCoordinator.close(handle.generationId)
+            browserSessionCoordinator.closeGeneration(handle)
+            fileSourceRegistry.clear()
+            completedFileRegistry.clear()
+            destinationLeaseRegistry.releaseAll()
+        }
+
+        override suspend fun stop() {
+            closeSessionGeneration()
+            val stop = stopServer ?: return
+            stopServer = null
+            startedNetworkFingerprint = null
+            withContext(NonCancellable) {
+                stop()
+            }
+            scope.cancel()
+        }
+
     }
 }
+
+private const val ALL_LOCAL_INTERFACES = "0.0.0.0"
+private const val STOP_GRACE_PERIOD_MILLIS = 500L
+private const val STOP_TIMEOUT_MILLIS = 2_000L
+
+private class NameOutcome(
+    val session: LocalNameSession?,
+    val localName: String?,
+    val status: LocalNameStatus,
+)

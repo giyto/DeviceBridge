@@ -347,7 +347,7 @@ describe("SessionController", () => {
     expect(text.snapshots).toEqual([textSnapshot]);
     expect(text.errors).toEqual([textError]);
 
-    fixture.controller.handleTextUnauthorized();
+    fixture.controller.handleTransferUnauthorized();
     expect(fixture.states.at(-1)?.kind).toBe("sessionLost");
     expect(fixture.store.saved).toBeUndefined();
     expect(text.activeToken).toBeUndefined();

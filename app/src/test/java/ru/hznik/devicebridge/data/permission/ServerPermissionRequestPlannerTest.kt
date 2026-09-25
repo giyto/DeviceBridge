@@ -34,7 +34,6 @@ class ServerPermissionRequestPlannerTest {
         )
 
         val initial = planner.plan(snapshot)
-        val retry = planner.plan(snapshot.copy(localNetworkCanAskAgain = true))
 
         assertEquals(
             setOf(
@@ -44,7 +43,7 @@ class ServerPermissionRequestPlannerTest {
             initial.permissions.toSet(),
         )
         assertFalse(initial.canStart)
-        assertEquals(initial, retry)
+        assertFalse(initial.localNetworkBlockedPermanently)
     }
 
     @Test

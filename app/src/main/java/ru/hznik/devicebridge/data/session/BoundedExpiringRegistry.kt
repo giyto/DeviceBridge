@@ -58,12 +58,6 @@ class BoundedExpiringRegistry<K : Any, V : Any>(
     fun remove(key: K): V? = entries.remove(key)?.value
 
     @Synchronized
-    fun values(): List<V> {
-        pruneExpired()
-        return entries.values.map(Entry<V>::value)
-    }
-
-    @Synchronized
     fun clear(): List<V> {
         val removed = entries.values.map(Entry<V>::value)
         entries.clear()
@@ -71,7 +65,7 @@ class BoundedExpiringRegistry<K : Any, V : Any>(
     }
 
     @Synchronized
-    fun pruneExpired(): List<V> = pruneExpired(checkedNow())
+    private fun pruneExpired(): List<V> = pruneExpired(checkedNow())
 
     private fun pruneExpired(now: Long): List<V> {
         val expired = entries.filterValues { it.expiresAtMs <= now }

@@ -1,6 +1,5 @@
 package ru.hznik.devicebridge.domain.settings
 
-private const val MAX_DEVICE_NAME_CODE_POINTS = 40
 private val repeatedWhitespace = Regex("\\s+")
 
 fun androidDeviceName(manufacturer: String?, model: String?): String {

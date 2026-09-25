@@ -1,3 +1,4 @@
+import { required } from "./dom";
 import type { SessionUiEffect, SessionUiState } from "./sessionController";
 import { sessionPresentationState } from "./uiPresentationState";
 
@@ -17,33 +18,36 @@ export function createShellView(
   documentRef: Document,
   actions: ShellActions,
 ): ShellView {
-  const status = requiredElement<HTMLElement>(documentRef, '[data-role="status"]');
-  const sessionPanel = requiredElement<HTMLElement>(documentRef, '[data-role="session-panel"]');
-  const title = requiredElement<HTMLElement>(documentRef, '[data-role="status-title"]');
-  const detail = requiredElement<HTMLElement>(documentRef, '[data-role="status-detail"]');
-  const versionData = requiredElement<HTMLElement>(documentRef, '[data-role="version-data"]');
-  const deviceRow = requiredElement<HTMLElement>(documentRef, '[data-role="device-row"]');
-  const deviceName = requiredElement<HTMLElement>(documentRef, '[data-role="device-name"]');
-  const sessionCountRow = requiredElement<HTMLElement>(
+  const status = required<HTMLElement>(documentRef, '[data-role="status"]', "shell");
+  const sessionPanel = required<HTMLElement>(documentRef, '[data-role="session-panel"]', "shell");
+  const title = required<HTMLElement>(documentRef, '[data-role="status-title"]', "shell");
+  const detail = required<HTMLElement>(documentRef, '[data-role="status-detail"]', "shell");
+  const versionData = required<HTMLElement>(documentRef, '[data-role="version-data"]', "shell");
+  const deviceRow = required<HTMLElement>(documentRef, '[data-role="device-row"]', "shell");
+  const deviceName = required<HTMLElement>(documentRef, '[data-role="device-name"]', "shell");
+  const sessionCountRow = required<HTMLElement>(
     documentRef,
     '[data-role="session-count-row"]',
+    "shell",
   );
-  const sessionCount = requiredElement<HTMLElement>(documentRef, '[data-role="session-count"]');
-  const retryButton = requiredElement<HTMLButtonElement>(documentRef, '[data-action="retry"]');
-  const form = requiredElement<HTMLFormElement>(documentRef, '[data-role="pairing-form"]');
-  const codeInput = requiredElement<HTMLInputElement>(documentRef, "#pairing-code");
-  const rememberBrowser = requiredElement<HTMLInputElement>(documentRef, "#remember-browser");
-  const pairButton = requiredElement<HTMLButtonElement>(documentRef, '[data-action="pair"]');
-  const disconnectButton = requiredElement<HTMLButtonElement>(
+  const sessionCount = required<HTMLElement>(documentRef, '[data-role="session-count"]', "shell");
+  const retryButton = required<HTMLButtonElement>(documentRef, '[data-action="retry"]', "shell");
+  const form = required<HTMLFormElement>(documentRef, '[data-role="pairing-form"]', "shell");
+  const codeInput = required<HTMLInputElement>(documentRef, "#pairing-code", "shell");
+  const rememberBrowser = required<HTMLInputElement>(documentRef, "#remember-browser", "shell");
+  const pairButton = required<HTMLButtonElement>(documentRef, '[data-action="pair"]', "shell");
+  const disconnectButton = required<HTMLButtonElement>(
     documentRef,
     '[data-action="disconnect"]',
+    "shell",
   );
-  const sessionHeading = requiredElement<HTMLElement>(
+  const sessionHeading = required<HTMLElement>(
     documentRef,
     '[data-role="session-heading"]',
+    "shell",
   );
-  const sessionTitle = requiredElement<HTMLElement>(documentRef, '[data-role="session-title"]');
-  const sessionDetail = requiredElement<HTMLElement>(documentRef, '[data-role="session-detail"]');
+  const sessionTitle = required<HTMLElement>(documentRef, '[data-role="session-title"]', "shell");
+  const sessionDetail = required<HTMLElement>(documentRef, '[data-role="session-detail"]', "shell");
   const consumedEffectIds = new Set<string>();
   let previousKind: SessionUiState["kind"] = "checking";
   let restoreAfterRetry = false;
@@ -82,6 +86,15 @@ export function createShellView(
         rememberBrowser.checked = true;
         break;
     }
+  };
+  /** Keeps the pairing form on screen but unchangeable while the code is on its way. */
+  const lockForm = (label: string): void => {
+    form.hidden = false;
+    codeInput.disabled = true;
+    rememberBrowser.disabled = true;
+    pairButton.disabled = true;
+    pairButton.textContent = label;
+    pairButton.setAttribute("aria-busy", "true");
   };
   const render = (state: SessionUiState): void => {
     status.dataset.state = state.kind;
@@ -136,24 +149,14 @@ export function createShellView(
         detail.textContent = "Не закрывайте эту вкладку.";
         sessionTitle.textContent = "Отправляем запрос";
         sessionDetail.textContent = "После проверки потребуется подтверждение на телефоне.";
-        form.hidden = false;
-        codeInput.disabled = true;
-        rememberBrowser.disabled = true;
-        pairButton.disabled = true;
-        pairButton.textContent = "Проверяем код…";
-        pairButton.setAttribute("aria-busy", "true");
+        lockForm("Проверяем код…");
         break;
       case "awaiting":
         title.textContent = "Ожидаем подтверждение";
         detail.textContent = "Запрос появился в приложении на телефоне.";
         sessionTitle.textContent = "Подтвердите браузер на телефоне";
         sessionDetail.textContent = "Разрешите или отклоните запрос в DeviceBridge.";
-        form.hidden = false;
-        codeInput.disabled = true;
-        rememberBrowser.disabled = true;
-        pairButton.disabled = true;
-        pairButton.textContent = "Ожидаем подтверждение…";
-        pairButton.setAttribute("aria-busy", "true");
+        lockForm("Ожидаем подтверждение…");
         break;
       case "uncertain":
         title.textContent = "Результат подключения неизвестен";
@@ -277,13 +280,4 @@ export function createShellView(
       consumedEffectIds.clear();
     },
   };
-}
-
-function requiredElement<T extends Element>(
-  documentRef: Document,
-  selector: string,
-): T {
-  const element = documentRef.querySelector<T>(selector);
-  if (element === null) throw new Error(`Required shell element is missing: ${selector}`);
-  return element;
 }

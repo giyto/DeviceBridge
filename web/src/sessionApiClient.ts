@@ -1,3 +1,5 @@
+import { isRecord, requireJsonResponse, requireSessionToken } from "./protocolGuards";
+
 export const SESSION_PROTOCOL_VERSION = 1;
 
 export type SessionErrorCode =
@@ -136,7 +138,7 @@ export class SessionApiClient {
     trustedCredential: string,
     signal?: AbortSignal,
   ): Promise<SessionConfirmation> {
-    requireToken(trustedCredential);
+    requireSessionToken(trustedCredential);
     const value = await this.requestJson(
       "/api/v1/session/trusted",
       {
@@ -153,7 +155,7 @@ export class SessionApiClient {
   }
 
   async status(token: string, signal?: AbortSignal): Promise<SessionStatus> {
-    requireToken(token);
+    requireSessionToken(token);
     const value = await this.requestJson(
       "/api/v1/status",
       {
@@ -166,7 +168,7 @@ export class SessionApiClient {
   }
 
   async close(token: string, signal?: AbortSignal): Promise<void> {
-    requireToken(token);
+    requireSessionToken(token);
     const response = await this.fetcher("/api/v1/session", {
       method: "DELETE",
       headers: { Authorization: `Bearer ${token}` },
@@ -182,10 +184,7 @@ export class SessionApiClient {
     if (!response.ok) {
       throw await parseError(response);
     }
-    const contentType = response.headers.get("Content-Type") ?? "";
-    if (!contentType.toLowerCase().startsWith("application/json")) {
-      throw new Error("DeviceBridge returned a non-JSON response");
-    }
+    requireJsonResponse(response, "DeviceBridge returned a non-JSON response");
     return response.json() as Promise<unknown>;
   }
 }
@@ -236,14 +235,14 @@ function parseConfirmation(value: unknown): SessionConfirmation {
     serverTimeEpochMillis: requireNumber(record.serverTimeEpochMillis),
   };
   requireCompatible(confirmation.protocolVersion);
-  requireToken(confirmation.token);
+  requireSessionToken(confirmation.token);
   const trustedCredential = record.trustedCredential;
   const trustedExpiry = record.trustedCredentialExpiresAtEpochMillis;
   if (trustedCredential === undefined && trustedExpiry === undefined) return confirmation;
   if (typeof trustedCredential !== "string") {
     throw new Error("Invalid DeviceBridge response");
   }
-  requireToken(trustedCredential);
+  requireSessionToken(trustedCredential);
   const expiresAtEpochMillis = requireNumber(trustedExpiry);
   if (expiresAtEpochMillis <= confirmation.serverTimeEpochMillis) {
     throw new Error("Invalid DeviceBridge response");
@@ -298,12 +297,6 @@ function requireCompatible(version: number): void {
   }
 }
 
-function requireToken(token: string): void {
-  if (token.length < 1 || token.length > 256 || /\s/.test(token)) {
-    throw new Error("Invalid session credential");
-  }
-}
-
 function requireRecord(value: unknown): Record<string, unknown> {
   if (!isRecord(value)) throw new Error("Invalid DeviceBridge response");
   return value;
@@ -352,10 +345,6 @@ function optionalNonNegativeNumber(value: unknown): number | undefined {
   return typeof value === "number" && Number.isSafeInteger(value) && value >= 0
     ? value
     : undefined;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function isErrorCode(value: unknown): value is SessionErrorCode {

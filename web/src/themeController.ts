@@ -4,24 +4,18 @@ import {
   type ThemePreference,
 } from "./browserThemePreferenceStore";
 
-export type EffectiveTheme = ThemePreference;
-export interface ThemeApplication {
-  readonly preference: ThemePreference;
-  readonly effective: EffectiveTheme;
-}
-
 type ThemeStorageEvents = Pick<Window, "addEventListener" | "removeEventListener">;
 
 export function createDocumentThemeApplication(
   documentRef: Document,
-): (application: ThemeApplication) => void {
-  return ({ preference, effective }): void => {
+): (theme: ThemePreference) => void {
+  return (theme): void => {
     const root = documentRef.documentElement;
-    root.dataset.theme = effective;
-    root.dataset.themePreference = preference;
-    root.style.colorScheme = effective;
+    root.dataset.theme = theme;
+    root.dataset.themePreference = theme;
+    root.style.colorScheme = theme;
     documentRef.querySelector<HTMLMetaElement>('meta[name="color-scheme"]')
-      ?.setAttribute("content", effective);
+      ?.setAttribute("content", theme);
   };
 }
 
@@ -38,7 +32,7 @@ export class ThemeController {
 
   constructor(
     private readonly store: BrowserThemePreferenceStore,
-    private readonly apply: (application: ThemeApplication) => void,
+    private readonly apply: (theme: ThemePreference) => void,
     private readonly storageEvents: ThemeStorageEvents,
   ) {}
 
@@ -63,6 +57,6 @@ export class ThemeController {
   }
 
   private render(): void {
-    this.apply({ preference: this.preference, effective: this.preference });
+    this.apply(this.preference);
   }
 }

@@ -8,6 +8,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
+import ru.hznik.devicebridge.core.text.toLowerHex
 
 data class ChunkedFileCopyResult(
     val sizeBytes: Long,
@@ -43,20 +44,12 @@ class AndroidChunkedFileCopier(
         output.flush()
         ChunkedFileCopyResult(
             sizeBytes = copied,
-            sha256 = digest.digest().toHex(),
+            sha256 = digest.digest().toLowerHex(),
         )
-    }
-
-    private fun ByteArray.toHex(): String = buildString(size * 2) {
-        this@toHex.forEach { byte ->
-            append(HEX[(byte.toInt() ushr 4) and 0x0F])
-            append(HEX[byte.toInt() and 0x0F])
-        }
     }
 
     private companion object {
         const val DEFAULT_BUFFER_SIZE = 64 * 1024
         const val MAX_BUFFER_SIZE = 1024 * 1024
-        const val HEX = "0123456789abcdef"
     }
 }

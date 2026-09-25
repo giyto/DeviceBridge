@@ -34,6 +34,10 @@ enum class TextTransferStatus {
     SENDING,
     DELIVERED,
     FAILED,
+    ;
+
+    val isTerminal: Boolean
+        get() = this == DELIVERED || this == FAILED
 }
 
 enum class TextTransferFailureReason {
@@ -186,6 +190,10 @@ data class TextTransferState private constructor(
             "Text transfer state contains duplicate session message identifiers"
         }
     }
+
+    /** Whether a message is still waiting or being sent. */
+    val hasActiveTransfer: Boolean
+        get() = items.any { !it.status.isTerminal }
 
     companion object {
         fun empty(): TextTransferState = TextTransferState(emptyList())

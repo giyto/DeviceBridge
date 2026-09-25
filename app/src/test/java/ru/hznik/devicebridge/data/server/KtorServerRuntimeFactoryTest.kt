@@ -360,8 +360,6 @@ class KtorServerRuntimeFactoryTest {
             val result = claim ?: return null
             onLost = onNameLost
             return object : LocalNameSession {
-                override val currentName: String? = (result as? LocalNameClaim.Claimed)?.name
-
                 override suspend fun claim(requestedLabel: String): LocalNameClaim = result
 
                 override suspend fun announce() {

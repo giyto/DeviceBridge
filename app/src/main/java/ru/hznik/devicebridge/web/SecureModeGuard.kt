@@ -15,10 +15,10 @@ import io.ktor.server.request.uri
 import io.ktor.server.response.header
 import io.ktor.server.response.respond
 import io.ktor.server.response.respondBytes
-import io.ktor.server.response.respondOutputStream
 import io.ktor.server.response.respondText
 import io.ktor.util.AttributeKey
 import java.util.Locale
+import ru.hznik.devicebridge.data.tls.FileProviderRootCertificateExporter
 import ru.hznik.devicebridge.data.tls.RelayedPeer
 
 internal const val DEFAULT_ORIGIN_SCHEME = "http"
@@ -50,7 +50,7 @@ fun Application.installSecureModeGuard(
             finish()
             return@intercept
         }
-        call.attributes.put(OriginSchemeKey, if (peer.secure) "https" else "http")
+        call.attributes.put(OriginSchemeKey, peer.scheme)
         val path = call.request.path()
         val isRead = call.request.httpMethod == HttpMethod.Get || call.request.httpMethod == HttpMethod.Head
         when {
@@ -86,9 +86,12 @@ fun Application.installSecureModeGuard(
 
 private suspend fun ApplicationCall.respondRootCertificate(der: ByteArray) {
     response.header(HttpHeaders.CacheControl, "no-store")
-    response.header(HttpHeaders.ContentDisposition, "attachment; filename=\"DeviceBridge-CA.crt\"")
+    response.header(
+        HttpHeaders.ContentDisposition,
+        "attachment; filename=\"${FileProviderRootCertificateExporter.FILE_NAME}\"",
+    )
     response.header("X-Content-Type-Options", "nosniff")
-    respondBytes(der, ContentType.parse("application/x-x509-ca-cert"), HttpStatusCode.OK)
+    respondBytes(der, ContentType.parse(FileProviderRootCertificateExporter.MIME_TYPE), HttpStatusCode.OK)
 }
 
 private suspend fun ApplicationCall.respondSetupPage(
@@ -104,9 +107,7 @@ private suspend fun ApplicationCall.respondSetupPage(
     response.header("X-Content-Type-Options", "nosniff")
     response.header("Referrer-Policy", "no-referrer")
     response.header(HttpHeaders.CacheControl, "no-store")
-    respondOutputStream(ContentType.parse(asset.contentType), HttpStatusCode.OK, asset.length) {
-        asset.openStream().use { input -> input.copyTo(this) }
-    }
+    respondAsset(asset)
 }
 
 /** Like the app's policy, plus the HTTPS origin the page probes to see whether the root is trusted. */

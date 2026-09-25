@@ -1,19 +1,9 @@
 package ru.hznik.devicebridge.core.protocol.error
 
-import kotlinx.serialization.Serializable
 import ru.hznik.devicebridge.core.protocol.file.FileProtocolErrorCode
 import ru.hznik.devicebridge.core.protocol.session.SessionErrorCode
 import ru.hznik.devicebridge.core.protocol.text.TextProtocolErrorCode
 import ru.hznik.devicebridge.domain.error.FailureCode
-
-@Serializable
-data class ProtocolErrorDetails(
-    val protocolVersion: Int? = null,
-    val operationId: String? = null,
-    val direction: String? = null,
-    val sizeCategory: String? = null,
-    val lifecycleState: String? = null,
-)
 
 fun SessionErrorCode.toFailureCode(): FailureCode = when (this) {
     SessionErrorCode.INVALID_PAYLOAD -> FailureCode.INVALID_PAYLOAD

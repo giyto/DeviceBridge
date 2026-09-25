@@ -1,6 +1,5 @@
 package ru.hznik.devicebridge.data.text
 
-import java.security.MessageDigest
 import java.util.UUID
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -9,6 +8,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withTimeoutOrNull
+import ru.hznik.devicebridge.core.text.sha256Hex
 import ru.hznik.devicebridge.domain.repository.TextTransferRepository
 import ru.hznik.devicebridge.domain.session.BrowserSessionId
 import ru.hznik.devicebridge.domain.session.BrowserSessionState
@@ -47,7 +47,7 @@ class TextTransferCoordinator(
     private val historyRecorder: TextTerminalHistoryRecorder =
         TextTerminalHistoryRecorder { },
 ) : TextTransferRepository {
-    private data class OperationKey(
+    private data class MessageKey(
         val generationId: ServerGenerationId,
         val sessionId: BrowserSessionId,
         val messageId: TextMessageId,
@@ -63,21 +63,15 @@ class TextTransferCoordinator(
         data class Failed(val reason: TextTransferFailureReason) : DeliverySignal
     }
 
-    private data class DeliveryKey(
-        val generationId: ServerGenerationId,
-        val sessionId: BrowserSessionId,
-        val messageId: TextMessageId,
-    )
-
     private sealed interface SendPreparation {
         data class Ready(val item: TextTransferItem) : SendPreparation
         data class Rejected(val result: TextTransferResult.Rejected) : SendPreparation
     }
 
     private val mutex = Mutex()
-    private val outcomes = LinkedHashMap<OperationKey, StoredOutcome>()
+    private val outcomes = LinkedHashMap<MessageKey, StoredOutcome>()
     private val pendingAcknowledgements =
-        LinkedHashMap<DeliveryKey, CompletableDeferred<DeliverySignal>>()
+        LinkedHashMap<MessageKey, CompletableDeferred<DeliverySignal>>()
     private val mutableState = MutableStateFlow(TextTransferState.empty())
     private var activeGenerationId: ServerGenerationId? = null
 
@@ -89,29 +83,13 @@ class TextTransferCoordinator(
     override val state: StateFlow<TextTransferState> = mutableState.asStateFlow()
 
     suspend fun activate(generationId: ServerGenerationId) {
-        val interrupted = mutex.withLock {
-            val previous = pendingAcknowledgements.values.toList()
-            activeGenerationId = generationId
-            pendingAcknowledgements.clear()
-            outcomes.clear()
-            mutableState.value = TextTransferState.empty()
-            previous
-        }
+        val interrupted = mutex.withLock { resetLocked(generationId) }
         interrupted.forEach { it.complete(DeliverySignal.Failed(TextTransferFailureReason.SESSION_CLOSED)) }
     }
 
     suspend fun close(generationId: ServerGenerationId) {
         val interrupted = mutex.withLock {
-            if (activeGenerationId != generationId) {
-                emptyList()
-            } else {
-                val pending = pendingAcknowledgements.values.toList()
-                activeGenerationId = null
-                pendingAcknowledgements.clear()
-                outcomes.clear()
-                mutableState.value = TextTransferState.empty()
-                pending
-            }
+            if (activeGenerationId != generationId) emptyList() else resetLocked(null)
         }
         interrupted.forEach { it.complete(DeliverySignal.Failed(TextTransferFailureReason.SESSION_CLOSED)) }
     }
@@ -127,14 +105,8 @@ class TextTransferCoordinator(
             } ?: return@withLock SendPreparation.Rejected(
                 TextTransferResult.Rejected(TextTransferRejection.SESSION_UNAVAILABLE),
             )
-            when (TextContentValidator.validate(request.content)) {
-                TextContentValidation.Empty -> return@withLock SendPreparation.Rejected(
-                    TextTransferResult.Rejected(TextTransferRejection.EMPTY_CONTENT),
-                )
-                is TextContentValidation.TooLarge -> return@withLock SendPreparation.Rejected(
-                    TextTransferResult.Rejected(TextTransferRejection.CONTENT_TOO_LARGE),
-                )
-                is TextContentValidation.Valid -> Unit
+            rejectionFor(request.content)?.let { rejection ->
+                return@withLock SendPreparation.Rejected(TextTransferResult.Rejected(rejection))
             }
             val item = TextTransferItem.outgoing(
                 id = newMessageId(),
@@ -153,9 +125,6 @@ class TextTransferCoordinator(
             is SendPreparation.Rejected -> preparation.result
         }
     }
-
-    override suspend fun receive(request: IncomingTextRequest): TextTransferResult =
-        acceptIncoming(request)
 
     override suspend fun retry(messageId: TextMessageId): TextTransferResult {
         val item = mutex.withLock {
@@ -185,7 +154,7 @@ class TextTransferCoordinator(
         sessionId: BrowserSessionId,
         messageId: TextMessageId,
     ): Boolean = mutex.withLock {
-        pendingAcknowledgements[DeliveryKey(generationId, sessionId, messageId)]
+        pendingAcknowledgements[MessageKey(generationId, sessionId, messageId)]
             ?.complete(DeliverySignal.Delivered)
             ?: false
     }
@@ -225,8 +194,8 @@ class TextTransferCoordinator(
                 )
             }
 
-            val key = OperationKey(request.generationId, request.sessionId, request.id)
-            val fingerprint = request.content.sha256()
+            val key = MessageKey(request.generationId, request.sessionId, request.id)
+            val fingerprint = request.content.sha256Hex()
             outcomes[key]?.let { stored ->
                 return@withLock if (stored.fingerprint == fingerprint) {
                     stored.result
@@ -235,16 +204,8 @@ class TextTransferCoordinator(
                 }
             }
 
-            when (TextContentValidator.validate(request.content)) {
-                TextContentValidation.Empty ->
-                    return@withLock TextTransferResult.Rejected(
-                        TextTransferRejection.EMPTY_CONTENT,
-                    )
-                is TextContentValidation.TooLarge ->
-                    return@withLock TextTransferResult.Rejected(
-                        TextTransferRejection.CONTENT_TOO_LARGE,
-                    )
-                is TextContentValidation.Valid -> Unit
+            rejectionFor(request.content)?.let { rejection ->
+                return@withLock TextTransferResult.Rejected(rejection)
             }
 
             val item = TextTransferItem.incoming(
@@ -266,20 +227,14 @@ class TextTransferCoordinator(
     }
 
     private suspend fun deliver(item: TextTransferItem): TextTransferResult {
-        val key = DeliveryKey(item.generationId, item.sessionId, item.id)
+        val key = MessageKey(item.generationId, item.sessionId, item.id)
         val deferred = CompletableDeferred<DeliverySignal>()
         val sending = mutex.withLock {
             if (activeGenerationId != item.generationId) {
                 return TextTransferResult.Rejected(TextTransferRejection.GENERATION_CLOSED)
             }
             val current = findItemLocked(item.sessionId, item.id)
-                ?: return TextTransferResult.Rejected(
-                    if (activeGenerationId != item.generationId) {
-                        TextTransferRejection.GENERATION_CLOSED
-                    } else {
-                        TextTransferRejection.MESSAGE_NOT_FOUND
-                    },
-                )
+                ?: return TextTransferResult.Rejected(TextTransferRejection.MESSAGE_NOT_FOUND)
             val next = current.transitionTo(
                 next = TextTransferStatus.SENDING,
                 changedAtEpochMillis = nowEpochMillis(),
@@ -330,16 +285,29 @@ class TextTransferCoordinator(
 
     private suspend fun recordTerminalBestEffort(result: TextTransferResult) {
         val item = (result as? TextTransferResult.Accepted)?.item ?: return
-        if (
-            item.status != TextTransferStatus.DELIVERED &&
-            item.status != TextTransferStatus.FAILED
-        ) {
-            return
-        }
+        if (!item.status.isTerminal) return
         runCatching {
             historyRecorder.recordTerminal(item)
         }
     }
+
+    private fun resetLocked(
+        generationId: ServerGenerationId?,
+    ): List<CompletableDeferred<DeliverySignal>> {
+        val pending = pendingAcknowledgements.values.toList()
+        activeGenerationId = generationId
+        pendingAcknowledgements.clear()
+        outcomes.clear()
+        mutableState.value = TextTransferState.empty()
+        return pending
+    }
+
+    private fun rejectionFor(content: String): TextTransferRejection? =
+        when (TextContentValidator.validate(content)) {
+            TextContentValidation.Empty -> TextTransferRejection.EMPTY_CONTENT
+            is TextContentValidation.TooLarge -> TextTransferRejection.CONTENT_TOO_LARGE
+            is TextContentValidation.Valid -> null
+        }
 
     private fun appendItemLocked(item: TextTransferItem) {
         mutableState.value = TextTransferState.of(
@@ -365,10 +333,6 @@ class TextTransferCoordinator(
     ): TextTransferItem? = mutableState.value.items.firstOrNull {
         it.sessionId == sessionId && it.id == messageId
     }
-
-    private fun String.sha256(): String = MessageDigest.getInstance("SHA-256")
-        .digest(encodeToByteArray())
-        .joinToString(separator = "") { byte -> "%02x".format(byte) }
 }
 
 internal object TextFeedPolicy {
@@ -390,7 +354,5 @@ internal object TextFeedPolicy {
         }
     }
 
-    private fun TextTransferItem.isCompleted(): Boolean =
-        status == ru.hznik.devicebridge.domain.text.TextTransferStatus.DELIVERED ||
-            status == ru.hznik.devicebridge.domain.text.TextTransferStatus.FAILED
+    private fun TextTransferItem.isCompleted(): Boolean = status.isTerminal
 }

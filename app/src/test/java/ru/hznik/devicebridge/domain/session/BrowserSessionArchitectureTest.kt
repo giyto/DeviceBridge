@@ -14,9 +14,12 @@ class BrowserSessionArchitectureTest {
         val forbiddenImports = Regex(
             """(?m)^import (android\.|androidx\.|io\.ktor\.|dagger\.|javax\.inject\.)""",
         )
+        val forbiddenQualifiedReferences = Regex("""\bandroidx?\.|ContentResolver""")
 
         val violations = kotlinSources(domainRoot).filter { source ->
-            forbiddenImports.containsMatchIn(Files.readString(source))
+            val text = Files.readString(source)
+            forbiddenImports.containsMatchIn(text) ||
+                forbiddenQualifiedReferences.containsMatchIn(text)
         }
 
         assertTrue("Domain import violations: $violations", violations.isEmpty())

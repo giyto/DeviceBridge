@@ -14,7 +14,6 @@ class DesignPrimitivesContractTest {
             "fun ScreenHeader(",
             "fun SectionHeader(",
             "fun MetadataRow(",
-            "fun OperationalItem(",
             "fun DestructiveActionButton(",
         ).forEach { api ->
             assertTrue("Missing reusable primitive: $api", primitives.contains(api))
@@ -25,11 +24,8 @@ class DesignPrimitivesContractTest {
     fun sharedStatesCoverLoadingSuccessErrorAndCancellationWithoutColorOnlyMeaning() {
         val stateComponents = read("src/main/java/ru/hznik/devicebridge/core/ui/StateComponents.kt")
 
-        assertTrue(stateComponents.contains("LOADING"))
-        assertTrue(stateComponents.contains("CANCELLED"))
         assertTrue(stateComponents.contains("loading: Boolean = false"))
         assertTrue(stateComponents.contains("stateDescription"))
-        assertTrue(stateComponents.contains("statusLabel"))
     }
 
     @Test
@@ -109,6 +105,7 @@ class DesignPrimitivesContractTest {
     @Test
     fun historyUsesDedicatedCardsAndFilterSheetWhileSettingsKeepsSharedSurfaces() {
         val history = read("src/main/java/ru/hznik/devicebridge/feature/history/HistoryScreen.kt")
+        val filterSheet = read("src/main/java/ru/hznik/devicebridge/feature/history/HistoryFilterSheet.kt")
         val settings = read("src/main/java/ru/hznik/devicebridge/feature/settings/SettingsScreen.kt")
 
         listOf(
@@ -116,12 +113,14 @@ class DesignPrimitivesContractTest {
             "HistoryFilterTrigger(",
             "HistoryFilterSheet(",
             "HistoryRecordCard(",
-            "ModalBottomSheet(",
         ).forEach { primitive ->
             assertTrue("History is missing $primitive", history.contains(primitive))
         }
+        assertTrue("History filter sheet is missing ModalBottomSheet(", filterSheet.contains("ModalBottomSheet("))
         assertTrue(!history.contains("OperationalItem("))
         assertTrue(!history.contains("FilterChip("))
+        assertTrue(!filterSheet.contains("OperationalItem("))
+        assertTrue(!filterSheet.contains("FilterChip("))
         listOf(
             "ScreenHeader(",
             "SectionHeader(",

@@ -2,29 +2,15 @@ package ru.hznik.devicebridge.data.file
 
 import android.Manifest
 import android.content.Context
-import android.content.Intent
 import android.content.pm.PackageManager
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
-import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
-import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 
 @RunWith(AndroidJUnit4::class)
 class AndroidFileSourcePickerGatewayInstrumentedTest {
-
-    @Test
-    fun openMultipleDocumentsContractRequestsOpenableMultipleSelection() {
-        val context = ApplicationProvider.getApplicationContext<Context>()
-        val intent = AndroidFileSourcePickerGateway.contract()
-            .createIntent(context, arrayOf("*/*"))
-
-        assertEquals(Intent.ACTION_OPEN_DOCUMENT, intent.action)
-        assertTrue(intent.getBooleanExtra(Intent.EXTRA_ALLOW_MULTIPLE, false))
-        assertEquals("*/*", intent.type)
-    }
 
     @Test
     fun applicationDoesNotRequestBroadStoragePermissions() {

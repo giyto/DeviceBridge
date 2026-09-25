@@ -21,7 +21,6 @@ import ru.hznik.devicebridge.data.server.IdleStopController
 import ru.hznik.devicebridge.domain.repository.TextTransferRepository
 import ru.hznik.devicebridge.domain.repository.FileTransferRepository
 import ru.hznik.devicebridge.domain.file.FileTransferPhase
-import ru.hznik.devicebridge.domain.text.TextTransferStatus
 
 interface ServerNotificationController {
     fun createForegroundNotification(state: ServerLifecycleState): Notification
@@ -48,18 +47,39 @@ class AndroidServerNotificationController @Inject constructor(
         state: ServerLifecycleState,
     ): Notification {
         ensureChannel()
-        val model = requireNotNull(
-            modelFactory.create(
-                state = state,
-                activeSessionCount = browserSessionRepository.connectedSessionIds.value.size,
-                hasActiveTextTransfer = textTransferRepository.hasActiveTransfer(),
-                activeFileTransfer = fileTransferRepository.activeNotificationTransfer(),
-                idleStopAtLocalTime = idleStopAtLocalTime(),
-            ),
-        ) {
+        val model = requireNotNull(currentModel(state)) {
             "Foreground notification requires an active server state"
         }
-        return NotificationCompat.Builder(context, CHANNEL_ID)
+        return buildNotification(model)
+    }
+
+    override fun publish(state: ServerLifecycleState) {
+        val model = currentModel(state)
+        if (model == null) {
+            cancel()
+            return
+        }
+        runCatching {
+            ensureChannel()
+            notificationManager.notify(NOTIFICATION_ID, buildNotification(model))
+        }
+    }
+
+    override fun cancel() {
+        notificationManager.cancel(NOTIFICATION_ID)
+    }
+
+    private fun currentModel(state: ServerLifecycleState): ServerNotificationModel? =
+        modelFactory.create(
+            state = state,
+            activeSessionCount = browserSessionRepository.connectedSessionIds.value.size,
+            hasActiveTextTransfer = textTransferRepository.state.value.hasActiveTransfer,
+            activeFileTransfer = fileTransferRepository.activeNotificationTransfer(),
+            idleStopAtLocalTime = idleStopAtLocalTime(),
+        )
+
+    private fun buildNotification(model: ServerNotificationModel): Notification =
+        NotificationCompat.Builder(context, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_server_notification)
             .setContentTitle(model.title)
             .setContentText(model.text)
@@ -80,31 +100,6 @@ class AndroidServerNotificationController @Inject constructor(
                 }
             }
             .build()
-    }
-
-    override fun publish(state: ServerLifecycleState) {
-        val model = modelFactory.create(
-            state = state,
-            activeSessionCount = browserSessionRepository.connectedSessionIds.value.size,
-            hasActiveTextTransfer = textTransferRepository.hasActiveTransfer(),
-            activeFileTransfer = fileTransferRepository.activeNotificationTransfer(),
-            idleStopAtLocalTime = idleStopAtLocalTime(),
-        )
-        if (model == null) {
-            cancel()
-            return
-        }
-        runCatching {
-            notificationManager.notify(
-                NOTIFICATION_ID,
-                createForegroundNotification(state),
-            )
-        }
-    }
-
-    override fun cancel() {
-        notificationManager.cancel(NOTIFICATION_ID)
-    }
 
     private fun ensureChannel() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
@@ -134,12 +129,6 @@ class AndroidServerNotificationController @Inject constructor(
         idleStopController.stopAtWallClockMs.value?.let { epochMs ->
             DateTimeFormatter.ofPattern("HH:mm")
                 .format(Instant.ofEpochMilli(epochMs).atZone(ZoneId.systemDefault()))
-        }
-
-    private fun TextTransferRepository.hasActiveTransfer(): Boolean =
-        state.value.items.any {
-            it.status == TextTransferStatus.PENDING ||
-                it.status == TextTransferStatus.SENDING
         }
 
     private fun FileTransferRepository.activeNotificationTransfer(): FileNotificationProgress? =

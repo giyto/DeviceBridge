@@ -58,16 +58,20 @@ object SessionRequestSecurityPolicy {
     private fun validateAllowedHost(
         host: String?,
         allowedHosts: Set<String>,
-    ): RequestGuardResult {
-        val normalizedHost = host?.lowercase(Locale.ROOT)
-            ?: return RequestGuardResult.Rejected(HttpStatusCode.Forbidden)
+    ): RequestGuardResult = if (allowedHostOrNull(host, allowedHosts) != null) {
+        RequestGuardResult.Allowed
+    } else {
+        RequestGuardResult.Rejected(HttpStatusCode.Forbidden)
+    }
+
+    /** The lowercased [host] when it is one of [allowedHosts], otherwise null. */
+    private fun allowedHostOrNull(host: String?, allowedHosts: Set<String>): String? {
+        val normalizedHost = host?.lowercase(Locale.ROOT) ?: return null
         val normalizedAllowedHosts = allowedHosts.mapTo(mutableSetOf()) {
             it.lowercase(Locale.ROOT)
         }
-        return if (normalizedAllowedHosts.isNotEmpty() && normalizedHost in normalizedAllowedHosts) {
-            RequestGuardResult.Allowed
-        } else {
-            RequestGuardResult.Rejected(HttpStatusCode.Forbidden)
+        return normalizedHost.takeIf {
+            normalizedAllowedHosts.isNotEmpty() && it in normalizedAllowedHosts
         }
     }
 
@@ -77,14 +81,8 @@ object SessionRequestSecurityPolicy {
         allowedHosts: Set<String>,
         originScheme: String,
     ): RequestGuardResult {
-        val normalizedHost = host?.lowercase(Locale.ROOT)
+        val normalizedHost = allowedHostOrNull(host, allowedHosts)
             ?: return RequestGuardResult.Rejected(HttpStatusCode.Forbidden)
-        val normalizedAllowedHosts = allowedHosts.mapTo(mutableSetOf()) {
-            it.lowercase(Locale.ROOT)
-        }
-        if (normalizedAllowedHosts.isEmpty() || normalizedHost !in normalizedAllowedHosts) {
-            return RequestGuardResult.Rejected(HttpStatusCode.Forbidden)
-        }
         val originUri = origin
             ?.let { runCatching { URI(it) }.getOrNull() }
             ?: return RequestGuardResult.Rejected(HttpStatusCode.Forbidden)

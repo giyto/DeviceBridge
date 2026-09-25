@@ -15,8 +15,6 @@ import javax.inject.Inject
 
 /** One running name: claim it, announce it, then close it on stop. */
 interface LocalNameSession {
-    val currentName: String?
-
     suspend fun claim(requestedLabel: String): LocalNameClaim
 
     suspend fun announce()
@@ -78,9 +76,6 @@ class AndroidLocalNamePublisher @Inject constructor(
     ) : LocalNameSession {
         @Volatile
         private var closed = false
-
-        override val currentName: String?
-            get() = responder.currentName
 
         override suspend fun claim(requestedLabel: String): LocalNameClaim = responder.claim(requestedLabel)
 

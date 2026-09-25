@@ -16,6 +16,7 @@ import javax.inject.Singleton
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.drop
@@ -34,6 +35,7 @@ import ru.hznik.devicebridge.domain.model.ServerLifecycleState
 import ru.hznik.devicebridge.domain.repository.BrowserSessionRepository
 import ru.hznik.devicebridge.domain.repository.FileTransferRepository
 import ru.hznik.devicebridge.domain.repository.TextTransferRepository
+import ru.hznik.devicebridge.domain.session.BrowserSessionId
 
 /** Quick Settings tile that mirrors the server lifecycle and starts or stops it with one tap. */
 @AndroidEntryPoint
@@ -67,10 +69,7 @@ class DeviceBridgeTileService : TileService() {
         super.onStartListening()
         listeningJob?.cancel()
         listeningJob = applicationScope.launch(Dispatchers.Main.immediate) {
-            combine(coordinator.state, browserSessions.connectedSessionIds) { state, connected ->
-                ServerTilePolicy.model(state, connected.size)
-            }
-                .distinctUntilChanged()
+            tileModels(coordinator.state, browserSessions.connectedSessionIds)
                 .collect(::render)
         }
     }
@@ -207,10 +206,7 @@ class ServerTileRefresher @Inject constructor(
     fun start(context: Context) {
         val appContext = context.applicationContext
         applicationScope.launch {
-            combine(coordinator.state, browserSessions.connectedSessionIds) { state, connected ->
-                ServerTilePolicy.model(state, connected.size)
-            }
-                .distinctUntilChanged()
+            tileModels(coordinator.state, browserSessions.connectedSessionIds)
                 .drop(1)
                 .collect {
                     runCatching {
@@ -223,3 +219,12 @@ class ServerTileRefresher @Inject constructor(
         }
     }
 }
+
+/** What the tile shows: the server state and how many browsers have a live connection. */
+private fun tileModels(
+    state: Flow<ServerLifecycleState>,
+    connectedSessionIds: Flow<Set<BrowserSessionId>>,
+): Flow<ServerTileModel> =
+    combine(state, connectedSessionIds) { current, connected ->
+        ServerTilePolicy.model(current, connected.size)
+    }.distinctUntilChanged()

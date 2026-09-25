@@ -231,14 +231,26 @@ test("file cancel and retry keep one transfer, keyboard focus and live feedback"
   await expect(card).toBeVisible();
   await expect(card.locator(".file-card__status")).toHaveText("Передаётся");
 
+  const dropZone = page.locator('[data-role="file-drop-zone"]');
+  await page.locator(".skip-link").focus();
+  for (let index = 0; index < 12; index += 1) {
+    await page.keyboard.press("Tab");
+    if (await dropZone.evaluate((element) => document.activeElement === element)) break;
+  }
+  await expect(dropZone).toBeFocused();
+  await page.keyboard.press("Tab");
   const cancel = card.getByRole("button", { name: "Отменить" });
-  await cancel.focus();
+  await expect(cancel).toBeFocused();
   await page.keyboard.press("Enter");
 
   const retry = card.getByRole("button", { name: "Повторить" });
   await expect(retry).toBeFocused();
   await expect(card.locator(".file-card__status")).toHaveText("Отменено");
   await expect(page.locator('[data-role="file-announcer"]')).toContainText("Отменено");
+  await page.keyboard.press("Shift+Tab");
+  await expect(dropZone).toBeFocused();
+  await page.keyboard.press("Tab");
+  await expect(retry).toBeFocused();
   await page.keyboard.press("Space");
 
   await expect(card.getByRole("button", { name: "Отменить" })).toBeFocused();

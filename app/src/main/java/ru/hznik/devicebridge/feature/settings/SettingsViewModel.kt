@@ -12,7 +12,6 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.map
-import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.launch
@@ -20,6 +19,7 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import ru.hznik.devicebridge.domain.file.HARD_MAX_FILE_BYTES
 import ru.hznik.devicebridge.domain.repository.ThemePreferenceRepository
 import ru.hznik.devicebridge.domain.settings.DestinationTree
+import ru.hznik.devicebridge.domain.settings.DeviceSettings
 import ru.hznik.devicebridge.domain.settings.SettingsUpdateResult
 import ru.hznik.devicebridge.domain.settings.SettingsValidationError
 import ru.hznik.devicebridge.domain.usecase.ObserveSettingsUseCase
@@ -34,8 +34,8 @@ import ru.hznik.devicebridge.domain.usecase.ObserveTrustedBrowsersUseCase
 import ru.hznik.devicebridge.domain.usecase.RevokeAllTrustedBrowsersUseCase
 import ru.hznik.devicebridge.domain.usecase.RevokeTrustedBrowserUseCase
 import ru.hznik.devicebridge.domain.trust.TrustedBrowserId
-
-private const val BYTES_PER_MIB = 1024L * 1024
+import ru.hznik.devicebridge.feature.common.LoadResult
+import ru.hznik.devicebridge.feature.common.asLoadResult
 
 @HiltViewModel
 @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
@@ -56,12 +56,6 @@ class SettingsViewModel @Inject constructor(
     private val certificateExporter: ru.hznik.devicebridge.data.tls.RootCertificateExporter,
     private val updateNetworkName: UpdateNetworkNameUseCase,
 ) : ViewModel() {
-    private sealed interface LoadResult {
-        data object Loading : LoadResult
-        data class Loaded(val settings: ru.hznik.devicebridge.domain.settings.DeviceSettings) :
-            LoadResult
-        data object Failed : LoadResult
-    }
     private val mutableUiState = MutableStateFlow(SettingsUiState())
     private val effectChannel = Channel<SettingsEffect>(Channel.BUFFERED)
     val uiState: StateFlow<SettingsUiState> = mutableUiState
@@ -71,14 +65,7 @@ class SettingsViewModel @Inject constructor(
     init {
         viewModelScope.launch {
             settingsReloadRevision
-                .flatMapLatest {
-                    observeSettings()
-                        .map<ru.hznik.devicebridge.domain.settings.DeviceSettings, LoadResult>(
-                            LoadResult::Loaded,
-                        )
-                        .onStart { emit(LoadResult.Loading) }
-                        .catch { emit(LoadResult.Failed) }
-                }
+                .flatMapLatest { observeSettings().asLoadResult() }
                 .collect(::applyLoadResult)
         }
         viewModelScope.launch {
@@ -116,7 +103,7 @@ class SettingsViewModel @Inject constructor(
         }
     }
 
-    private fun applyLoadResult(result: LoadResult) {
+    private fun applyLoadResult(result: LoadResult<DeviceSettings>) {
         mutableUiState.update { current ->
             when (result) {
                 LoadResult.Loading -> current.copy(
@@ -124,7 +111,7 @@ class SettingsViewModel @Inject constructor(
                     loadErrorMessage = null,
                 )
                 is LoadResult.Loaded -> {
-                    val settings = result.settings
+                    val settings = result.value
                     val destinationAvailability = when {
                         settings.destinationTree == null -> DestinationAvailability.NONE
                         current.settings.destinationTree == settings.destinationTree &&
@@ -154,7 +141,7 @@ class SettingsViewModel @Inject constructor(
                         fileLimitMiBInput = if (current.fileLimitState.isDirty) {
                             current.fileLimitMiBInput
                         } else {
-                            (settings.effectiveFileLimitBytes / BYTES_PER_MIB).toString()
+                            bytesToMebibytesInput(settings.effectiveFileLimitBytes)
                         },
                         destinationAvailability = destinationAvailability,
                     )
@@ -207,9 +194,7 @@ class SettingsViewModel @Inject constructor(
             }
             SettingsAction.SaveRetention -> saveRetention()
             is SettingsAction.FileLimitMiBChanged -> mutableUiState.update {
-                val bytes = action.value.toLongOrNull()?.let { mebibytes ->
-                    runCatching { Math.multiplyExact(mebibytes, BYTES_PER_MIB) }.getOrNull()
-                }
+                val bytes = mebibytesInputToBytes(action.value)
                 it.copy(
                     fileLimitMiBInput = action.value,
                     fileLimitState = it.fileLimitState.copy(
@@ -375,10 +360,7 @@ class SettingsViewModel @Inject constructor(
 
     private fun saveFileLimit() {
         val draft = mutableUiState.value.fileLimitMiBInput
-        val mebibytes = draft.toLongOrNull()
-        val bytes = mebibytes?.let {
-            runCatching { Math.multiplyExact(it, BYTES_PER_MIB) }.getOrNull()
-        }
+        val bytes = mebibytesInputToBytes(draft)
         if (bytes == null || bytes !in 1..HARD_MAX_FILE_BYTES) {
             setFieldError(SettingField.FILE_LIMIT, "Введите размер от 1 до 1024 МиБ.")
             return
@@ -596,7 +578,7 @@ class SettingsViewModel @Inject constructor(
                     fileLimitMiBInput = if (hasNewerDraft) {
                         current.fileLimitMiBInput
                     } else {
-                        (settings.effectiveFileLimitBytes / BYTES_PER_MIB).toString()
+                        bytesToMebibytesInput(settings.effectiveFileLimitBytes)
                     },
                     fileLimitState = SettingsFieldState(isDirty = hasNewerDraft),
                 )

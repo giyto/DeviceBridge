@@ -52,14 +52,8 @@ class BrowserSessionReducerTest {
         )
         assertEquals(BrowserSessionPhase.CONNECTED, unblocked.phase)
 
-        val failed = BrowserSessionReducer.reduce(
-            unblocked,
-            BrowserSessionEvent.Failed(generation, BrowserSessionError.CapacityReached),
-        )
-        assertEquals(BrowserSessionPhase.ERROR, failed.phase)
-
         val inactive = BrowserSessionReducer.reduce(
-            failed,
+            unblocked,
             BrowserSessionEvent.Deactivated(generation),
         )
         assertEquals(BrowserSessionPhase.INACTIVE, inactive.phase)

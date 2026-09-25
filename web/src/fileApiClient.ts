@@ -1,3 +1,10 @@
+import {
+  isProtocolId,
+  isRecord,
+  requireJsonResponse,
+  requireSessionToken,
+} from "./protocolGuards";
+
 export const FILE_PROTOCOL_VERSION = 1;
 export const HARD_MAX_FILE_BYTES = 1_073_741_824;
 /** Smaller uploads always start over; the server keeps no part of them. */
@@ -111,6 +118,11 @@ export interface FileErrorEvent {
   readonly code: FileApiErrorCode;
 }
 
+/** The transfer is over: it will not move again unless the person retries it. */
+export function isTerminalStatus(status: FileTransferStatus): boolean {
+  return status === "COMPLETED" || status === "CANCELLED" || status === "FAILED";
+}
+
 export class FileApiError extends Error {
   constructor(readonly status: number, readonly code: FileApiErrorCode) {
     super(fileErrorMessage(code));
@@ -206,13 +218,13 @@ export class FileApiClient {
     init: RequestInit,
     hasBody = true,
   ): Promise<unknown> {
-    requireToken(token);
+    requireSessionToken(token);
     const headers = new Headers(init.headers);
     headers.set("Authorization", `Bearer ${token}`);
     if (hasBody) headers.set("Content-Type", "application/json");
     const response = await this.fetcher(url, { ...init, headers });
     if (!response.ok) throw await parseApiError(response);
-    requireJsonResponse(response);
+    requireJsonResponse(response, "DeviceBridge returned a non-JSON file response");
     return response.json() as Promise<unknown>;
   }
 }
@@ -369,11 +381,7 @@ function requireEnvelope(value: unknown, type: string): Record<string, unknown> 
   return value;
 }
 
-function requireToken(token: string): void {
-  if (token.length < 1 || token.length > 256 || /\s/.test(token)) throw new Error("Invalid session credential");
-}
 function requireProtocolId(value: string): void { if (!isProtocolId(value)) throw new Error("Invalid protocol identifier"); }
-function isProtocolId(value: unknown): value is string { return typeof value === "string" && /^[A-Za-z0-9_-]{1,64}$/.test(value); }
 function requirePositiveInteger(value: unknown): number { const result = requireSafeNonNegativeInteger(value); if (result === 0) invalid(); return result; }
 function requireSafeNonNegativeInteger(value: unknown): number { if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0) invalid(); return value; }
 function requireFileSize(value: unknown): number { const result = requireSafeNonNegativeInteger(value); if (result > HARD_MAX_FILE_BYTES) invalid(); return result; }
@@ -381,10 +389,8 @@ function isDirection(value: unknown): value is FileDirection { return value === 
 function isTransferStatus(value: unknown): value is FileTransferStatus { return typeof value === "string" && ["QUEUED", "CONNECTING", "TRANSFERRING", "VERIFYING", "COMPLETED", "CANCELLED", "FAILED"].includes(value); }
 function isFileApiErrorCode(value: unknown): value is FileApiErrorCode { return typeof value === "string" && ["INVALID_PAYLOAD", "UNSUPPORTED_VERSION", "FILE_TOO_LARGE", "MESSAGE_CONFLICT", "SESSION_UNAVAILABLE", "NOT_APPROVED", "CHECKSUM_MISMATCH", "DESTINATION_UNAVAILABLE", "INSUFFICIENT_SPACE", "SOURCE_UNAVAILABLE", "CANCELLED", "STREAM_FAILED", "UNAUTHORIZED"].includes(value); }
 function hasControl(value: string): boolean { return [...value].some((character) => { const code = character.codePointAt(0); return code !== undefined && (code <= 0x1f || code === 0x7f); }); }
-function isRecord(value: unknown): value is Record<string, unknown> { return typeof value === "object" && value !== null && !Array.isArray(value); }
-function requireJsonResponse(response: Response): void { if (!(response.headers.get("Content-Type") ?? "").toLowerCase().startsWith("application/json")) throw new Error("DeviceBridge returned a non-JSON file response"); }
 function invalid(): never { throw new Error("Invalid DeviceBridge file response"); }
-function fileErrorMessage(code: FileApiErrorCode): string {
+export function fileErrorMessage(code: FileApiErrorCode): string {
   switch (code) {
     case "UNAUTHORIZED": return "Сессия браузера завершена.";
     case "FILE_TOO_LARGE": return "Файл превышает лимит 1 ГиБ.";

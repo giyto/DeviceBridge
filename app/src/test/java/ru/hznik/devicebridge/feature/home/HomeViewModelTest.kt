@@ -59,7 +59,6 @@ import ru.hznik.devicebridge.domain.usecase.RevokeBrowserSessionUseCase
 import ru.hznik.devicebridge.domain.usecase.StartServerUseCase
 import ru.hznik.devicebridge.domain.usecase.StopServerUseCase
 import ru.hznik.devicebridge.domain.usecase.ObserveTextTransfersUseCase
-import ru.hznik.devicebridge.domain.text.IncomingTextRequest
 import ru.hznik.devicebridge.domain.text.SendTextRequest
 import ru.hznik.devicebridge.domain.text.TextContentKind
 import ru.hznik.devicebridge.domain.text.TextMessageId
@@ -460,7 +459,7 @@ class HomeViewModelTest {
         }
 
     @Test
-    fun errorHasNoStaleEndpointAndViewModelHasNoPlatformServerImports() =
+    fun errorStateHasNoStaleEndpointAndDisablesTransfers() =
         runTest(dispatcher) {
             val repository = FakeRepository(
                 ServerLifecycleState.Error(7, ServerLifecycleError.NetworkLost),
@@ -621,9 +620,6 @@ class HomeViewModelTest {
         override val state: StateFlow<TextTransferState> = mutableState
 
         override suspend fun send(request: SendTextRequest): TextTransferResult =
-            error("Not used")
-
-        override suspend fun receive(request: IncomingTextRequest): TextTransferResult =
             error("Not used")
 
         override suspend fun retry(messageId: TextMessageId): TextTransferResult =

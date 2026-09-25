@@ -88,12 +88,4 @@ object ServerLifecycleReducer {
         } else {
             this
         }
-
-    private fun ServerLifecycleState.generationOrNull(): Long? = when (this) {
-        ServerLifecycleState.Stopped -> null
-        is ServerLifecycleState.Starting -> generation
-        is ServerLifecycleState.Running -> generation
-        is ServerLifecycleState.Stopping -> generation
-        is ServerLifecycleState.Error -> generation
-    }
 }

@@ -174,16 +174,8 @@ class SessionEventDispatcher(
                             queue += PendingEvent(event, completion)
                             accepted = true
                         }
-                        event.isPriority() -> {
-                            val progressIndex =
-                                queue.indexOfFirst { pending -> pending.event.progressKey() != null }
-                            if (progressIndex >= 0) {
-                                queue.removeAt(progressIndex).completion.complete(true)
-                                queue += PendingEvent(event, completion)
-                                accepted = true
-                            }
-                        }
-                        coalescingKey != null -> {
+                        // Full: any event may take the place of the first queued progress update.
+                        else -> {
                             val progressIndex =
                                 queue.indexOfFirst { pending -> pending.event.progressKey() != null }
                             if (progressIndex >= 0) {

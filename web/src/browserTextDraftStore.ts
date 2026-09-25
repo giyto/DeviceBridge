@@ -1,3 +1,4 @@
+import { isProtocolId } from "./protocolGuards";
 import type { TextDraftStore } from "./textTransferController";
 
 const STORAGE_KEY = "devicebridge.textDraft.v1";
@@ -23,7 +24,7 @@ export class BrowserTextDraftStore implements TextDraftStore {
       this.clear(scopeId);
       return;
     }
-    if (!isSafeScope(scopeId) || draft.length > MAX_DRAFT_CHARACTERS) return;
+    if (!isProtocolId(scopeId) || draft.length > MAX_DRAFT_CHARACTERS) return;
     this.storage.setItem(STORAGE_KEY, JSON.stringify({ scopeId, draft } satisfies DraftRecord));
   }
 
@@ -42,7 +43,7 @@ export class BrowserTextDraftStore implements TextDraftStore {
       if (
         typeof value !== "object" || value === null ||
         !("scopeId" in value) || !("draft" in value) ||
-        !isSafeScope(value.scopeId) || typeof value.draft !== "string" ||
+        !isProtocolId(value.scopeId) || typeof value.draft !== "string" ||
         value.draft.length === 0 || value.draft.length > MAX_DRAFT_CHARACTERS
       ) {
         this.storage.removeItem(STORAGE_KEY);
@@ -54,8 +55,4 @@ export class BrowserTextDraftStore implements TextDraftStore {
       return undefined;
     }
   }
-}
-
-function isSafeScope(value: unknown): value is string {
-  return typeof value === "string" && /^[A-Za-z0-9_-]{1,64}$/.test(value);
 }

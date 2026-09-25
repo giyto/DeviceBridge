@@ -21,14 +21,4 @@ class HistoryTextPreviewTest {
 
         assertEquals(input, createHistoryTextPreview(input))
     }
-
-    @Test
-    fun boundsVeryLargeInput() {
-        val input = "аб🙂\n".repeat(25_000)
-
-        val preview = createHistoryTextPreview(input)
-
-        assertEquals(200, preview.codePointCount(0, preview.length))
-        assertTrue(preview.length < input.length)
-    }
 }

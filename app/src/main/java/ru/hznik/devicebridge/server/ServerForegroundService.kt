@@ -167,11 +167,7 @@ class ServerForegroundService : Service() {
         stateCollectionJob = null
         idleStopJob?.cancel()
         idleStopJob = null
-        if (
-            stopJob == null &&
-            coordinator.state.value !is ServerLifecycleState.Stopped &&
-            coordinator.state.value !is ServerLifecycleState.Error
-        ) {
+        if (stopJob == null && !coordinator.state.value.isIdle) {
             applicationScope.launch {
                 coordinator.stop(ServerStopReason.ProcessTerminated)
             }

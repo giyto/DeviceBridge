@@ -11,6 +11,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
+import ru.hznik.devicebridge.core.text.toLowerHex
 import ru.hznik.devicebridge.domain.file.FileTransferDirection
 import ru.hznik.devicebridge.domain.file.FileTransferState
 
@@ -49,9 +50,7 @@ class AndroidFileRetrySourceValidator @Inject constructor(
                         }
                         digest.update(buffer, 0, read)
                     }
-                    val hash = digest.digest().joinToString(separator = "") { byte ->
-                        "%02x".format(byte)
-                    }
+                    val hash = digest.digest().toLowerHex()
                     if (
                         total == item.metadata.sizeBytes &&
                         hash.equals(item.metadata.sha256, ignoreCase = true)

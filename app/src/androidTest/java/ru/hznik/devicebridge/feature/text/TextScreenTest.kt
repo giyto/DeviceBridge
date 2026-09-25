@@ -39,6 +39,7 @@ import ru.hznik.devicebridge.domain.text.TextContentKind
 import ru.hznik.devicebridge.domain.text.TextMessageId
 import ru.hznik.devicebridge.domain.text.TextTransferDirection
 import ru.hznik.devicebridge.domain.text.TextTransferStatus
+import ru.hznik.devicebridge.feature.common.RecipientUiState
 import ru.hznik.devicebridge.ui.theme.DeviceBridgeTheme
 
 @RunWith(AndroidJUnit4::class)
@@ -70,7 +71,7 @@ class TextScreenTest {
             state = TextUiState(
                 draft = "https://example.com",
                 recipients = listOf(
-                    TextRecipientUiState(
+                    RecipientUiState(
                         id = sessionId,
                         browserLabel = "Яндекс Браузер",
                         sourceIpv4 = "192.168.1.3",
@@ -122,7 +123,6 @@ class TextScreenTest {
                 items = listOf(
                     TextItemUiState(
                         id = messageId,
-                        sessionId = BrowserSessionId("session-1"),
                         browserLabel = "Edge",
                         content = "<script>alert('plain')</script>",
                         contentKind = TextContentKind.TEXT,
@@ -156,7 +156,6 @@ class TextScreenTest {
                 items = listOf(
                     TextItemUiState(
                         id = TextMessageId("long-link"),
-                        sessionId = BrowserSessionId("session-long"),
                         browserLabel = "Firefox",
                         content = longUrl,
                         contentKind = TextContentKind.LINK,
@@ -206,7 +205,7 @@ class TextScreenTest {
                     TextScreen(
                         uiState = TextUiState(
                             recipients = listOf(
-                                TextRecipientUiState(
+                                RecipientUiState(
                                     id = BrowserSessionId("session-1"),
                                     browserLabel = "Chrome",
                                     sourceIpv4 = "192.168.1.2",
@@ -266,13 +265,13 @@ class TextScreenTest {
         setScreen(
             TextUiState(
                 recipients = listOf(
-                    TextRecipientUiState(
+                    RecipientUiState(
                         id = sessionId,
                         browserLabel = "Chrome",
                         sourceIpv4 = "192.168.1.2",
                         selected = true,
                     ),
-                    TextRecipientUiState(
+                    RecipientUiState(
                         id = BrowserSessionId("accessible-recipient-2"),
                         browserLabel = "Edge",
                         sourceIpv4 = "192.168.1.3",

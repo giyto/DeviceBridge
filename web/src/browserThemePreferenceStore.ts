@@ -1,3 +1,5 @@
+import { hasExactKeys, readRecord, removeRecord, writeRecord } from "./versionedRecord";
+
 export const THEME_PREFERENCE_STORAGE_KEY = "devicebridge.theme.v1";
 const FORMAT_VERSION = 1;
 const DEFAULT_THEME: ThemePreference = "dark";
@@ -8,68 +10,37 @@ export class BrowserThemePreferenceStore {
   constructor(private readonly storage: Storage = globalThis.localStorage) {}
 
   read(): ThemePreference {
-    let raw: string | null;
-    try {
-      raw = this.storage.getItem(THEME_PREFERENCE_STORAGE_KEY);
-    } catch {
+    const stored = readRecord(this.storage, THEME_PREFERENCE_STORAGE_KEY);
+    if (stored === undefined) return DEFAULT_THEME;
+    const parsed = stored.value;
+    if (isLegacySystemPreference(parsed)) {
+      this.save(DEFAULT_THEME);
       return DEFAULT_THEME;
     }
-    if (raw === null) return DEFAULT_THEME;
-
-    try {
-      const parsed = JSON.parse(raw) as unknown;
-      if (isLegacySystemPreference(parsed)) {
-        this.save(DEFAULT_THEME);
-        return DEFAULT_THEME;
-      }
-      if (!isStoredPreference(parsed)) {
-        this.clear();
-        return DEFAULT_THEME;
-      }
-      return parsed.preference;
-    } catch {
+    if (!isStoredPreference(parsed)) {
       this.clear();
       return DEFAULT_THEME;
     }
+    return parsed.preference;
   }
 
   save(preference: ThemePreference): boolean {
     if (!isThemePreference(preference)) return false;
-    try {
-      this.storage.setItem(
-        THEME_PREFERENCE_STORAGE_KEY,
-        JSON.stringify({
-          version: FORMAT_VERSION,
-          preference,
-        }),
-      );
-      return true;
-    } catch {
-      return false;
-    }
+    return writeRecord(this.storage, THEME_PREFERENCE_STORAGE_KEY, {
+      version: FORMAT_VERSION,
+      preference,
+    });
   }
 
   clear(): boolean {
-    try {
-      this.storage.removeItem(THEME_PREFERENCE_STORAGE_KEY);
-      return true;
-    } catch {
-      return false;
-    }
+    return removeRecord(this.storage, THEME_PREFERENCE_STORAGE_KEY);
   }
-}
-
-function hasExactStoredShape(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object"
-    && value !== null
-    && !Array.isArray(value)
-    && Object.keys(value).sort().join(",") === "preference,version";
 }
 
 function isStoredPreference(
   value: unknown,
 ): value is { readonly version: 1; readonly preference: ThemePreference } {
-  return hasExactStoredShape(value)
+  return hasExactKeys(value, ["preference", "version"])
     && value.version === FORMAT_VERSION
     && isThemePreference(value.preference);
 }
@@ -77,7 +48,7 @@ function isStoredPreference(
 function isLegacySystemPreference(
   value: unknown,
 ): value is { readonly version: 1; readonly preference: "system" } {
-  return hasExactStoredShape(value)
+  return hasExactKeys(value, ["preference", "version"])
     && value.version === FORMAT_VERSION
     && value.preference === "system";
 }

@@ -92,6 +92,5 @@ class FileTransferHistoryRecorderTest {
         }
         override suspend fun delete(recordId: HistoryRecordId): Boolean = false
         override suspend fun clear(): Int = 0
-        override suspend fun deleteOlderThan(cutoffEpochMillis: Long): Int = 0
     }
 }

@@ -24,7 +24,7 @@ describe("theme control", () => {
     const sun = icon("sun");
     const moon = icon("moon");
 
-    control.render({ preference: "dark", effective: "dark" });
+    control.render("dark");
     expect(toggle.dataset.activeTheme).toBe("dark");
     expect(toggle.getAttribute("aria-label")).toBe("Включить светлую тему");
     expect(toggle.title).toBe("Включить светлую тему");
@@ -35,7 +35,7 @@ describe("theme control", () => {
     expect(onPreferenceChange).toHaveBeenCalledOnce();
     expect(onPreferenceChange).toHaveBeenCalledWith("light");
 
-    control.render({ preference: "light", effective: "light" });
+    control.render("light");
     expect(toggle.dataset.activeTheme).toBe("light");
     expect(toggle.getAttribute("aria-label")).toBe("Включить тёмную тему");
     expect(sun.hidden).toBe(false);

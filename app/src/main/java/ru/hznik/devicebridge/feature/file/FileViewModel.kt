@@ -37,9 +37,14 @@ import ru.hznik.devicebridge.domain.usecase.ObserveFileTransfersUseCase
 import ru.hznik.devicebridge.domain.usecase.ObserveSettingsUseCase
 import ru.hznik.devicebridge.domain.usecase.RetryFileTransferUseCase
 import ru.hznik.devicebridge.data.file.resumableBytes
+import ru.hznik.devicebridge.feature.common.RECIPIENT_DISCONNECTED_MESSAGE
+import ru.hznik.devicebridge.feature.common.RecipientReconciliation
+import ru.hznik.devicebridge.feature.common.connectedRecipient
+import ru.hznik.devicebridge.feature.common.reconcileRecipientChoice
+import ru.hznik.devicebridge.feature.common.toRecipients
 
 @HiltViewModel
-class FileViewModel private constructor(
+class FileViewModel internal constructor(
     observeBrowserSessions: ObserveBrowserSessionsUseCase,
     observeTransfers: ObserveFileTransfersUseCase,
     observeSettings: ObserveSettingsUseCase,
@@ -47,8 +52,8 @@ class FileViewModel private constructor(
     private val approveTransfer: ApproveFileTransferUseCase,
     private val cancelTransfer: CancelFileTransferUseCase,
     private val retryTransfer: RetryFileTransferUseCase,
-    private val nowEpochMillis: () -> Long,
-    autoAcceptStatus: AutoAcceptStatusSource,
+    private val nowEpochMillis: () -> Long = System::currentTimeMillis,
+    autoAcceptStatus: AutoAcceptStatusSource = AutoAcceptStatusSource.None,
 ) : ViewModel() {
     @Inject
     constructor(
@@ -72,28 +77,6 @@ class FileViewModel private constructor(
         autoAcceptStatus,
     )
 
-    internal constructor(
-        observeBrowserSessions: ObserveBrowserSessionsUseCase,
-        observeTransfers: ObserveFileTransfersUseCase,
-        observeSettings: ObserveSettingsUseCase,
-        createTransfers: CreateFileTransfersUseCase,
-        approveTransfer: ApproveFileTransferUseCase,
-        cancelTransfer: CancelFileTransferUseCase,
-        retryTransfer: RetryFileTransferUseCase,
-        nowEpochMillis: () -> Long,
-        @Suppress("UNUSED_PARAMETER") testOnly: Unit = Unit,
-        autoAcceptStatus: AutoAcceptStatusSource = AutoAcceptStatusSource.None,
-    ) : this(
-        observeBrowserSessions,
-        observeTransfers,
-        observeSettings,
-        createTransfers,
-        approveTransfer,
-        cancelTransfer,
-        retryTransfer,
-        nowEpochMillis,
-        autoAcceptStatus,
-    )
     private data class LocalState(
         val selection: List<FileDraftItem> = emptyList(),
         val selectedSessionId: BrowserSessionId? = null,
@@ -179,7 +162,9 @@ class FileViewModel private constructor(
             }
             is FileAction.ChangeIncomingDestination ->
                 effectChannel.trySend(FileEffect.ChooseDestination(action.transferId))
-            is FileAction.DestinationSelected -> approve(action.transferId, action.destinationId)
+            is FileAction.DestinationSelected -> execute(action.transferId) { id ->
+                approveTransfer(id, action.destinationId)
+            }
             is FileAction.DestinationCancelled -> local.update {
                 it.copy(errorMessage = "Папка не выбрана. Файл остаётся в ожидании.", successMessage = null)
             }
@@ -249,18 +234,20 @@ class FileViewModel private constructor(
 
     private fun reconcileRecipient(active: List<BrowserSession>) {
         local.update { current ->
-            when {
-                current.selectedSessionId != null && active.none { it.id == current.selectedSessionId } ->
+            when (
+                val change = reconcileRecipientChoice(current.selectedSessionId, current.recipientWasLost, active)
+            ) {
+                RecipientReconciliation.Lost ->
                     current.copy(
                         selectedSessionId = null,
                         recipientWasLost = true,
                         isSubmitting = false,
-                        errorMessage = "Выбранный браузер отключён. Выберите получателя.",
+                        errorMessage = RECIPIENT_DISCONNECTED_MESSAGE,
                         successMessage = null,
                     )
-                current.selectedSessionId == null && active.size == 1 && !current.recipientWasLost ->
-                    current.copy(selectedSessionId = active.single().id)
-                else -> current
+                is RecipientReconciliation.AutoSelected ->
+                    current.copy(selectedSessionId = change.sessionId)
+                RecipientReconciliation.Unchanged -> current
             }
         }
     }
@@ -347,18 +334,9 @@ class FileViewModel private constructor(
         super.onCleared()
     }
 
-    private fun approve(id: ru.hznik.devicebridge.domain.file.FileTransferId, destination: ru.hznik.devicebridge.domain.file.FileDestinationId) {
-        viewModelScope.launch {
-            val result = approveTransfer(id, destination)
-            if (result != FileTransferOperationResult.Accepted) {
-                local.update { it.copy(errorMessage = result.userMessage(), successMessage = null) }
-            }
-        }
-    }
-
     private fun execute(
-        id: ru.hznik.devicebridge.domain.file.FileTransferId,
-        operation: suspend (ru.hznik.devicebridge.domain.file.FileTransferId) -> FileTransferOperationResult,
+        id: FileTransferId,
+        operation: suspend (FileTransferId) -> FileTransferOperationResult,
     ) {
         viewModelScope.launch {
             val result = operation(id)
@@ -375,12 +353,10 @@ class FileViewModel private constructor(
         localState: LocalState,
         flags: AutoAcceptFlags,
     ): FileUiState {
-        val selected = localState.selectedSessionId?.takeIf { id -> sessionState.sessions.any { it.id == id } }
+        val selected = sessionState.sessions.connectedRecipient(localState.selectedSessionId)
         return FileUiState(
             selection = localState.selection,
-            recipients = sessionState.sessions.map { session ->
-                FileRecipientUiState(session.id, session.browserLabel, session.sourceIpv4, session.id == selected)
-            },
+            recipients = sessionState.sessions.toRecipients(selected),
             selectedSessionId = selected,
             recipientSelectionRequired = localState.selection.isNotEmpty() && selected == null,
             transfers = snapshot.items.map { item ->
@@ -415,8 +391,8 @@ class FileViewModel private constructor(
 }
 
 private data class AutoAcceptFlags(
-    val accepted: Set<ru.hznik.devicebridge.domain.file.FileTransferId> = emptySet(),
-    val paused: Set<ru.hznik.devicebridge.domain.file.FileTransferId> = emptySet(),
+    val accepted: Set<FileTransferId> = emptySet(),
+    val paused: Set<FileTransferId> = emptySet(),
 )
 
 private data class PreparedDraftTransfer(

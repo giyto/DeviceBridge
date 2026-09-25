@@ -84,25 +84,11 @@ enum class BrowserSessionPhase {
     PENDING,
     CONNECTED,
     BLOCKED,
-    ERROR,
 }
 
 enum class BrowserApprovalDecision {
     ALLOW_ONCE,
     ALLOW_AND_REMEMBER,
-    REJECT,
-}
-
-sealed interface BrowserSessionError {
-    data object CapacityReached : BrowserSessionError
-    data object GenerationClosed : BrowserSessionError
-    data object RequestExpired : BrowserSessionError
-    data object RequestNotFound : BrowserSessionError
-    data class Unexpected(val technicalCause: String) : BrowserSessionError {
-        init {
-            require(technicalCause.isNotBlank())
-        }
-    }
 }
 
 @ConsistentCopyVisibility
@@ -112,7 +98,6 @@ data class BrowserSessionState private constructor(
     val pendingRequests: List<PendingBrowserRequest>,
     val sessions: List<BrowserSession>,
     val blockedUntilElapsedRealtimeMs: Long?,
-    val error: BrowserSessionError?,
 ) {
     val isActive: Boolean
         get() = generationId != null
@@ -120,7 +105,6 @@ data class BrowserSessionState private constructor(
     val phase: BrowserSessionPhase
         get() = when {
             generationId == null -> BrowserSessionPhase.INACTIVE
-            error != null -> BrowserSessionPhase.ERROR
             blockedUntilElapsedRealtimeMs != null -> BrowserSessionPhase.BLOCKED
             pendingRequests.isNotEmpty() -> BrowserSessionPhase.PENDING
             sessions.isNotEmpty() -> BrowserSessionPhase.CONNECTED
@@ -133,7 +117,6 @@ data class BrowserSessionState private constructor(
             require(pendingRequests.isEmpty())
             require(sessions.isEmpty())
             require(blockedUntilElapsedRealtimeMs == null)
-            require(error == null)
         } else {
             require(pairingCode != null) { "An active generation requires a pairing code" }
             require(pendingRequests.all { it.generationId == generationId }) {
@@ -155,7 +138,6 @@ data class BrowserSessionState private constructor(
             pendingRequests = emptyList(),
             sessions = emptyList(),
             blockedUntilElapsedRealtimeMs = null,
-            error = null,
         )
 
         fun active(
@@ -164,14 +146,12 @@ data class BrowserSessionState private constructor(
             pendingRequests: List<PendingBrowserRequest> = emptyList(),
             sessions: List<BrowserSession> = emptyList(),
             blockedUntilElapsedRealtimeMs: Long? = null,
-            error: BrowserSessionError? = null,
         ): BrowserSessionState = BrowserSessionState(
             generationId = generationId,
             pairingCode = pairingCode,
             pendingRequests = pendingRequests.toList(),
             sessions = sessions.toList(),
             blockedUntilElapsedRealtimeMs = blockedUntilElapsedRealtimeMs,
-            error = error,
         )
     }
 
@@ -180,14 +160,12 @@ data class BrowserSessionState private constructor(
         pendingRequests: List<PendingBrowserRequest> = this.pendingRequests,
         sessions: List<BrowserSession> = this.sessions,
         blockedUntilElapsedRealtimeMs: Long? = this.blockedUntilElapsedRealtimeMs,
-        error: BrowserSessionError? = this.error,
     ): BrowserSessionState = active(
         generationId = requireNotNull(generationId),
         pairingCode = pairingCode,
         pendingRequests = pendingRequests,
         sessions = sessions,
         blockedUntilElapsedRealtimeMs = blockedUntilElapsedRealtimeMs,
-        error = error,
     )
 }
 
@@ -204,12 +182,17 @@ private fun requireValidBrowserLabel(value: String) {
 }
 
 private fun requireValidIpv4(value: String) {
+    require(isCanonicalIpv4(value)) { "Source address must be a canonical IPv4 address" }
+}
+
+/** Dotted-quad IPv4 with no leading zeros, the only form sessions record. */
+fun isCanonicalIpv4(value: String): Boolean {
     val octets = value.split('.')
-    require(octets.size == 4 && octets.all { octet ->
+    return octets.size == 4 && octets.all { octet ->
         octet.isNotEmpty() &&
             octet.length <= 3 &&
             octet.all(Char::isDigit) &&
             (octet.length == 1 || octet.first() != '0') &&
             octet.toInt() in 0..255
-    }) { "Source address must be a canonical IPv4 address" }
+    }
 }

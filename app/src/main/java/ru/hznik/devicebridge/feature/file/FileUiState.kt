@@ -1,6 +1,5 @@
 package ru.hznik.devicebridge.feature.file
 
-import kotlin.math.roundToInt
 import ru.hznik.devicebridge.domain.file.FileDestinationId
 import ru.hznik.devicebridge.domain.file.FileDraftId
 import ru.hznik.devicebridge.domain.file.FileTransferDirection
@@ -9,6 +8,7 @@ import ru.hznik.devicebridge.domain.file.FileTransferId
 import ru.hznik.devicebridge.domain.file.FileTransferPhase
 import ru.hznik.devicebridge.domain.file.HARD_MAX_FILE_BYTES
 import ru.hznik.devicebridge.domain.session.BrowserSessionId
+import ru.hznik.devicebridge.feature.common.RecipientUiState
 
 typealias DraftSourceLease = ru.hznik.devicebridge.domain.file.DraftSourceLease
 
@@ -24,13 +24,6 @@ data class FileDraftItem(
     internal val dedupeKey: String
         get() = "$sourceIdentity\u0000$sizeBytes\u0000${sha256.lowercase()}"
 }
-
-data class FileRecipientUiState(
-    val id: BrowserSessionId,
-    val browserLabel: String,
-    val sourceIpv4: String,
-    val selected: Boolean,
-)
 
 data class FileTransferItemUiState(
     val id: FileTransferId,
@@ -50,21 +43,11 @@ data class FileTransferItemUiState(
     /** The running attempt continues after this many bytes kept by an earlier one. */
     val resumedFromBytes: Long = 0,
 ) {
-    val progress: Float
-        get() = if (sizeBytes == 0L) {
-            if (phase == FileTransferPhase.COMPLETED) 1f else 0f
-        } else {
-            (bytesTransferred.toDouble() / sizeBytes.toDouble()).toFloat().coerceIn(0f, 1f)
-        }
     val canCancel: Boolean get() = !phase.isTerminal
     val hasActiveProgress: Boolean
         get() = phase == FileTransferPhase.CONNECTING ||
             phase == FileTransferPhase.TRANSFERRING ||
             phase == FileTransferPhase.VERIFYING
-    val hasDeterminateProgress: Boolean
-        get() = phase == FileTransferPhase.TRANSFERRING && sizeBytes > 0
-    val progressPercent: Int?
-        get() = progress.takeIf { hasDeterminateProgress }?.times(100)?.roundToInt()
     val canRetry: Boolean get() = phase == FileTransferPhase.FAILED || phase == FileTransferPhase.CANCELLED
     /** Retry continues an upload from the part kept on the phone. */
     val continuesUpload: Boolean
@@ -110,7 +93,7 @@ private fun FileTransferItemUiState.resumableFailureMessage(): String? {
 
 data class FileUiState(
     val selection: List<FileDraftItem> = emptyList(),
-    val recipients: List<FileRecipientUiState> = emptyList(),
+    val recipients: List<RecipientUiState> = emptyList(),
     val selectedSessionId: BrowserSessionId? = null,
     val recipientSelectionRequired: Boolean = false,
     val transfers: List<FileTransferItemUiState> = emptyList(),

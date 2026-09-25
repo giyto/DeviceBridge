@@ -182,9 +182,12 @@ a {
 .footer-row {
   display: flex;
   min-width: 0;
+  min-height: 76px;
+  flex-direction: column;
   align-items: center;
-  justify-content: space-between;
+  justify-content: center;
   gap: var(--space-4);
+  text-align: center;
 }
 .shell {
   display: grid;
@@ -304,11 +307,18 @@ a {
 .status-card__label,
 .stage-card__step {
   margin: 0 0 0.6rem;
-  color: var(--accent);
   font-size: 0.75rem;
   font-weight: 750;
   letter-spacing: 0.1em;
   text-transform: uppercase;
+}
+
+.status-card__label {
+  color: var(--accent);
+}
+
+.stage-card__step {
+  color: var(--text-muted);
 }
 
 h1,
@@ -699,10 +709,6 @@ h2 {
   transition: border-color var(--motion-duration-standard) var(--motion-easing-standard);
 }
 
-.stage-card__step {
-  color: var(--text-muted);
-}
-
 .session-heading[hidden] ~ .text-transfer {
   margin-top: 0;
   padding-top: 0;
@@ -712,10 +718,18 @@ h2 {
 .pairing-form,
 .text-transfer {
   display: grid;
-  gap: var(--space-3);
   margin-top: 1.25rem;
   padding-top: 1.25rem;
   border-top: var(--border-width-subtle) solid var(--border);
+}
+
+.pairing-form {
+  gap: var(--space-3);
+}
+
+.text-transfer {
+  min-width: 0;
+  gap: 1.25rem;
 }
 
 .pairing-form[hidden],
@@ -779,7 +793,6 @@ h2 {
 }
 
 .primary-button,
-.file-unavailable button,
 .text-card__retry {
   min-height: 44px;
   padding: 0.7rem 1rem;
@@ -882,7 +895,6 @@ h2 {
 
 .primary-button:disabled,
 .secondary-button:disabled,
-.file-unavailable button:disabled,
 .text-card__copy:disabled,
 .text-card__open:disabled {
   cursor: not-allowed;
@@ -894,16 +906,10 @@ h2 {
   cursor: progress;
 }
 
-.text-transfer {
-  min-width: 0;
-  gap: 1.25rem;
-}
-
 .text-transfer__heading,
 .text-feed-panel__heading,
 .text-card__metadata,
-.text-card__summary,
-.file-unavailable {
+.text-card__summary {
   display: flex;
   min-width: 0;
   align-items: center;
@@ -1121,30 +1127,6 @@ h2 {
   cursor: pointer;
 }
 
-.file-unavailable {
-  align-items: flex-start;
-  padding: 1rem;
-  border: var(--border-width-subtle) solid var(--border);
-  border-radius: var(--shape-medium);
-  background: var(--surface);
-}
-
-.file-unavailable strong {
-  font-size: 0.9rem;
-}
-
-.file-unavailable p {
-  margin-top: 0.25rem;
-  font-size: 0.8rem;
-}
-
-.file-unavailable button {
-  flex: 0 0 auto;
-  border-color: var(--border);
-  background: var(--surface-elevated);
-  color: var(--text-muted);
-}
-
 .file-transfer {
   display: grid;
   min-width: 0;
@@ -1159,8 +1141,7 @@ h2 {
 }
 
 .file-transfer__heading,
-.file-card__heading,
-.file-card__actions {
+.file-card__heading {
   display: flex;
   min-width: 0;
   align-items: center;
@@ -1378,8 +1359,12 @@ h2 {
 }
 
 .file-card__actions {
-  justify-content: flex-start;
+  display: flex;
+  min-width: 0;
   flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-start;
+  gap: var(--space-3);
 }
 
 .file-card__actions button {
@@ -1404,13 +1389,6 @@ h2 {
   border-top: var(--border-width-subtle) solid var(--border);
   color: var(--text-muted);
   font-size: 0.78rem;
-}
-
-.footer-row {
-  min-height: 76px;
-  flex-direction: column;
-  justify-content: center;
-  text-align: center;
 }
 
 @keyframes item-enter {
@@ -1458,7 +1436,6 @@ h2 {
 
 
   .text-transfer__heading,
-  .file-unavailable,
   .file-transfer__heading,
   .file-card__heading {
     align-items: stretch;
@@ -1478,10 +1455,6 @@ h2 {
   .text-card__metadata time {
     width: 100%;
     margin-left: 0;
-  }
-
-  .file-unavailable button {
-    width: 100%;
   }
 
   .file-card__actions button {

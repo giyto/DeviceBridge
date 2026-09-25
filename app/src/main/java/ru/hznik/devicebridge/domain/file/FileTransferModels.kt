@@ -4,9 +4,9 @@ import ru.hznik.devicebridge.domain.session.BrowserSessionId
 import ru.hznik.devicebridge.domain.session.ServerGenerationId
 
 private const val MAX_FILE_TRANSFER_ID_LENGTH = 64
-private const val MAX_FILE_DISPLAY_NAME_LENGTH = 255
-private const val MAX_FILE_MIME_TYPE_LENGTH = 127
-private val FILE_SHA_256 = Regex("^[a-fA-F0-9]{64}$")
+internal const val MAX_FILE_DISPLAY_NAME_LENGTH = 255
+internal const val MAX_FILE_MIME_TYPE_LENGTH = 127
+internal val FILE_SHA_256 = Regex("^[a-fA-F0-9]{64}$")
 private val FILE_TRANSFER_ID = Regex("^[A-Za-z0-9_-]+$")
 
 @JvmInline
@@ -114,6 +114,10 @@ data class FileTransferSnapshot(
 
     fun item(id: FileTransferId): FileTransferState? =
         items.firstOrNull { it.metadata.id == id }
+
+    /** Whether a transfer is queued or still moving. */
+    val hasUnfinishedTransfer: Boolean
+        get() = items.any { !it.phase.isTerminal }
 }
 
 data class CreateFileTransfersRequest(

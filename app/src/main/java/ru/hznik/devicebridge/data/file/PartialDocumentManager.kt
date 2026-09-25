@@ -1,6 +1,7 @@
 package ru.hznik.devicebridge.data.file
 
 import java.util.Locale
+import ru.hznik.devicebridge.domain.file.DEFAULT_FILE_MIME_TYPE
 import ru.hznik.devicebridge.domain.file.MAX_SAFE_FILENAME_LENGTH
 import ru.hznik.devicebridge.domain.file.SafeFilenameResolver
 
@@ -59,7 +60,7 @@ class PartialDocumentManager(
         val partialName = resolvePartialName(finalName, existingNames)
         // A neutral type: providers append an extension for known types ("….partial.mp4"),
         // and media indexers would then show an unfinished file as a video or photo.
-        val documentUri = provider.create(treeUri, PARTIAL_MIME_TYPE, partialName)
+        val documentUri = provider.create(treeUri, DEFAULT_FILE_MIME_TYPE, partialName)
             ?: error("Destination provider did not create a partial document")
         return PartialDocumentHandle(
             documentUri = documentUri,
@@ -134,6 +135,5 @@ class PartialDocumentManager(
 
     private companion object {
         const val PARTIAL_SUFFIX = ".devicebridge-partial"
-        const val PARTIAL_MIME_TYPE = "application/octet-stream"
     }
 }

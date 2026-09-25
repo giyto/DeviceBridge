@@ -1,3 +1,4 @@
+import { required } from "../dom";
 import { SETUP_PLATFORMS, type SetupPlatform } from "./setupPlatform";
 
 export interface SetupPageDependencies {
@@ -44,20 +45,24 @@ const TEXT: Record<TrustState, { title: string; detail: string }> = {
 };
 
 export function createSetupPage(documentRef: Document, deps: SetupPageDependencies): SetupPage {
-  const status = required<HTMLElement>(documentRef, '[data-role="trust-status"]');
-  const title = required<HTMLElement>(documentRef, '[data-role="trust-title"]');
-  const detail = required<HTMLElement>(documentRef, '[data-role="trust-detail"]');
-  const checkAgain = required<HTMLButtonElement>(documentRef, '[data-action="check-again"]');
+  const status = required<HTMLElement>(documentRef, '[data-role="trust-status"]', "setup page");
+  const title = required<HTMLElement>(documentRef, '[data-role="trust-title"]', "setup page");
+  const detail = required<HTMLElement>(documentRef, '[data-role="trust-detail"]', "setup page");
+  const checkAgain = required<HTMLButtonElement>(
+    documentRef,
+    '[data-action="check-again"]',
+    "setup page",
+  );
   const tabs = new Map(
     SETUP_PLATFORMS.map((platform) => [
       platform,
-      required<HTMLButtonElement>(documentRef, `[data-platform="${platform}"]`),
+      required<HTMLButtonElement>(documentRef, `[data-platform="${platform}"]`, "setup page"),
     ]),
   );
   const guides = new Map(
     SETUP_PLATFORMS.map((platform) => [
       platform,
-      required<HTMLElement>(documentRef, `[data-guide="${platform}"]`),
+      required<HTMLElement>(documentRef, `[data-guide="${platform}"]`, "setup page"),
     ]),
   );
   let checking: Promise<boolean> | null = null;
@@ -111,10 +116,4 @@ export function createSetupPage(documentRef: Document, deps: SetupPageDependenci
     },
     check,
   };
-}
-
-function required<T extends Element>(documentRef: Document, selector: string): T {
-  const element = documentRef.querySelector<T>(selector);
-  if (element === null) throw new Error("Missing setup page element: " + selector);
-  return element;
 }

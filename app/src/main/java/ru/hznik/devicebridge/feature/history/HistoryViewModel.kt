@@ -7,11 +7,8 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flatMapLatest
-import kotlinx.coroutines.flow.map
-import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import ru.hznik.devicebridge.domain.history.HistoryDirection
@@ -22,6 +19,8 @@ import ru.hznik.devicebridge.domain.history.HistoryStatus
 import ru.hznik.devicebridge.domain.usecase.ClearHistoryUseCase
 import ru.hznik.devicebridge.domain.usecase.DeleteHistoryRecordUseCase
 import ru.hznik.devicebridge.domain.usecase.ObserveHistoryUseCase
+import ru.hznik.devicebridge.feature.common.LoadResult
+import ru.hznik.devicebridge.feature.common.asLoadResult
 
 private const val FILTER_DIRECTIONS_KEY = "history_filter_directions"
 private const val FILTER_KINDS_KEY = "history_filter_kinds"
@@ -35,12 +34,6 @@ class HistoryViewModel @Inject constructor(
     private val clearHistory: ClearHistoryUseCase,
     private val savedStateHandle: SavedStateHandle,
 ) : ViewModel() {
-    private sealed interface LoadResult {
-        data object Loading : LoadResult
-        data class Loaded(val records: List<HistoryRecord>) : LoadResult
-        data object Failed : LoadResult
-    }
-
     private val filter = MutableStateFlow(savedStateHandle.restoreHistoryFilter())
     private val reloadRevision = MutableStateFlow(0)
     private val mutableUiState = MutableStateFlow(
@@ -51,12 +44,7 @@ class HistoryViewModel @Inject constructor(
     init {
         viewModelScope.launch {
             combine(filter, reloadRevision) { currentFilter, _ -> currentFilter }
-                .flatMapLatest { currentFilter ->
-                    observeHistory(currentFilter)
-                        .map<List<HistoryRecord>, LoadResult>(LoadResult::Loaded)
-                        .onStart { emit(LoadResult.Loading) }
-                        .catch { emit(LoadResult.Failed) }
-                }
+                .flatMapLatest { currentFilter -> observeHistory(currentFilter).asLoadResult() }
                 .collect(::applyLoadResult)
         }
     }
@@ -95,7 +83,7 @@ class HistoryViewModel @Inject constructor(
         }
     }
 
-    private fun applyLoadResult(result: LoadResult) {
+    private fun applyLoadResult(result: LoadResult<List<HistoryRecord>>) {
         mutableUiState.update { current ->
             when (result) {
                 LoadResult.Loading -> current.copy(
@@ -104,15 +92,15 @@ class HistoryViewModel @Inject constructor(
                     errorMessage = null,
                 )
                 is LoadResult.Loaded -> current.copy(
-                    loadState = if (result.records.isEmpty()) {
+                    loadState = if (result.value.isEmpty()) {
                         HistoryLoadState.EMPTY
                     } else {
                         HistoryLoadState.CONTENT
                     },
-                    records = result.records,
+                    records = result.value,
                     filter = filter.value,
                     selectedRecord = current.selectedRecord?.let { selected ->
-                        result.records.firstOrNull { it.id == selected.id }
+                        result.value.firstOrNull { it.id == selected.id }
                     },
                     errorMessage = null,
                 )

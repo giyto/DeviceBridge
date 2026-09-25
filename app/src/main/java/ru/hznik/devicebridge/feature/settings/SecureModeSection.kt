@@ -2,15 +2,10 @@ package ru.hznik.devicebridge.feature.settings
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.selection.toggleable
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -18,13 +13,10 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -46,45 +38,21 @@ internal fun SecureModeSection(
             "сертификат телефона - инструкция откроется по прежнему адресу DeviceBridge."
     }
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .testTag("secure-mode-toggle")
-                .toggleable(
-                    value = enabled,
-                    enabled = !saving,
-                    role = Role.Switch,
-                    onValueChange = { onAction(SettingsAction.SecureModeToggled(it)) },
-                )
-                .semantics { stateDescription = statusText }
-                .padding(vertical = 4.dp),
-            horizontalArrangement = Arrangement.spacedBy(16.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Column(
-                modifier = Modifier.weight(1f),
-                verticalArrangement = Arrangement.spacedBy(4.dp),
-            ) {
-                Text(
-                    text = "Защищённый режим (HTTPS)",
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.SemiBold,
-                )
-                Text(
-                    text = statusText,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    style = MaterialTheme.typography.bodySmall,
-                )
-            }
-            Switch(checked = enabled, onCheckedChange = null, enabled = !saving)
-        }
-        uiState.secureModeState.errorMessage?.let { FieldErrorText(it) }
+        SettingsSwitchRow(
+            title = "Защищённый режим (HTTPS)",
+            statusText = statusText,
+            checked = enabled,
+            enabled = !saving,
+            onCheckedChange = { onAction(SettingsAction.SecureModeToggled(it)) },
+            testTag = "secure-mode-toggle",
+        )
+        uiState.secureModeState.errorMessage?.let { FieldError(it) }
 
         when (val root = uiState.rootCertificate) {
             RootCertificateStatus.NotCreated -> Unit
             is RootCertificateStatus.Ready -> RootCertificateDetails(root, uiState, onAction)
             RootCertificateStatus.Unusable -> {
-                FieldErrorText(
+                FieldError(
                     "Сертификат телефона повреждён или его ключ недоступен. " +
                         "Сбросьте сертификат, чтобы защищённый режим снова работал.",
                 )
@@ -150,7 +118,7 @@ private fun RootCertificateDetails(
         ) {
             Text("Поделиться сертификатом")
         }
-        uiState.certificateShareError?.let { FieldErrorText(it) }
+        uiState.certificateShareError?.let { FieldError(it) }
         Text(
             text = "Отпечаток сертификата телефона (SHA-1)",
             style = MaterialTheme.typography.titleSmall,
@@ -250,13 +218,4 @@ private fun SecureModeChangeDialog(
 internal fun shortFingerprint(sha1: String): String {
     val groups = sha1.split(' ')
     return if (groups.size < 2) sha1 else groups.first() + " … " + groups.last()
-}
-
-@Composable
-private fun FieldErrorText(message: String) {
-    Text(
-        text = message,
-        color = MaterialTheme.colorScheme.error,
-        style = MaterialTheme.typography.bodySmall,
-    )
 }

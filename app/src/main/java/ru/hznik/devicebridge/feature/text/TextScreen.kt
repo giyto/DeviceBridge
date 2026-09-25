@@ -18,7 +18,6 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -52,6 +51,7 @@ import ru.hznik.devicebridge.domain.text.TextContentKind
 import ru.hznik.devicebridge.domain.text.TextMessageId
 import ru.hznik.devicebridge.domain.text.TextTransferDirection
 import ru.hznik.devicebridge.domain.text.TextTransferStatus
+import ru.hznik.devicebridge.feature.common.RecipientUiState
 import ru.hznik.devicebridge.ui.theme.DeviceBridgeTheme
 import java.time.Instant
 import java.time.ZoneId
@@ -138,7 +138,7 @@ fun TextScreen(
 
 @Composable
 private fun RecipientSection(
-    recipients: List<TextRecipientUiState>,
+    recipients: List<RecipientUiState>,
     selectionRequired: Boolean,
     onSelect: (BrowserSessionId) -> Unit,
 ) {
@@ -187,7 +187,7 @@ private fun RecipientSection(
 
 @Composable
 private fun RecipientCard(
-    recipient: TextRecipientUiState,
+    recipient: RecipientUiState,
     selectable: Boolean,
     onSelect: (BrowserSessionId) -> Unit,
 ) {
@@ -568,7 +568,7 @@ private fun TextScreenLightPreview() {
             uiState = TextUiState(
                 draft = "https://example.com",
                 recipients = listOf(
-                    TextRecipientUiState(
+                    RecipientUiState(
                         id = BrowserSessionId("preview-browser"),
                         browserLabel = "Яндекс Браузер",
                         sourceIpv4 = "192.168.1.24",
@@ -599,7 +599,6 @@ private fun TextScreenDarkPreview() {
                 items = listOf(
                     TextItemUiState(
                         id = TextMessageId("preview-message"),
-                        sessionId = BrowserSessionId("preview-browser"),
                         browserLabel = "Edge",
                         content = "Локальная передача работает",
                         contentKind = TextContentKind.TEXT,

@@ -174,7 +174,8 @@ class BrowserSessionCoordinator(
         trustedBrowserRepository?.let { repository ->
             scope.launch {
                 repository.trustedBrowsers.collectLatest { browsers ->
-                    closeTrustedSessionsMissingFrom(browsers.mapTo(mutableSetOf()) { it.id })
+                    val activeBrowserIds = browsers.mapTo(mutableSetOf()) { it.id }
+                    closeTrustedSessionsMatching { trustedId -> trustedId !in activeBrowserIds }
                 }
             }
             scope.launch {
@@ -230,10 +231,8 @@ class BrowserSessionCoordinator(
         rememberBrowserRequested: Boolean = false,
     ): ChallengeCreationResult = mutex.withLock {
         if (activeHandle !== handle) return@withLock ChallengeCreationResult.GenerationClosed
-        val metadata = when (val normalized = ClientMetadataNormalizer.normalize(browserLabel, sourceIpv4)) {
-            is ClientMetadataResult.Valid -> normalized.metadata
-            is ClientMetadataResult.Invalid -> return@withLock ChallengeCreationResult.InvalidMetadata
-        }
+        val metadata = ClientMetadataNormalizer.normalizeOrNull(browserLabel, sourceIpv4)
+            ?: return@withLock ChallengeCreationResult.InvalidMetadata
         when (val limit = rateLimiter.check(metadata.sourceIpv4)) {
             is RateLimitDecision.Blocked -> return@withLock ChallengeCreationResult.RateLimited(
                 limit.retryAfterMs,
@@ -283,8 +282,7 @@ class BrowserSessionCoordinator(
             val removed = pending.remove(entry.request.id)
             if (removed === entry && activeHandle?.generationId == entry.request.generationId) {
                 entry.decision.complete(SessionConfirmationResult.TimedOut)
-                mutableState.value = BrowserSessionReducer.reduce(
-                    mutableState.value,
+                reduce(
                     BrowserSessionEvent.RequestExpired(
                         entry.request.generationId,
                         entry.request.id,
@@ -311,16 +309,10 @@ class BrowserSessionCoordinator(
                 ?: return@withLock RecoveryPreparation.Immediate(
                     SessionConfirmationRecoveryResult.Expired,
                 )
-            val metadata = when (
-                val normalized = ClientMetadataNormalizer.normalize(browserLabel, sourceIpv4)
-            ) {
-                is ClientMetadataResult.Valid -> normalized.metadata
-                is ClientMetadataResult.Invalid -> {
-                    return@withLock RecoveryPreparation.Immediate(
-                        SessionConfirmationRecoveryResult.InvalidMetadata,
-                    )
-                }
-            }
+            val metadata = ClientMetadataNormalizer.normalizeOrNull(browserLabel, sourceIpv4)
+                ?: return@withLock RecoveryPreparation.Immediate(
+                    SessionConfirmationRecoveryResult.InvalidMetadata,
+                )
             if (
                 metadata.browserLabel != entry.request.browserLabel ||
                 metadata.sourceIpv4 != entry.request.sourceIpv4
@@ -369,10 +361,7 @@ class BrowserSessionCoordinator(
             }
             if (sessions.size >= maxSessions) {
                 entry.decision.complete(SessionConfirmationResult.CapacityReached)
-                mutableState.value = BrowserSessionReducer.reduce(
-                    mutableState.value,
-                    BrowserSessionEvent.RequestDenied(entry.request.generationId, requestId),
-                )
+                reduce(BrowserSessionEvent.RequestDenied(entry.request.generationId, requestId))
                 return@withLock null
             }
             ApprovalPreparation(entry, handle)
@@ -400,28 +389,17 @@ class BrowserSessionCoordinator(
             if (sessions.size >= maxSessions) {
                 orphanedTrustedBrowser = issuedTrustedBrowser
                 entry.decision.complete(SessionConfirmationResult.CapacityReached)
-                mutableState.value = BrowserSessionReducer.reduce(
-                    mutableState.value,
-                    BrowserSessionEvent.RequestDenied(entry.request.generationId, requestId),
-                )
+                reduce(BrowserSessionEvent.RequestDenied(entry.request.generationId, requestId))
                 return@withLock
             }
-            val rawToken = secretGenerator.newSessionToken()
-            val session = BrowserSession(
-                id = BrowserSessionId(secretGenerator.newOpaqueId()),
+            val (session, rawToken) = createSessionLocked(
                 generationId = handle.generationId,
                 browserLabel = entry.request.browserLabel,
                 sourceIpv4 = entry.request.sourceIpv4,
-                connectedAtElapsedRealtimeMs = clock.nowMs(),
                 trustedBrowserId = issuedTrustedBrowser?.browser?.id,
             )
-            sessions[session.id] = StoredSession(
-                session = session,
-                credential = SessionTokenCredential.fromRaw(handle.generationId, rawToken),
-            )
             val nextCode = lifetimePolicy.newPairingCode()
-            mutableState.value = BrowserSessionReducer.reduce(
-                mutableState.value,
+            reduce(
                 BrowserSessionEvent.RequestApproved(
                     generationId = handle.generationId,
                     requestId = requestId,
@@ -465,10 +443,7 @@ class BrowserSessionCoordinator(
     override suspend fun deny(requestId: PairingRequestId) {
         mutex.withLock {
             val entry = pending.remove(requestId) ?: return@withLock
-            mutableState.value = BrowserSessionReducer.reduce(
-                mutableState.value,
-                BrowserSessionEvent.RequestDenied(entry.request.generationId, requestId),
-            )
+            reduce(BrowserSessionEvent.RequestDenied(entry.request.generationId, requestId))
             entry.decision.complete(SessionConfirmationResult.Denied)
         }
     }
@@ -505,37 +480,20 @@ class BrowserSessionCoordinator(
             if (activeHandle !== handle) {
                 return@withLock TrustedSessionExchangeResult.GenerationClosed
             }
-            val metadata = when (
-                val normalized = ClientMetadataNormalizer.normalize(
-                    trustedBrowser.browserLabel,
-                    sourceIpv4,
-                )
-            ) {
-                is ClientMetadataResult.Valid -> normalized.metadata
-                is ClientMetadataResult.Invalid -> {
-                    return@withLock TrustedSessionExchangeResult.InvalidMetadata
-                }
-            }
+            val metadata = ClientMetadataNormalizer.normalizeOrNull(
+                trustedBrowser.browserLabel,
+                sourceIpv4,
+            ) ?: return@withLock TrustedSessionExchangeResult.InvalidMetadata
             if (sessions.size >= maxSessions) {
                 return@withLock TrustedSessionExchangeResult.CapacityReached
             }
-            val rawToken = secretGenerator.newSessionToken()
-            val session = BrowserSession(
-                id = BrowserSessionId(secretGenerator.newOpaqueId()),
+            val (session, rawToken) = createSessionLocked(
                 generationId = handle.generationId,
                 browserLabel = metadata.browserLabel,
                 sourceIpv4 = metadata.sourceIpv4,
-                connectedAtElapsedRealtimeMs = clock.nowMs(),
                 trustedBrowserId = trustedBrowser.id,
             )
-            sessions[session.id] = StoredSession(
-                session = session,
-                credential = SessionTokenCredential.fromRaw(handle.generationId, rawToken),
-            )
-            mutableState.value = BrowserSessionReducer.reduce(
-                mutableState.value,
-                BrowserSessionEvent.TrustedSessionConnected(handle.generationId, session),
-            )
+            reduce(BrowserSessionEvent.TrustedSessionConnected(handle.generationId, session))
             TrustedSessionExchangeResult.Approved(session.id, rawToken)
         }
     }
@@ -564,48 +522,20 @@ class BrowserSessionCoordinator(
     }
 
     override suspend fun revoke(sessionId: BrowserSessionId) {
-        val toClose = mutex.withLock {
-            val removed = sessions.remove(sessionId) ?: return@withLock emptyList()
-            mutableState.value = BrowserSessionReducer.reduce(
-                mutableState.value,
-                BrowserSessionEvent.SessionRevoked(removed.session.generationId, sessionId),
-            )
-            connections.remove(sessionId)?.toList().orEmpty()
-                .also { publishConnectionCountLocked() }
-        }
-        toClose.forEach { connection ->
-            try {
-                connection.close()
-            } catch (_: Exception) {
-                // Revocation is complete even if a transport was already closed.
-            }
-        }
+        val toClose = mutex.withLock { removeSessionLocked(sessionId) }
+        closeConnections(toClose)
     }
 
     override suspend fun revokeTrustedBrowser(browserId: TrustedBrowserId): Boolean {
         val revoked = trustedBrowserRepository?.revoke(browserId) ?: false
-        closeTrustedSessions(setOf(browserId))
+        closeTrustedSessionsMatching { trustedId -> trustedId == browserId }
         return revoked
     }
 
     override suspend fun revokeAllTrustedBrowsers(): Int {
         val revoked = trustedBrowserRepository?.revokeAll() ?: 0
-        closeAllTrustedSessions()
-        return revoked
-    }
-
-    private suspend fun closeTrustedSessions(browserIds: Set<TrustedBrowserId>) {
-        closeTrustedSessionsMatching { trustedId -> trustedId in browserIds }
-    }
-
-    private suspend fun closeTrustedSessionsMissingFrom(
-        activeBrowserIds: Set<TrustedBrowserId>,
-    ) {
-        closeTrustedSessionsMatching { trustedId -> trustedId !in activeBrowserIds }
-    }
-
-    private suspend fun closeAllTrustedSessions() {
         closeTrustedSessionsMatching { true }
+        return revoked
     }
 
     private suspend fun closeTrustedSessionsMatching(
@@ -618,18 +548,7 @@ class BrowserSessionCoordinator(
                         ?.takeIf(shouldClose)
                         ?.let { stored.session.id }
                 }
-            sessionIds.flatMap { sessionId ->
-                val removed = sessions.remove(sessionId) ?: return@flatMap emptyList()
-                mutableState.value = BrowserSessionReducer.reduce(
-                    mutableState.value,
-                    BrowserSessionEvent.SessionRevoked(
-                        removed.session.generationId,
-                        sessionId,
-                    ),
-                )
-                connections.remove(sessionId)?.toList().orEmpty()
-                    .also { publishConnectionCountLocked() }
-            }
+            sessionIds.flatMap(::removeSessionLocked)
         }
         closeConnections(toClose.distinct())
     }
@@ -643,10 +562,7 @@ class BrowserSessionCoordinator(
                 if (activeHandle !== handle) return@withLock
                 val latestCode = mutableState.value.pairingCode ?: return@withLock
                 val rotated = lifetimePolicy.currentOrRotated(latestCode)
-                mutableState.value = BrowserSessionReducer.reduce(
-                    mutableState.value,
-                    BrowserSessionEvent.PairingCodeRotated(handle.generationId, rotated),
-                )
+                reduce(BrowserSessionEvent.PairingCodeRotated(handle.generationId, rotated))
                 scheduleCodeRotation(handle)
             }
         }
@@ -656,10 +572,7 @@ class BrowserSessionCoordinator(
         requireNotNull(mutableState.value.pairingCode).let { current ->
             val refreshed = lifetimePolicy.currentOrRotated(current)
             if (refreshed !== current) {
-                mutableState.value = BrowserSessionReducer.reduce(
-                    mutableState.value,
-                    BrowserSessionEvent.PairingCodeRotated(handle.generationId, refreshed),
-                )
+                reduce(BrowserSessionEvent.PairingCodeRotated(handle.generationId, refreshed))
                 scheduleCodeRotation(handle)
             }
             refreshed
@@ -685,12 +598,8 @@ class BrowserSessionCoordinator(
         if (challenge.generationId != handle.generationId) {
             return ConfirmationPreparation.Immediate(SessionConfirmationResult.GenerationClosed)
         }
-        val metadata = when (val normalized = ClientMetadataNormalizer.normalize(browserLabel, sourceIpv4)) {
-            is ClientMetadataResult.Valid -> normalized.metadata
-            is ClientMetadataResult.Invalid -> {
-                return ConfirmationPreparation.Immediate(SessionConfirmationResult.InvalidMetadata)
-            }
-        }
+        val metadata = ClientMetadataNormalizer.normalizeOrNull(browserLabel, sourceIpv4)
+            ?: return ConfirmationPreparation.Immediate(SessionConfirmationResult.InvalidMetadata)
         if (metadata != challenge.metadata) {
             return ConfirmationPreparation.Immediate(SessionConfirmationResult.InvalidMetadata)
         }
@@ -708,8 +617,7 @@ class BrowserSessionCoordinator(
                     SessionConfirmationResult.InvalidCode(failure.remainingAttempts),
                 )
                 is RateLimitDecision.Blocked -> {
-                    mutableState.value = BrowserSessionReducer.reduce(
-                        mutableState.value,
+                    reduce(
                         BrowserSessionEvent.SourceBlocked(
                             handle.generationId,
                             Math.addExact(clock.nowMs(), failure.retryAfterMs),
@@ -750,10 +658,7 @@ class BrowserSessionCoordinator(
         }
         challenges.remove(challengeId)
         rateLimiter.recordSuccess(metadata.sourceIpv4)
-        mutableState.value = BrowserSessionReducer.reduce(
-            mutableState.value,
-            BrowserSessionEvent.RequestAdded(request),
-        )
+        reduce(BrowserSessionEvent.RequestAdded(request))
         return ConfirmationPreparation.Await(entry)
     }
 
@@ -765,10 +670,7 @@ class BrowserSessionCoordinator(
     private fun clearExpiredBlock(handle: SessionGenerationHandle) {
         val blockedUntil = mutableState.value.blockedUntilElapsedRealtimeMs ?: return
         if (clock.nowMs() >= blockedUntil) {
-            mutableState.value = BrowserSessionReducer.reduce(
-                mutableState.value,
-                BrowserSessionEvent.SourceBlockCleared(handle.generationId),
-            )
+            reduce(BrowserSessionEvent.SourceBlockCleared(handle.generationId))
         }
     }
 
@@ -787,11 +689,43 @@ class BrowserSessionCoordinator(
         connections.clear()
         publishConnectionCountLocked()
         activeHandle = null
-        mutableState.value = BrowserSessionReducer.reduce(
-            mutableState.value,
-            BrowserSessionEvent.Deactivated(handle.generationId),
-        )
+        reduce(BrowserSessionEvent.Deactivated(handle.generationId))
         return toClose
+    }
+
+    private fun reduce(event: BrowserSessionEvent) {
+        mutableState.value = BrowserSessionReducer.reduce(mutableState.value, event)
+    }
+
+    /** Stores a new session and returns it with its raw bearer secret. */
+    private fun createSessionLocked(
+        generationId: ServerGenerationId,
+        browserLabel: String,
+        sourceIpv4: String,
+        trustedBrowserId: TrustedBrowserId?,
+    ): Pair<BrowserSession, String> {
+        val rawToken = secretGenerator.newSessionToken()
+        val session = BrowserSession(
+            id = BrowserSessionId(secretGenerator.newOpaqueId()),
+            generationId = generationId,
+            browserLabel = browserLabel,
+            sourceIpv4 = sourceIpv4,
+            connectedAtElapsedRealtimeMs = clock.nowMs(),
+            trustedBrowserId = trustedBrowserId,
+        )
+        sessions[session.id] = StoredSession(
+            session = session,
+            credential = SessionTokenCredential.fromRaw(generationId, rawToken),
+        )
+        return session to rawToken
+    }
+
+    /** Removes a session and returns its transport connections for closing outside the lock. */
+    private fun removeSessionLocked(sessionId: BrowserSessionId): List<SessionConnection> {
+        val removed = sessions.remove(sessionId) ?: return emptyList()
+        reduce(BrowserSessionEvent.SessionRevoked(removed.session.generationId, sessionId))
+        return connections.remove(sessionId)?.toList().orEmpty()
+            .also { publishConnectionCountLocked() }
     }
 
     private fun publishConnectionCountLocked() {

@@ -3,7 +3,6 @@ package ru.hznik.devicebridge.feature.home
 import ru.hznik.devicebridge.domain.session.BrowserSessionId
 import ru.hznik.devicebridge.domain.session.PairingRequestId
 import ru.hznik.devicebridge.domain.file.FileTransferDirection
-import ru.hznik.devicebridge.domain.file.FileTransferId
 import ru.hznik.devicebridge.domain.file.FileTransferPhase
 import ru.hznik.devicebridge.domain.error.UserFacingFailure
 
@@ -66,7 +65,6 @@ data class ServerSessionUiState(
 }
 
 data class HomeFileTransferUiState(
-    val id: FileTransferId,
     val displayName: String,
     val sizeBytes: Long,
     val direction: FileTransferDirection,

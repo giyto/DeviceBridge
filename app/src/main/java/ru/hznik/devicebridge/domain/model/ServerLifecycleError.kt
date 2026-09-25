@@ -1,9 +1,6 @@
 package ru.hznik.devicebridge.domain.model
 
 sealed interface ServerLifecycleError {
-    val isRecoverable: Boolean
-        get() = true
-
     data object LocalNetworkPermissionDenied : ServerLifecycleError
     data object PermissionRevoked : ServerLifecycleError
     data object NoLanNetwork : ServerLifecycleError

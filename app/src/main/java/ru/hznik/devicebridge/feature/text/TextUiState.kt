@@ -5,13 +5,7 @@ import ru.hznik.devicebridge.domain.text.TextContentKind
 import ru.hznik.devicebridge.domain.text.TextMessageId
 import ru.hznik.devicebridge.domain.text.TextTransferDirection
 import ru.hznik.devicebridge.domain.text.TextTransferStatus
-
-data class TextRecipientUiState(
-    val id: BrowserSessionId,
-    val browserLabel: String,
-    val sourceIpv4: String,
-    val selected: Boolean,
-)
+import ru.hznik.devicebridge.feature.common.RecipientUiState
 
 data class TextPreviewUiState(
     val content: String,
@@ -21,7 +15,6 @@ data class TextPreviewUiState(
 
 data class TextItemUiState(
     val id: TextMessageId,
-    val sessionId: BrowserSessionId,
     val browserLabel: String,
     val content: String,
     val contentKind: TextContentKind,
@@ -35,7 +28,7 @@ data class TextItemUiState(
 data class TextUiState(
     val isLoading: Boolean = false,
     val draft: String = "",
-    val recipients: List<TextRecipientUiState> = emptyList(),
+    val recipients: List<RecipientUiState> = emptyList(),
     val selectedSessionId: BrowserSessionId? = null,
     val recipientSelectionRequired: Boolean = false,
     val preview: TextPreviewUiState? = null,

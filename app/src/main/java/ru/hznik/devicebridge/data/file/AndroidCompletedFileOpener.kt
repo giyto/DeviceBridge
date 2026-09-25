@@ -5,6 +5,7 @@ import android.content.ClipData
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import ru.hznik.devicebridge.domain.file.DEFAULT_FILE_MIME_TYPE
 import ru.hznik.devicebridge.domain.file.FileTransferPhase
 
 interface ExternalFileViewerGateway {
@@ -37,7 +38,7 @@ class AndroidCompletedFileOpener(
             return CompletedFileOpenResult.UnsafeUri
         }
         val intent = Intent(Intent.ACTION_VIEW)
-            .setDataAndType(uri, mimeType.ifBlank { DEFAULT_MIME_TYPE })
+            .setDataAndType(uri, mimeType.ifBlank { DEFAULT_FILE_MIME_TYPE })
             .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
             .apply {
                 clipData = ClipData.newRawUri("DeviceBridge file", uri)
@@ -51,7 +52,6 @@ class AndroidCompletedFileOpener(
 
     private companion object {
         const val ContentResolverScheme = "content"
-        const val DEFAULT_MIME_TYPE = "application/octet-stream"
     }
 }
 

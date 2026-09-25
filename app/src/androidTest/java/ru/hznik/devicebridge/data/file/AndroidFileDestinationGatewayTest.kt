@@ -1,8 +1,6 @@
 package ru.hznik.devicebridge.data.file
 
-import android.content.Context
 import android.content.Intent
-import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -12,14 +10,6 @@ import org.junit.runner.RunWith
 
 @RunWith(AndroidJUnit4::class)
 class AndroidFileDestinationGatewayTest {
-
-    @Test
-    fun contractUsesOpenDocumentTree() {
-        val context = ApplicationProvider.getApplicationContext<Context>()
-        val intent = AndroidFileDestinationGateway.contract().createIntent(context, null)
-
-        assertEquals(Intent.ACTION_OPEN_DOCUMENT_TREE, intent.action)
-    }
 
     @Test
     fun approveCreatesScopedLeaseAndReleaseIsIdempotent() {

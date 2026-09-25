@@ -7,10 +7,7 @@ const val DEFAULT_FILE_MIME_TYPE = "application/octet-stream"
 fun effectiveFileLimitBytes(requestedBytes: Long): Long =
     requestedBytes.coerceIn(1L, HARD_MAX_FILE_BYTES)
 
-private const val MAX_VALIDATED_DISPLAY_NAME_LENGTH = 255
-private const val MAX_VALIDATED_MIME_TYPE_LENGTH = 127
 private val VALID_TRANSFER_ID = Regex("^[A-Za-z0-9_-]{1,64}$")
-private val VALID_SHA_256 = Regex("^[a-fA-F0-9]{64}$")
 
 data class FileMetadataCandidate(
     val transferId: String,
@@ -58,7 +55,7 @@ object FileMetadataValidator {
         }
         if (
             candidate.displayName.isBlank() ||
-            candidate.displayName.length > MAX_VALIDATED_DISPLAY_NAME_LENGTH ||
+            candidate.displayName.length > MAX_FILE_DISPLAY_NAME_LENGTH ||
             candidate.displayName.any(Char::isISOControl)
         ) {
             return FileMetadataValidation.Invalid(FileMetadataError.INVALID_DISPLAY_NAME)
@@ -69,7 +66,7 @@ object FileMetadataValidator {
         if (candidate.sizeBytes > effectiveLimit) {
             return FileMetadataValidation.Invalid(FileMetadataError.FILE_TOO_LARGE)
         }
-        if (!VALID_SHA_256.matches(candidate.sha256)) {
+        if (!FILE_SHA_256.matches(candidate.sha256)) {
             return FileMetadataValidation.Invalid(FileMetadataError.INVALID_CHECKSUM)
         }
 
@@ -109,7 +106,7 @@ object FileMetadataValidator {
     private fun String?.toSafeMimeType(): String =
         this?.takeIf {
             it.isNotBlank() &&
-                it.length <= MAX_VALIDATED_MIME_TYPE_LENGTH &&
+                it.length <= MAX_FILE_MIME_TYPE_LENGTH &&
                 it.none(Char::isISOControl)
         } ?: DEFAULT_FILE_MIME_TYPE
 }

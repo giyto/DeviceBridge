@@ -7,6 +7,9 @@ import android.provider.DocumentsContract
 import androidx.activity.result.contract.ActivityResultContracts
 import java.util.concurrent.atomic.AtomicBoolean
 
+internal const val DOCUMENT_TREE_READ_WRITE_FLAGS =
+    Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+
 interface DocumentTreePermissionGateway {
     fun acquire(uri: String, grantFlags: Int): Boolean
 
@@ -49,7 +52,7 @@ class AndroidFileDestinationGateway(
         grantFlags: Int,
     ): DestinationApproval {
         if (uri == null) return DestinationApproval.Cancelled
-        val scopedFlags = grantFlags and READ_WRITE_FLAGS
+        val scopedFlags = grantFlags and DOCUMENT_TREE_READ_WRITE_FLAGS
         if (scopedFlags == 0 || !permissions.acquire(uri, scopedFlags)) {
             return DestinationApproval.Unavailable
         }
@@ -61,9 +64,6 @@ class AndroidFileDestinationGateway(
     companion object {
         fun contract(): ActivityResultContracts.OpenDocumentTree =
             ActivityResultContracts.OpenDocumentTree()
-
-        private const val READ_WRITE_FLAGS =
-            Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
     }
 }
 
@@ -78,7 +78,7 @@ class PersistedDestinationPermissionController(
 ) {
     fun approve(uri: String?): SettingsDestinationApproval {
         if (uri == null) return SettingsDestinationApproval.Cancelled
-        if (!permissions.acquire(uri, READ_WRITE_FLAGS) || !permissions.isAvailable(uri)) {
+        if (!permissions.acquire(uri, DOCUMENT_TREE_READ_WRITE_FLAGS) || !permissions.isAvailable(uri)) {
             return SettingsDestinationApproval.Unavailable
         }
         return SettingsDestinationApproval.Approved(uri)
@@ -89,16 +89,11 @@ class PersistedDestinationPermissionController(
         return DestinationApproval.Approved(
             ScopedDocumentTreeLease(
                 uri = uri,
-                grantFlags = READ_WRITE_FLAGS,
+                grantFlags = DOCUMENT_TREE_READ_WRITE_FLAGS,
                 permissions = permissions,
                 releasePermissionOnClose = false,
             ),
         )
-    }
-
-    private companion object {
-        const val READ_WRITE_FLAGS =
-            Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
     }
 }
 

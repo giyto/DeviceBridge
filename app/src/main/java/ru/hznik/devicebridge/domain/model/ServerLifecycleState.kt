@@ -4,6 +4,19 @@ sealed interface ServerLifecycleState {
     val isRunning: Boolean
         get() = false
 
+    /** Neither running nor on its way up or down, so a start is allowed. */
+    val isIdle: Boolean
+        get() = this is Stopped || this is Error
+
+    /** The generation this state belongs to; null only when stopped. */
+    fun generationOrNull(): Long? = when (this) {
+        Stopped -> null
+        is Starting -> generation
+        is Running -> generation
+        is Stopping -> generation
+        is Error -> generation
+    }
+
     data object Stopped : ServerLifecycleState
 
     data class Starting(
@@ -23,7 +36,7 @@ sealed interface ServerLifecycleState {
     ) : ServerLifecycleState
 
     data class Error(
-        val generation: Long?,
+        val generation: Long,
         val cause: ServerLifecycleError,
     ) : ServerLifecycleState
 }

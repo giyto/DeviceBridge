@@ -4,7 +4,6 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
-import ru.hznik.devicebridge.core.protocol.error.ProtocolErrorDetails
 import ru.hznik.devicebridge.core.protocol.error.toFailureCode
 import ru.hznik.devicebridge.domain.text.TextContentValidation
 import ru.hznik.devicebridge.domain.text.TextContentValidator
@@ -122,7 +121,6 @@ data class TextErrorEvent(
     val relatedMessageId: String? = null,
     val code: TextProtocolErrorCode,
     val errorCode: String = code.toFailureCode().wireValue,
-    val details: ProtocolErrorDetails? = null,
 )
 
 fun TextReceivedEvent.toSnapshotItem(): TextSnapshotItem = TextSnapshotItem(

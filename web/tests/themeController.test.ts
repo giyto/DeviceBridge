@@ -15,13 +15,13 @@ describe("ThemeController", () => {
     const controller = new ThemeController(store, apply, window);
 
     controller.start();
-    expect(apply).toHaveBeenLastCalledWith({ preference: "dark", effective: "dark" });
+    expect(apply).toHaveBeenLastCalledWith("dark");
 
     controller.setPreference("light");
-    expect(apply).toHaveBeenLastCalledWith({ preference: "light", effective: "light" });
+    expect(apply).toHaveBeenLastCalledWith("light");
 
     controller.setPreference("dark");
-    expect(apply).toHaveBeenLastCalledWith({ preference: "dark", effective: "dark" });
+    expect(apply).toHaveBeenLastCalledWith("dark");
     controller.dispose();
   });
 
@@ -29,7 +29,7 @@ describe("ThemeController", () => {
     document.head.innerHTML = '<meta name="color-scheme" content="light dark">';
     const apply = createDocumentThemeApplication(document);
 
-    apply({ preference: "dark", effective: "dark" });
+    apply("dark");
 
     expect(document.documentElement.dataset.theme).toBe("dark");
     expect(document.documentElement.dataset.themePreference).toBe("dark");
@@ -52,7 +52,7 @@ describe("ThemeController", () => {
       key: THEME_PREFERENCE_STORAGE_KEY,
     }));
 
-    expect(apply).toHaveBeenLastCalledWith({ preference: "light", effective: "light" });
+    expect(apply).toHaveBeenLastCalledWith("light");
     expect(storage.getItem("devicebridge.session.v1")).toBe("session-secret");
     expect(storage.getItem("devicebridge.text-draft.v1")).toBe("draft");
     controller.dispose();

@@ -4,7 +4,6 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
-import ru.hznik.devicebridge.core.protocol.error.ProtocolErrorDetails
 import ru.hznik.devicebridge.core.protocol.error.toFailureCode
 
 const val SESSION_PROTOCOL_VERSION = 1
@@ -100,7 +99,6 @@ data class SessionErrorBody(
     val retryAfterSeconds: Int? = null,
     val attemptsRemaining: Int? = null,
     val errorCode: String = code.toFailureCode().wireValue,
-    val details: ProtocolErrorDetails? = null,
 )
 
 @Serializable

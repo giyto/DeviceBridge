@@ -4,6 +4,7 @@ import {
   parseFileSnapshot,
   type FileSnapshotEvent,
 } from "./fileApiClient";
+import { isProtocolId, requireSessionToken } from "./protocolGuards";
 
 export interface XhrUploadTargetLike {
   onprogress: ((event: ProgressEvent) => void) | null;
@@ -37,7 +38,7 @@ export class XhrFileUploader {
     signal?: AbortSignal,
     offsetBytes = 0,
   ): Promise<FileSnapshotEvent> {
-    requireToken(token);
+    requireSessionToken(token);
     requireTransferId(transferId);
     if (!Number.isSafeInteger(offsetBytes) || offsetBytes < 0 || offsetBytes > file.size) {
       throw new Error("Invalid upload offset");
@@ -105,14 +106,8 @@ function parseJson(value: string): unknown {
   }
 }
 
-function requireToken(token: string): void {
-  if (token.length < 1 || token.length > 256 || /\s/.test(token)) {
-    throw new Error("Invalid session credential");
-  }
-}
-
 function requireTransferId(transferId: string): void {
-  if (!/^[A-Za-z0-9_-]{1,64}$/.test(transferId)) {
+  if (!isProtocolId(transferId)) {
     throw new Error("Invalid transfer identifier");
   }
 }

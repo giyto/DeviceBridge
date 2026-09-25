@@ -17,7 +17,6 @@ data class WebAssetDescriptor(
 )
 
 class WebAssetResource internal constructor(
-    val path: String,
     val contentType: String,
     val length: Long,
     private val streamFactory: () -> InputStream,
@@ -42,7 +41,6 @@ class AllowlistedWebAssetProvider(
         if (descriptor.length < 0L) return null
 
         return WebAssetResource(
-            path = path,
             contentType = contentTypeFor(path),
             length = descriptor.length,
             streamFactory = descriptor.openStream,

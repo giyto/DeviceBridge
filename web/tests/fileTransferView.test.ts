@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createFileTransferView } from "../src/fileTransferView";
-import type { FileTransferUiState } from "../src/fileTransferController";
+import type { FileTransferUiState } from "../src/fileTransferModel";
 
 beforeEach(() => {
   document.open();

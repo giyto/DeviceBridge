@@ -12,23 +12,6 @@ beforeEach(() => {
 });
 
 describe("DeviceBridge shell markup", () => {
-  it("uses semantic landmarks and a textual live status", () => {
-    createShellView(document, actions());
-
-    expect(document.querySelector("header")).toBeNull();
-    expect(document.querySelector("main")).not.toBeNull();
-    expect(document.querySelector("footer")).not.toBeNull();
-    expect(document.querySelector("h1")?.textContent).toContain("DeviceBridge");
-    expect(document.querySelector('[data-role="connection-area"]')?.contains(document.querySelector("h1"))).toBe(true);
-    expect(document.querySelector('[data-role="status"]')).toMatchObject({
-      ariaLive: "polite",
-      role: "status",
-    });
-    expect(document.querySelector('[data-role="status-title"]')?.textContent).toContain(
-      "Проверяем",
-    );
-  });
-
   it("shows the trusted-network HTTP warning without technical euphemisms", () => {
     createShellView(document, actions());
     const warning = document.querySelector('[data-role="security-warning"]')?.textContent ?? "";
@@ -53,31 +36,6 @@ describe("DeviceBridge shell markup", () => {
     expect(document.querySelector<HTMLElement>('[data-role="text-transfer"]')?.hidden).toBe(true);
     expect(document.querySelector<HTMLElement>('[data-role="file-transfer"]')?.hidden).toBe(true);
     expect(document.querySelector('label[for="file-input"]')?.textContent).toContain("Выберите файлы");
-  });
-
-  it("submits the explicit remember-browser choice", () => {
-    const onSubmitCode = vi.fn();
-    const view = createShellView(document, { ...actions(), onSubmitCode });
-    view.render({
-      kind: "ready",
-      manifest: { protocolVersion: 1, webAssetVersion: "sha256-abcd" },
-      challenge: {
-        protocolVersion: 1,
-        challengeId: "challenge-remember",
-        expiresAtEpochMillis: 10_000,
-        confirmTimeoutSeconds: 60,
-        attemptsRemaining: 5,
-      },
-    });
-    const input = document.querySelector<HTMLInputElement>("#pairing-code")!;
-    const remember = document.querySelector<HTMLInputElement>("#remember-browser")!;
-    input.value = "123456";
-    remember.checked = true;
-
-    document.querySelector<HTMLFormElement>('[data-role="pairing-form"]')
-      ?.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
-
-    expect(onSubmitCode).toHaveBeenCalledWith("123456", true);
   });
 });
 

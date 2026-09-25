@@ -4,6 +4,7 @@ import android.content.ContentResolver
 import android.net.Uri
 import android.provider.OpenableColumns
 import androidx.activity.result.contract.ActivityResultContracts
+import ru.hznik.devicebridge.domain.file.DEFAULT_FILE_MIME_TYPE
 
 data class AndroidDocumentMetadata(
     val displayName: String?,
@@ -58,7 +59,7 @@ class AndroidFileSourcePickerGateway(
                         mimeType = metadata.mimeType
                             ?.trim()
                             ?.takeIf(String::isNotEmpty)
-                            ?: DEFAULT_MIME_TYPE,
+                            ?: DEFAULT_FILE_MIME_TYPE,
                     ),
                     error = null,
                 )
@@ -67,7 +68,6 @@ class AndroidFileSourcePickerGateway(
 
     companion object {
         const val DEFAULT_DISPLAY_NAME = "document"
-        const val DEFAULT_MIME_TYPE = "application/octet-stream"
 
         fun contract(): ActivityResultContracts.OpenMultipleDocuments =
             ActivityResultContracts.OpenMultipleDocuments()
