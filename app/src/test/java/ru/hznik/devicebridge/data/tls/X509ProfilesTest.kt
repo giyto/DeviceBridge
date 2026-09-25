@@ -44,11 +44,11 @@ class X509ProfilesTest {
         assertEquals(Date.from(now.plus(Duration.ofDays(3650))), root.notAfter)
         assertArrayEquals(
             hex(
-                "303ca03a" +
+                "302fa02d" +
                     "300a87080a000000ff000000" +
                     "300a8708ac100000fff00000" +
                     "300a8708c0a80000ffff0000" +
-                    "3014821264657669636562726964676" + "52e6c6f63616c",
+                    "300782056c6f63616c",
             ),
             nameConstraintsOf(root),
         )
@@ -95,7 +95,48 @@ class X509ProfilesTest {
         }
     }
 
-    private fun root(): X509Certificate {
+    @Test
+    fun rootVouchesForAnyLocalName() {
+        val root = root()
+
+        listOf("devicebridge.local", "nikita.local", "devicebridge-2.local").forEach { name ->
+            validate(root, server(root, "192.168.1.24", dnsNames = listOf(name)))
+        }
+        assertEquals(listOf("local"), X509Profiles.permittedDnsNames(root))
+    }
+
+    @Test
+    fun rootCannotVouchForNamesOutsideTheLocalZone() {
+        val root = root()
+
+        listOf("local.example.com", "example.local.com", "localhost").forEach { name ->
+            assertThrows(name, CertPathValidatorException::class.java) {
+                validate(root, server(root, "192.168.1.24", dnsNames = listOf(name)))
+            }
+        }
+    }
+
+    @Test
+    fun rootFromBeforeCustomNamesOnlyVouchesForDeviceBridgeLocal() {
+        val legacy = root(permittedDnsName = DEVICEBRIDGE_LOCAL_NAME)
+
+        validate(legacy, server(legacy, "192.168.1.24", dnsNames = listOf("devicebridge.local")))
+        assertThrows(CertPathValidatorException::class.java) {
+            validate(legacy, server(legacy, "192.168.1.24", dnsNames = listOf("nikita.local")))
+        }
+        assertEquals(listOf("devicebridge.local"), X509Profiles.permittedDnsNames(legacy))
+    }
+
+    @Test
+    fun dnsNameMatchingFollowsRfc5280() {
+        assertTrue(X509Profiles.permitsDnsName(listOf("local"), "Nikita.Local"))
+        assertTrue(X509Profiles.permitsDnsName(listOf("devicebridge.local"), "devicebridge.local"))
+        assertFalse(X509Profiles.permitsDnsName(listOf("devicebridge.local"), "devicebridge-2.local"))
+        assertFalse(X509Profiles.permitsDnsName(listOf("local"), "notlocal"))
+        assertFalse(X509Profiles.permitsDnsName(emptyList(), "nikita.local"))
+    }
+
+    private fun root(permittedDnsName: String = LOCAL_DNS_ZONE): X509Certificate {
         val publicKey = keys.generate(CA, TlsKeyPurpose.CERTIFICATE_AUTHORITY)
         return X509Profiles.root(
             publicKey = publicKey,
@@ -104,6 +145,7 @@ class X509ProfilesTest {
             notBefore = now,
             notAfter = now.plus(Duration.ofDays(3650)),
             sign = { keys.signSha256WithEcdsa(CA, it) },
+            permittedDnsName = permittedDnsName,
         )
     }
 

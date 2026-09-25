@@ -47,6 +47,7 @@ import ru.hznik.devicebridge.domain.usecase.ObserveHistoryUseCase
 import ru.hznik.devicebridge.domain.usecase.ObserveSettingsUseCase
 import ru.hznik.devicebridge.domain.usecase.UpdateDestinationTreeUseCase
 import ru.hznik.devicebridge.domain.usecase.UpdateDeviceNameUseCase
+import ru.hznik.devicebridge.domain.usecase.UpdateNetworkNameUseCase
 import ru.hznik.devicebridge.domain.usecase.UpdateFileLimitUseCase
 import ru.hznik.devicebridge.domain.usecase.UpdateAutoAcceptTrustedFilesUseCase
 import ru.hznik.devicebridge.domain.usecase.UpdateIdleStopTimeoutUseCase
@@ -229,6 +230,11 @@ object PersistenceModule {
     fun provideObserveSettingsUseCase(
         repository: SettingsRepository,
     ): ObserveSettingsUseCase = ObserveSettingsUseCase(repository)
+
+    @Provides
+    fun provideUpdateNetworkNameUseCase(
+        repository: SettingsRepository,
+    ): UpdateNetworkNameUseCase = UpdateNetworkNameUseCase(repository)
 
     @Provides
     fun provideUpdateDeviceNameUseCase(

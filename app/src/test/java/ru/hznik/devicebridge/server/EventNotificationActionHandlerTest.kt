@@ -21,6 +21,11 @@ import ru.hznik.devicebridge.domain.file.VerifyFileTransferRequest
 import ru.hznik.devicebridge.domain.repository.FileTransferRepository
 import ru.hznik.devicebridge.domain.repository.TextTransferRepository
 import ru.hznik.devicebridge.domain.session.BrowserSessionId
+import ru.hznik.devicebridge.domain.session.BrowserSessionState
+import ru.hznik.devicebridge.domain.session.PairingRequestId
+import ru.hznik.devicebridge.domain.repository.BrowserSessionRepository
+import ru.hznik.devicebridge.domain.usecase.ApproveBrowserRequestUseCase
+import ru.hznik.devicebridge.domain.usecase.DenyBrowserRequestUseCase
 import ru.hznik.devicebridge.domain.session.ServerGenerationId
 import ru.hznik.devicebridge.domain.text.IncomingTextRequest
 import ru.hznik.devicebridge.domain.text.SendTextRequest
@@ -37,6 +42,7 @@ class EventNotificationActionHandlerTest {
     private val files = FakeFiles()
     private val accepted = NotificationAcceptedTransfers()
     private val copied = mutableListOf<String>()
+    private val sessions = RecordingSessions()
     private val handler = EventNotificationActionHandler(
         registry = registry,
         publisher = publisher,
@@ -44,7 +50,63 @@ class EventNotificationActionHandlerTest {
         files = files,
         notificationAccepted = accepted,
         clipboard = { copied += it },
+        approveRequest = ApproveBrowserRequestUseCase(sessions),
+        denyRequest = DenyBrowserRequestUseCase(sessions),
     )
+
+    @Test
+    fun pairingButtonsMakeTheSameDecisionsAsTheApp() = runTest {
+        val request = PairingRequestId("request-1")
+        val notice = EventNotice.PairingRequest(request, "Edge, Windows", 45_000, rememberRequested = true)
+
+        handler.handle(EventNotificationAction.ALLOW_PAIRING, registry.register(notice))
+        handler.handle(EventNotificationAction.ALLOW_AND_REMEMBER_PAIRING, registry.register(notice))
+        handler.handle(EventNotificationAction.DENY_PAIRING, registry.register(notice))
+
+        // "Разрешить" never remembers the browser, even when it asked to be remembered.
+        assertEquals(listOf("approve:request-1", "remember:request-1", "deny:request-1"), sessions.calls)
+        assertEquals(listOf(notice.key, notice.key, notice.key), publisher.cancelled)
+    }
+
+    @Test
+    fun aRequestThatIsNoLongerPendingOnlyLosesItsNotification() = runTest {
+        sessions.failing = true
+        val notice = EventNotice.PairingRequest(PairingRequestId("gone"), "Edge, Windows", 45_000)
+
+        handler.handle(EventNotificationAction.ALLOW_PAIRING, registry.register(notice))
+
+        assertEquals(listOf(notice.key), publisher.cancelled)
+    }
+
+    @Test
+    fun pairingButtonOnAnotherKindOfNotificationDoesNothing() = runTest {
+        val textId = registry.register(EventNotice.IncomingText(SESSION, TextMessageId("m1"), "x", false))
+
+        handler.handle(EventNotificationAction.ALLOW_PAIRING, textId)
+
+        assertTrue(sessions.calls.isEmpty())
+        assertTrue(publisher.cancelled.isEmpty())
+    }
+
+    private class RecordingSessions : BrowserSessionRepository {
+        val calls = mutableListOf<String>()
+        var failing = false
+        override val state = MutableStateFlow(BrowserSessionState.inactive())
+        override val connectedSessionIds = MutableStateFlow(emptySet<BrowserSessionId>())
+
+        override suspend fun approve(requestId: PairingRequestId) = record("approve", requestId)
+
+        override suspend fun approveAndRemember(requestId: PairingRequestId) = record("remember", requestId)
+
+        override suspend fun deny(requestId: PairingRequestId) = record("deny", requestId)
+
+        override suspend fun revoke(sessionId: BrowserSessionId) = Unit
+
+        private fun record(kind: String, requestId: PairingRequestId) {
+            if (failing) error("The request is no longer pending")
+            calls += "$kind:${requestId.value}"
+        }
+    }
 
     @Test
     fun copyPutsTheWholeTextOnTheClipboardAndClosesTheNotification() = runTest {

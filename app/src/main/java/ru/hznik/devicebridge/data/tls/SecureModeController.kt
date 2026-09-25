@@ -61,6 +61,11 @@ class SecureModeController(
         return status
     }
 
+    /** Whether the root lets HTTPS work by [localName]; true while there is no root yet. */
+    suspend fun rootPermits(localName: String): Boolean = withContext(io) {
+        runCatching { authority.permits(localName) }.getOrDefault(true)
+    }
+
     suspend fun rootStatus(): RootCertificateStatus = withContext(io) {
         runCatching {
             authority.rootOrNull()

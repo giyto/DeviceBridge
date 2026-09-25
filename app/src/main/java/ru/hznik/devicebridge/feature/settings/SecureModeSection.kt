@@ -92,6 +92,17 @@ internal fun SecureModeSection(
             }
         }
 
+        if (enabled && !uiState.certificateCoversNetworkName && uiState.rootCertificate is RootCertificateStatus.Ready) {
+            Text(
+                text = "Сертификат на компьютере подходит только для адреса devicebridge.local. Чтобы " +
+                    "защищённая страница открывалась по имени «${uiState.settings.networkName.value}.local», " +
+                    "сбросьте сертификат ниже и установите его на компьютер заново.",
+                modifier = Modifier.testTag("certificate-name-hint"),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.error,
+            )
+        }
+
         if (uiState.certificateWasReset) {
             Text(
                 text = "Создан новый сертификат. На компьютерах удалите старый сертификат " +

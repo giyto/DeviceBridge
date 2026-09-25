@@ -9,6 +9,31 @@ object SettingsDefaults {
     const val MAX_RETENTION_DAYS = 365
 }
 
+/**
+ * The label of the phone's name on the local network: `<label>.local`. Latin letters, digits
+ * and hyphens, 1..40 characters, no hyphen at either end, always lower case.
+ */
+@JvmInline
+value class NetworkName(val value: String) {
+    init {
+        require(PATTERN.matches(value)) { "Invalid network name" }
+    }
+
+    companion object {
+        const val MAX_LENGTH = 40
+
+        // Before DEFAULT: the init block of DEFAULT needs it.
+        private val PATTERN = Regex("^[a-z0-9](?:[a-z0-9-]{0,38}[a-z0-9])?$")
+        val DEFAULT = NetworkName("devicebridge")
+
+        /** The trimmed, lower-cased label, or null when it breaks the rules. */
+        fun parse(input: String): NetworkName? {
+            val normalized = input.trim().lowercase()
+            return if (PATTERN.matches(normalized)) NetworkName(normalized) else null
+        }
+    }
+}
+
 @JvmInline
 value class DestinationTree(val value: String) {
     init {
@@ -27,6 +52,7 @@ data class DeviceSettings(
     val idleStopTimeout: IdleStopTimeout = IdleStopTimeout.DEFAULT,
     /** Serve browsers over HTTPS with the phone's own certificate authority. */
     val secureModeEnabled: Boolean = false,
+    val networkName: NetworkName = NetworkName.DEFAULT,
 ) {
     init {
         require(deviceName.isNotBlank())
@@ -57,6 +83,7 @@ enum class SettingsValidationError {
     FILE_LIMIT,
     AUTO_ACCEPT_DESTINATION,
     IDLE_STOP_TIMEOUT,
+    NETWORK_NAME,
 }
 
 /** How long the server may stay without live browser connections before it stops itself. */

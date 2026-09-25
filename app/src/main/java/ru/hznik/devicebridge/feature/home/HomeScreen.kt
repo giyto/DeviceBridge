@@ -125,18 +125,17 @@ fun HomeScreen(
         ) {
             ServerDetailsCard(
                 address = uiState.localAddress,
+                notice = uiState.localNameNotice,
                 secureMode = uiState.secureMode,
                 uptimeSeconds = uiState.uptimeSeconds,
-                onCopy = {
+                onCopy = { address ->
                     coroutineScope.launch {
                         clipboard.setClipEntry(
-                            ClipData.newPlainText(
-                                "DeviceBridge address",
-                                uiState.localAddress,
-                            ).toClipEntry(),
+                            ClipData.newPlainText("DeviceBridge address", address).toClipEntry(),
                         )
                     }
                 },
+                onOpenSettings = onOpenSettings,
             )
         }
 
@@ -658,9 +657,11 @@ private fun LifecycleButton(
 @Composable
 private fun ServerDetailsCard(
     address: String,
+    notice: LocalNameNotice?,
     secureMode: Boolean,
     uptimeSeconds: Long,
-    onCopy: () -> Unit,
+    onCopy: (String) -> Unit,
+    onOpenSettings: () -> Unit,
 ) {
     Column(
         modifier = Modifier
@@ -673,6 +674,19 @@ private fun ServerDetailsCard(
             supportingText = "Доступен только в текущей сети.",
         )
         MetadataRow(label = "Адрес", value = address, monospace = true)
+        if (notice != null) {
+            Text(
+                text = notice.text,
+                modifier = Modifier.testTag("local-name-notice"),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            if (notice.opensSettings) {
+                TextButton(onClick = onOpenSettings) {
+                    Text("Открыть настройки")
+                }
+            }
+        }
         if (secureMode) {
             Text(
                 text = "Защищённый режим: браузер сам откроет зашифрованное соединение, " +
@@ -684,7 +698,7 @@ private fun ServerDetailsCard(
         }
         MetadataRow(label = "Время работы", value = formatUptime(uptimeSeconds))
         FilledTonalButton(
-            onClick = onCopy,
+            onClick = { onCopy(address) },
             modifier = Modifier.semantics {
                 contentDescription = "Скопировать адрес DeviceBridge"
             },

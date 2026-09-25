@@ -11,6 +11,7 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -48,6 +49,7 @@ class ServerLifecycleCoordinator @Inject constructor(
         recoverInterruptedSession(),
     )
     private var activeRuntime: ServerRuntime? = null
+    private var endpointChangesJob: Job? = null
 
     override val state: StateFlow<ServerLifecycleState> = mutableState.asStateFlow()
     private val mutableLastStopReason = MutableStateFlow<ServerStopReason?>(null)
@@ -97,7 +99,9 @@ class ServerLifecycleCoordinator @Inject constructor(
                     endpointHost = endpoint.host,
                     networkFingerprint = newRuntime.networkFingerprint,
                 )
+                observeEndpoint(currentGeneration, newRuntime)
             } catch (throwable: Throwable) {
+                stopObservingEndpoint()
                 permissionRevocationObserver.stop()
                 lanNetworkObserver.stop()
                 runCatching { newRuntime?.closeSessionGeneration() }
@@ -132,6 +136,7 @@ class ServerLifecycleCoordinator @Inject constructor(
                 mutableState.value,
                 ServerLifecycleEvent.StopRequested(currentGeneration),
             )
+            stopObservingEndpoint()
             permissionRevocationObserver.stop()
             lanNetworkObserver.stop()
             val runtime = activeRuntime
@@ -200,6 +205,7 @@ class ServerLifecycleCoordinator @Inject constructor(
                 mutableState.value,
                 ServerLifecycleEvent.Failed(generation, cause),
             )
+            stopObservingEndpoint()
             permissionRevocationObserver.stop()
             lanNetworkObserver.stop()
             val runtime = activeRuntime
@@ -228,6 +234,24 @@ class ServerLifecycleCoordinator @Inject constructor(
         } else {
             ServerLifecycleState.Stopped
         }
+    }
+
+    private fun observeEndpoint(generation: Long, runtime: ServerRuntime) {
+        endpointChangesJob = applicationScope.launch {
+            runtime.endpointChanges.collect { endpoint ->
+                mutex.withLock {
+                    mutableState.value = ServerLifecycleReducer.reduce(
+                        mutableState.value,
+                        ServerLifecycleEvent.EndpointChanged(generation, endpoint),
+                    )
+                }
+            }
+        }
+    }
+
+    private fun stopObservingEndpoint() {
+        endpointChangesJob?.cancel()
+        endpointChangesJob = null
     }
 
     private fun observeNetwork(

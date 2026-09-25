@@ -7,6 +7,7 @@ import {
   type TrustedCredentialStore,
   type SessionUiState,
   type SessionUiEffect,
+  type WaitingPorts,
 } from "../src/sessionController";
 import { SessionApiError } from "../src/sessionApiClient";
 import type { WebManifest } from "../src/webManifestClient";
@@ -228,11 +229,103 @@ describe("SessionController", () => {
 
     fixture.events.lose("reconnect_exhausted");
 
-    expect(fixture.states.at(-1)?.kind).toBe("needsUserAction");
+    expect(fixture.states.at(-1)?.kind).toBe("waiting");
     expect(store.saved).toBe("token");
     expect(trusted.saved?.credential).toBe("trusted-token");
     expect(api.status).toHaveBeenCalledOnce();
     expect(api.createChallenge).not.toHaveBeenCalled();
+    expect(fixture.fileSession.connectionAvailable).toBe(false);
+    fixture.controller.dispose();
+  });
+
+  it("waits for the phone, then signs in with the remembered browser without a code", async () => {
+    vi.useFakeTimers();
+    const api = fakeApi();
+    api.status = vi.fn(async (token: string) => {
+      if (token === "old-token") throw new SessionApiError(401, "UNAUTHORIZED", "Старая сессия");
+      return {
+        protocolVersion: 1,
+        sessionId: "session-2",
+        connected: true,
+        activeSessionCount: 1,
+        effectiveFileLimitBytes: 1_073_741_824,
+        deviceName: "Pixel",
+      };
+    });
+    const loader = { load: vi.fn().mockRejectedValue(new TypeError("offline")) };
+    const fileSession = new FakeFileSession();
+    const fixture = createFixture(
+      api,
+      new FakeTokenStore("old-token"),
+      loader,
+      new FakeTextSession(),
+      fileSession,
+      new FakeTrustedStore({ credential: "trusted-token", expiresAtEpochMillis: 99_000 }),
+    );
+
+    fixture.controller.start();
+    await vi.advanceTimersByTimeAsync(1_000 + 2_000 + 4_000);
+    expect(fixture.states.at(-1)).toEqual({ kind: "waiting" });
+    await vi.advanceTimersByTimeAsync(3_000);
+    expect(loader.load).toHaveBeenCalledTimes(5);
+    expect(fixture.states.at(-1)).toEqual({ kind: "waiting" });
+
+    loader.load.mockResolvedValue(manifest);
+    await vi.advanceTimersByTimeAsync(3_000);
+
+    expect(fixture.states.at(-1)?.kind).toBe("connected");
+    expect(api.exchangeTrusted).toHaveBeenCalledOnce();
+    expect(api.createChallenge).not.toHaveBeenCalled();
+    expect(api.confirm).not.toHaveBeenCalled();
+    expect(fixture.store.saved).toBe("trusted-session-token");
+    expect(fileSession.suspended).toBe(1);
+    fixture.controller.dispose();
+  });
+
+  it("without a remembered browser the form says the phone is back and asks to remember", async () => {
+    vi.useFakeTimers();
+    const api = fakeApi();
+    const loader = { load: vi.fn().mockRejectedValue(new TypeError("offline")) };
+    const fixture = createFixture(api, new FakeTokenStore(), loader);
+
+    fixture.controller.start();
+    await vi.advanceTimersByTimeAsync(7_000);
+    loader.load.mockResolvedValue(manifest);
+    fixture.controller.retry();
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(fixture.states.at(-1)).toMatchObject({ kind: "ready", notice: "phoneReturned" });
+    expect(api.createChallenge).toHaveBeenCalledWith("Edge on Windows", true, expect.any(AbortSignal));
+    expect(api.confirm).not.toHaveBeenCalled();
+    fixture.controller.dispose();
+  });
+
+  it("checks less often while the tab is hidden and at once when it comes back", async () => {
+    vi.useFakeTimers();
+    const visibility = new FakeVisibility(false);
+    const loader = { load: vi.fn().mockRejectedValue(new TypeError("offline")) };
+    const fixture = createFixture(
+      fakeApi(),
+      new FakeTokenStore(),
+      loader,
+      new FakeTextSession(),
+      new FakeFileSession(),
+      new FakeTrustedStore(),
+      { visibility, online: { onOnline: () => () => undefined } },
+    );
+
+    fixture.controller.start();
+    await vi.advanceTimersByTimeAsync(7_000);
+    expect(loader.load).toHaveBeenCalledTimes(4);
+    await vi.advanceTimersByTimeAsync(14_000);
+    expect(loader.load).toHaveBeenCalledTimes(4);
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(loader.load).toHaveBeenCalledTimes(5);
+
+    visibility.show();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(loader.load).toHaveBeenCalledTimes(6);
+    fixture.controller.dispose();
   });
   it("activates text only for a connected session and routes socket text events", async () => {
     const text = new FakeTextSession();
@@ -271,15 +364,20 @@ describe("SessionController", () => {
     expect(fixture.states.at(-1)).toMatchObject({ kind: "offline", nextRetryInMs: 1_000 });
     await vi.advanceTimersByTimeAsync(1_000 + 2_000 + 4_000);
     expect(loader.load).toHaveBeenCalledTimes(4);
-    expect(fixture.states.at(-1)).toEqual({
-      kind: "offline",
-      message: "Не удаётся связаться с DeviceBridge.",
-      nextRetryInMs: undefined,
-    });
+    // After the quick retries the page keeps waiting instead of giving up.
+    expect(fixture.states.at(-1)).toEqual({ kind: "waiting" });
 
     fixture.controller.retry();
     await vi.advanceTimersByTimeAsync(0);
     expect(loader.load).toHaveBeenCalledTimes(5);
+    // One question at a time: a second press while one is in flight asks nothing more.
+    let finish: (value: WebManifest) => void = () => undefined;
+    loader.load.mockImplementationOnce(() => new Promise((resolve) => { finish = resolve; }));
+    fixture.controller.retry();
+    fixture.controller.retry();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(loader.load).toHaveBeenCalledTimes(6);
+    finish(manifest);
     fixture.controller.dispose();
   });
 
@@ -329,6 +427,7 @@ describe("SessionController", () => {
     await vi.waitFor(() => expect(revoked.states.at(-1)?.kind).toBe("ready"));
     expect(revokedTrust.saved).toBeUndefined();
     expect(revokedApi.createChallenge).toHaveBeenCalledOnce();
+    expect(revoked.states.at(-1)).toMatchObject({ kind: "ready", notice: "trustRejected" });
 
     vi.useFakeTimers();
     const offlineApi = fakeApi();
@@ -343,8 +442,11 @@ describe("SessionController", () => {
       new FakeTrustedStore({ credential: "trusted-token", expiresAtEpochMillis: 99_000 }),
     );
     offline.controller.start();
-    await vi.advanceTimersByTimeAsync(1_000 + 2_000 + 4_000);
+    await vi.advanceTimersByTimeAsync(1_000 + 2_000);
+    // The quick retries do not exchange again; only a new cycle after waiting does.
     expect(offlineApi.exchangeTrusted).toHaveBeenCalledOnce();
+    await vi.advanceTimersByTimeAsync(4_000);
+    expect(offlineApi.exchangeTrusted).toHaveBeenCalledTimes(2);
     offline.controller.dispose();
   });
 
@@ -392,6 +494,7 @@ function createFixture(
   textSession = new FakeTextSession(),
   fileSession = new FakeFileSession(),
   trustedStore = new FakeTrustedStore(),
+  waitingPorts?: WaitingPorts,
 ) {
   const states: SessionUiState[] = [];
   const effects: SessionUiEffect[] = [];
@@ -407,6 +510,14 @@ function createFixture(
     textSession,
     fileSession,
     trustedStore,
+    {
+      setTimeout: (callback, delayMs) => globalThis.setTimeout(callback, delayMs),
+      clearTimeout: (handle) => globalThis.clearTimeout(handle as number),
+    },
+    waitingPorts ?? {
+      visibility: { isVisible: () => true, onChange: () => () => undefined },
+      online: { onOnline: () => () => undefined },
+    },
   );
   return { controller, states, effects, api, store, events, textSession, fileSession, trustedStore };
 }
@@ -463,6 +574,20 @@ class FakeTrustedStore implements TrustedCredentialStore {
   clear(): void { this.saved = undefined; }
 }
 
+class FakeVisibility {
+  private listeners: Array<() => void> = [];
+  constructor(private visible: boolean) {}
+  isVisible(): boolean { return this.visible; }
+  onChange(listener: () => void): () => void {
+    this.listeners.push(listener);
+    return () => { this.listeners = this.listeners.filter((item) => item !== listener); };
+  }
+  show(): void {
+    this.visible = true;
+    for (const listener of this.listeners) listener();
+  }
+}
+
 class FakeEventChannel implements SessionEventChannel {
   connectedWith?: string;
   private callbacks?: Parameters<SessionEventChannel["connect"]>[1];
@@ -516,6 +641,8 @@ class FakeFileSession {
     this.effectiveFileLimitBytes = effectiveFileLimitBytes;
   }
   deactivate(): void { this.activeToken = undefined; }
+  suspended = 0;
+  suspendSession(): void { this.suspended += 1; this.activeToken = undefined; }
   setConnectionAvailable(available: boolean): void { this.connectionAvailable = available; }
   receiveOffer(): void {}
   receiveProgress(): void {}

@@ -47,5 +47,8 @@ class EffectiveFileLimitProviderTest {
 
         override suspend fun updateSecureMode(enabled: Boolean): SettingsUpdateResult =
             error("Not used")
+
+        override suspend fun updateNetworkName(value: String): SettingsUpdateResult =
+            error("Not used")
     }
 }

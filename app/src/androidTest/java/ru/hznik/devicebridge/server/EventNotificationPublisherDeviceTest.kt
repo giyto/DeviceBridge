@@ -76,6 +76,26 @@ class EventNotificationPublisherDeviceTest {
     }
 
     @Test
+    fun pairingButtonsThatAllowNeedAnUnlock() {
+        val request = EventNotice.PairingRequest(
+            ru.hznik.devicebridge.domain.session.PairingRequestId("request-device-test"),
+            "Edge, Windows",
+            60_000,
+            rememberRequested = true,
+        )
+        publisher.show(request, alert = true)
+
+        val posted = awaitEvents { it.size == 1 }.single().notification
+        assertEquals(
+            listOf("Отклонить", "Разрешить", "Разрешить и запомнить"),
+            posted.actions.map { it.title.toString() },
+        )
+        assertEquals(listOf(false, true, true), posted.actions.map { it.isAuthenticationRequired })
+        publisher.cancel(request.key)
+        awaitEvents { it.isEmpty() }
+    }
+
+    @Test
     fun cancelRemovesTheNotification() {
         publisher.show(notice, alert = true)
         awaitEvents { it.isNotEmpty() }

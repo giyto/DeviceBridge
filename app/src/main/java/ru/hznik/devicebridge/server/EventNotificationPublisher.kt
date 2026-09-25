@@ -88,7 +88,11 @@ class AndroidEventNotificationPublisher @Inject constructor(
                 if (notice is EventNotice.IncomingText) setGroup(TEXT_GROUP)
                 model.actions.forEach { action ->
                     val intent = actionIntent(id, action, model) ?: return@forEach
-                    addAction(0, action.label, intent)
+                    addAction(
+                        NotificationCompat.Action.Builder(0, action.label, intent)
+                            .setAuthenticationRequired(action.requiresUnlock)
+                            .build(),
+                    )
                 }
             }
             .build()
@@ -186,6 +190,9 @@ class AndroidEventNotificationPublisher @Inject constructor(
             EventNotificationAction.ACCEPT_FILES,
             EventNotificationAction.DECLINE_FILES,
             EventNotificationAction.COPY_TEXT,
+            EventNotificationAction.DENY_PAIRING,
+            EventNotificationAction.ALLOW_PAIRING,
+            EventNotificationAction.ALLOW_AND_REMEMBER_PAIRING,
             -> PendingIntent.getBroadcast(
                 context,
                 requestCode,
@@ -239,7 +246,8 @@ class AndroidEventNotificationPublisher @Inject constructor(
         }
         private const val TEXT_GROUP = "devicebridge_text"
         private const val TEXT_SUMMARY_ID = 2_999
-        private const val ACTION_SLOTS = 8
+        // More than there are actions, so every button and the body get their own request code.
+        internal const val ACTION_SLOTS = 16
 
         /** The request-code slot of a tap on the notification body, after those of the actions. */
         private const val CONTENT_SLOT = ACTION_SLOTS - 1

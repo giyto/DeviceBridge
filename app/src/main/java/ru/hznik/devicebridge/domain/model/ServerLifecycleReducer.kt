@@ -29,6 +29,13 @@ object ServerLifecycleReducer {
             else -> current
         }
 
+        is ServerLifecycleEvent.EndpointChanged -> when (current) {
+            is ServerLifecycleState.Running ->
+                if (current.generation == event.generation) current.copy(endpoint = event.endpoint) else current
+
+            else -> current
+        }
+
         is ServerLifecycleEvent.StopRequested -> when (current) {
             is ServerLifecycleState.Starting ->
                 current.transitionToStopping(event.generation)

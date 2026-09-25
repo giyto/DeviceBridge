@@ -109,6 +109,7 @@ test("layout, reload, trusted reconnect and revoke preserve accessible session s
   await expect(page.getByRole("heading", { name: "Подключите браузер" })).toBeVisible();
   await expect(page.locator("#pairing-code")).toBeVisible();
   await expect(status).toHaveAttribute("data-state", "ready");
+  await expect(page.locator('[data-role="status-detail"]')).toContainText("Этот телефон не узнал браузер");
   expect(trustedExchangeCount).toBe(3);
   await expect.poll(() => page.evaluate(() =>
     localStorage.getItem("devicebridge.trusted-browser.v1"),

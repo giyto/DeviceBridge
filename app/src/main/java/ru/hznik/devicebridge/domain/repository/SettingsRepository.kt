@@ -22,4 +22,6 @@ interface SettingsRepository {
     suspend fun updateIdleStopTimeout(value: IdleStopTimeout): SettingsUpdateResult
 
     suspend fun updateSecureMode(enabled: Boolean): SettingsUpdateResult
+
+    suspend fun updateNetworkName(value: String): SettingsUpdateResult
 }

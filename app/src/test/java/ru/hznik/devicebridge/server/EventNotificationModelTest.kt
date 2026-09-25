@@ -13,23 +13,62 @@ import ru.hznik.devicebridge.domain.text.TextMessageId
 
 class EventNotificationModelTest {
 
-    private val factory = EventNotificationModelFactory()
+    private val factory = EventNotificationModelFactory(sdkInt = 37)
     private val session = BrowserSessionId("session-1")
 
     @Test
-    fun pairingRequestOnlyOpensTheAppAndHasNoSecrets() {
+    fun pairingRequestCanBeDecidedFromTheNotificationAndHasNoSecrets() {
         val model = factory.create(
             EventNotice.PairingRequest(PairingRequestId("request-1"), "Chrome, Windows", 45_000),
         )
 
         assertEquals("Запрос подключения", model.title)
-        assertTrue(model.text.startsWith("Chrome, Windows просит доступ"))
-        assertEquals(listOf(EventNotificationAction.OPEN), model.actions)
+        assertEquals("Chrome, Windows просит доступ к телефону.", model.text)
+        assertEquals(
+            listOf(EventNotificationAction.DENY_PAIRING, EventNotificationAction.ALLOW_PAIRING),
+            model.actions,
+        )
         assertEquals(EventNotificationTarget.HOME, model.target)
         assertEquals(45_000L, model.timeoutMs)
         assertEquals("Запрос подключения", model.publicTitle)
         assertFalse(model.text.contains("request-1"))
         assertFalse(model.text.contains("token", ignoreCase = true))
+    }
+
+    @Test
+    fun rememberRequestAddsAllowAndRememberAndAllowNeedsAnUnlock() {
+        val model = factory.create(
+            EventNotice.PairingRequest(PairingRequestId("request-1"), "Edge, Windows", 45_000, rememberRequested = true),
+        )
+
+        assertEquals(
+            listOf(
+                EventNotificationAction.DENY_PAIRING,
+                EventNotificationAction.ALLOW_PAIRING,
+                EventNotificationAction.ALLOW_AND_REMEMBER_PAIRING,
+            ),
+            model.actions,
+        )
+        assertEquals(listOf("Отклонить", "Разрешить", "Разрешить и запомнить"), model.actions.map { it.label })
+        assertFalse(EventNotificationAction.DENY_PAIRING.requiresUnlock)
+        assertTrue(EventNotificationAction.ALLOW_PAIRING.requiresUnlock)
+        assertTrue(EventNotificationAction.ALLOW_AND_REMEMBER_PAIRING.requiresUnlock)
+    }
+
+    @Test
+    fun androidElevenAndOlderCanOnlyDenyFromTheNotification() {
+        val model = EventNotificationModelFactory(sdkInt = 30).create(
+            EventNotice.PairingRequest(PairingRequestId("request-1"), "Chrome, Windows", 45_000, rememberRequested = true),
+        )
+
+        assertEquals(listOf(EventNotificationAction.DENY_PAIRING), model.actions)
+        assertEquals("Chrome, Windows просит доступ к телефону. Откройте DeviceBridge, чтобы разрешить.", model.text)
+        assertEquals(EventNotificationTarget.HOME, model.target)
+    }
+
+    @Test
+    fun everyActionFitsItsOwnRequestCodeSlot() {
+        assertTrue(EventNotificationAction.entries.size < AndroidEventNotificationPublisher.ACTION_SLOTS)
     }
 
     @Test

@@ -7,6 +7,13 @@ import {
   type SessionStatus,
 } from "./sessionApiClient";
 import { ManifestCompatibilityError, type WebManifest } from "./webManifestClient";
+import {
+  AvailabilityWaiter,
+  documentVisibilityPort,
+  windowOnlinePort,
+  type OnlinePort,
+  type VisibilityPort,
+} from "./availabilityWaiter";
 import type {
   FileErrorEvent,
   FileOfferEvent,
@@ -22,7 +29,13 @@ import type {
 
 export type SessionUiState =
   | Readonly<{ kind: "checking" }>
-  | Readonly<{ kind: "ready"; manifest: WebManifest; challenge: SessionChallenge }>
+  | Readonly<{
+      kind: "ready";
+      manifest: WebManifest;
+      challenge: SessionChallenge;
+      /** Why the form is shown again: the phone came back, or it did not recognise this browser. */
+      notice?: ReadyNotice;
+    }>
   | Readonly<{ kind: "submitting"; manifest: WebManifest }>
   | Readonly<{ kind: "awaiting"; manifest: WebManifest }>
   | Readonly<{ kind: "uncertain"; manifest: WebManifest; message: string; checking: boolean }>
@@ -44,7 +57,11 @@ export type SessionUiState =
   | Readonly<{ kind: "expired"; manifest: WebManifest; message: string }>
   | Readonly<{ kind: "denied"; manifest: WebManifest; message: string }>
   | Readonly<{ kind: "sessionLost"; manifest?: WebManifest; message: string }>
-  | Readonly<{ kind: "offline"; message: string; nextRetryInMs?: number }>;
+  | Readonly<{ kind: "offline"; message: string; nextRetryInMs?: number }>
+  /** The quick retries gave up; the page keeps checking and connects by itself. */
+  | Readonly<{ kind: "waiting" }>;
+
+export type ReadyNotice = "phoneReturned" | "trustRejected";
 
 export type SessionUiEffect = Readonly<{
   id: string;
@@ -121,6 +138,8 @@ export interface TextSessionLifecycle {
 export interface FileSessionLifecycle {
   activate(token: string, effectiveFileLimitBytes: number): void;
   deactivate(): void;
+  /** Ends the session but keeps the files chosen for sending for the next one. */
+  suspendSession(): void;
   setConnectionAvailable(available: boolean): void;
   receiveOffer(event: FileOfferEvent): void;
   receiveProgress(event: FileProgressEvent): void;
@@ -152,6 +171,7 @@ const noTextSession: TextSessionLifecycle = {
 const noFileSession: FileSessionLifecycle = {
   activate: () => undefined,
   deactivate: () => undefined,
+  suspendSession: () => undefined,
   setConnectionAvailable: () => undefined,
   receiveOffer: () => undefined,
   receiveProgress: () => undefined,
@@ -164,6 +184,21 @@ const noTrustedCredentialStore: TrustedCredentialStore = {
   clear: () => undefined,
 };
 
+export interface WaitingPorts {
+  readonly visibility: VisibilityPort;
+  readonly online: OnlinePort;
+}
+
+function defaultWaitingPorts(): WaitingPorts {
+  if (typeof document === "undefined" || typeof window === "undefined") {
+    return {
+      visibility: { isVisible: () => true, onChange: () => () => undefined },
+      online: { onOnline: () => () => undefined },
+    };
+  }
+  return { visibility: documentVisibilityPort(document), online: windowOnlinePort(window) };
+}
+
 export class SessionController {
   private generation = 0;
   private abortController?: AbortController;
@@ -172,8 +207,11 @@ export class SessionController {
   private challenge?: SessionChallenge;
   private activeToken?: string;
   private busy = false;
-  private challengeRememberRequested = false;
+  private challengeRememberRequested = true;
   private trustedExchangeAttempted = false;
+  /** The next pairing form follows a wait for the phone. */
+  private phoneReturned = false;
+  private readonly waiter: AvailabilityWaiter;
   private pairingRecovery?: Readonly<{
     manifest: WebManifest;
     challengeId: string;
@@ -191,13 +229,25 @@ export class SessionController {
     private readonly fileSession: FileSessionLifecycle = noFileSession,
     private readonly trustedCredentialStore: TrustedCredentialStore = noTrustedCredentialStore,
     private readonly scheduler: ControllerScheduler = browserScheduler,
-  ) {}
+    waitingPorts: WaitingPorts = defaultWaitingPorts(),
+  ) {
+    this.waiter = new AvailabilityWaiter(
+      (signal) => this.manifestLoader.load(signal).then(() => true),
+      scheduler,
+      waitingPorts.visibility,
+      waitingPorts.online,
+    );
+  }
 
   start(): void {
     this.beginNewCycle();
   }
 
   retry(): void {
+    if (this.currentState.kind === "waiting") {
+      this.waiter.checkNow();
+      return;
+    }
     if (this.currentState.kind === "uncertain" && this.pairingRecovery !== undefined) {
       if (this.busy) return;
       this.busy = true;
@@ -207,7 +257,7 @@ export class SessionController {
     this.beginNewCycle();
   }
 
-  submitCode(code: string, rememberBrowserRequested = false): void {
+  submitCode(code: string, rememberBrowserRequested = true): void {
     if (this.currentState.kind !== "ready" || this.busy) return;
     if (!/^\d{6}$/.test(code)) return;
     const generation = this.generation;
@@ -273,17 +323,32 @@ export class SessionController {
     });
   }
 
-  private beginNewCycle(): void {
+  private beginNewCycle(keepFileDraft = false): void {
     this.generation += 1;
     this.cancelPending();
     this.events.disconnect();
     this.textSession.suspendSession();
-    this.fileSession.deactivate();
+    if (keepFileDraft) this.fileSession.suspendSession();
+    else this.fileSession.deactivate();
     this.busy = false;
-    this.challengeRememberRequested = false;
+    this.challengeRememberRequested = true;
     this.trustedExchangeAttempted = false;
     this.pairingRecovery = undefined;
     void this.boot(this.generation, 0);
+  }
+
+  /**
+   * The quick retries are over: keep asking quietly and start over once the phone answers.
+   * Nothing the person did is repeated; the drafts stay for the next session.
+   */
+  private waitForPhone(): void {
+    this.textSession.setConnectionAvailable(false);
+    this.fileSession.setConnectionAvailable(false);
+    this.emit({ kind: "waiting" });
+    this.waiter.start(() => {
+      this.phoneReturned = true;
+      this.beginNewCycle(true);
+    });
   }
 
   private async boot(generation: number, retryIndex: number): Promise<void> {
@@ -316,6 +381,7 @@ export class SessionController {
         }
       }
       const trusted = this.trustedCredentialStore.read();
+      let trustRejected = false;
       if (trusted !== undefined && !this.trustedExchangeAttempted) {
         this.trustedExchangeAttempted = true;
         try {
@@ -333,12 +399,17 @@ export class SessionController {
         } catch (error: unknown) {
           if (isTrustedCredentialRejected(error)) {
             this.trustedCredentialStore.clear();
+            trustRejected = true;
           } else {
             throw error;
           }
         }
       }
-      await this.createChallenge(generation, manifest, false);
+      const notice: ReadyNotice | undefined = trustRejected
+        ? "trustRejected"
+        : this.phoneReturned ? "phoneReturned" : undefined;
+      this.phoneReturned = false;
+      await this.createChallenge(generation, manifest, true, notice);
     } catch (error: unknown) {
       if (!this.isCurrent(generation) || isAbortError(error)) return;
       if (error instanceof ManifestCompatibilityError) {
@@ -358,7 +429,8 @@ export class SessionController {
   private async createChallenge(
     generation: number,
     manifest: WebManifest,
-    rememberBrowserRequested = false,
+    rememberBrowserRequested = true,
+    notice?: ReadyNotice,
   ): Promise<void> {
     try {
       const challenge = await this.api.createChallenge(
@@ -369,7 +441,9 @@ export class SessionController {
       if (this.isCurrent(generation)) {
         this.challenge = challenge;
         this.challengeRememberRequested = rememberBrowserRequested;
-        this.emit({ kind: "ready", manifest, challenge });
+        this.emit(notice === undefined
+          ? { kind: "ready", manifest, challenge }
+          : { kind: "ready", manifest, challenge, notice });
       }
     } catch (error: unknown) {
       if (!this.isCurrent(generation) || isAbortError(error)) return;
@@ -570,12 +644,8 @@ export class SessionController {
         this.fileSession.setConnectionAvailable(false);
         if (reason === "reconnect_exhausted") {
           recovering = false;
-          this.emit({
-            kind: "needsUserAction",
-            manifest,
-            status,
-            message: "Автоматически восстановить связь не удалось. Проверьте сеть и повторите попытку.",
-          });
+          this.events.disconnect();
+          this.waitForPhone();
           return;
         }
         void this.revalidateSessionAfterEventLoss(generation, manifest, token);
@@ -673,7 +743,7 @@ export class SessionController {
 
   private emitError(manifest: WebManifest, error: unknown): void {
     if (!(error instanceof SessionApiError)) {
-      this.emit({ kind: "offline", message: OFFLINE_MESSAGE });
+      this.waitForPhone();
       return;
     }
     switch (error.code) {
@@ -718,8 +788,11 @@ export class SessionController {
 
   private scheduleOfflineRetry(generation: number, retryIndex: number): void {
     const nextRetryInMs = RETRY_DELAYS_MS[retryIndex];
+    if (nextRetryInMs === undefined) {
+      this.waitForPhone();
+      return;
+    }
     this.emit({ kind: "offline", message: OFFLINE_MESSAGE, nextRetryInMs });
-    if (nextRetryInMs === undefined) return;
     this.retryHandle = this.scheduler.setTimeout(() => {
       this.retryHandle = undefined;
       void this.boot(generation, retryIndex + 1);
@@ -739,6 +812,7 @@ export class SessionController {
   }
 
   private cancelPending(): void {
+    this.waiter.stop();
     this.abortController?.abort();
     this.abortController = undefined;
     if (this.retryHandle !== undefined) {

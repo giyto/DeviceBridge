@@ -44,6 +44,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import java.time.Instant
@@ -138,7 +139,6 @@ fun SettingsScreen(
                 SettingsCard(title = "Устройство") {
                     SettingsTextField(
                         title = "Имя телефона",
-                        supportingText = "Так телефон будет называться в браузере.",
                         value = uiState.deviceNameInput,
                         onValueChange = { onAction(SettingsAction.DeviceNameChanged(it)) },
                         fieldState = uiState.deviceNameState,
@@ -148,21 +148,41 @@ fun SettingsScreen(
                             uiState.deviceNameInput.trim() == uiState.settings.deviceName,
                         onSave = { onAction(SettingsAction.SaveDeviceName) },
                     )
+                    SettingsTextField(
+                        title = "Имя в сети",
+                        supportingText = "Адрес на компьютере: http://" +
+                            uiState.settings.networkName.value + ".local. Латинские буквы, цифры и дефис.",
+                        value = uiState.networkNameInput,
+                        onValueChange = { onAction(SettingsAction.NetworkNameChanged(it)) },
+                        fieldState = uiState.networkNameState,
+                        fieldDescription = "Поле имени в сети",
+                        saveDescription = "Сохранить имя в сети",
+                        isSaved = uiState.networkNameState.errorMessage == null &&
+                            uiState.networkNameInput.trim().lowercase() == uiState.settings.networkName.value,
+                        onSave = { onAction(SettingsAction.SaveNetworkName) },
+                        suffix = ".local",
+                        keyboardOptions = KeyboardOptions(
+                            capitalization = KeyboardCapitalization.None,
+                            autoCorrectEnabled = false,
+                            keyboardType = KeyboardType.Uri,
+                        ),
+                    )
+                    if (uiState.networkNameAppliesAfterRestart) {
+                        Text(
+                            text = "Новый адрес заработает после перезапуска сервера.",
+                            modifier = Modifier.testTag("network-name-restart-hint"),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
                 }
             }
 
             item {
-                val context = LocalContext.current
-                val debugBuild = context.applicationInfo.flags and
-                    android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE != 0
                 SettingsCard(title = "Сервер") {
                     IdleStopSelector(
                         selected = uiState.settings.idleStopTimeout,
-                        choices = if (debugBuild) {
-                            IdleStopTimeout.USER_CHOICES + IdleStopTimeout.DEBUG_1
-                        } else {
-                            IdleStopTimeout.USER_CHOICES
-                        },
+                        choices = IdleStopTimeout.USER_CHOICES,
                         fieldState = uiState.idleStopState,
                         onSelect = { onAction(SettingsAction.IdleStopSelected(it)) },
                     )
@@ -211,20 +231,6 @@ fun SettingsScreen(
                             text = "Папка для входящих файлов",
                             style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.SemiBold,
-                        )
-                        Text(
-                            text = when (uiState.destinationAvailability) {
-                                DestinationAvailability.NONE ->
-                                    "Папка не выбрана. Перед приёмом файла приложение спросит её снова."
-                                DestinationAvailability.CHECKING ->
-                                    "Проверяем доступ к сохранённой папке…"
-                                DestinationAvailability.AVAILABLE ->
-                                    "Папка доступна и будет предложена для следующих входящих файлов."
-                                DestinationAvailability.UNAVAILABLE ->
-                                    "Сохранённая папка недоступна. Выберите папку снова."
-                            },
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            style = MaterialTheme.typography.bodyMedium,
                         )
                         uiState.destinationState.errorMessage?.let { message ->
                             FieldError(message)
@@ -389,21 +395,12 @@ private fun DarkThemeRow(
         horizontalArrangement = Arrangement.spacedBy(16.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Column(
+        Text(
+            text = "Тёмная тема",
             modifier = Modifier.weight(1f),
-            verticalArrangement = Arrangement.spacedBy(4.dp),
-        ) {
-            Text(
-                text = "Тёмная тема",
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.SemiBold,
-            )
-            Text(
-                text = "Светлая тема удобнее при ярком свете.",
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                style = MaterialTheme.typography.bodySmall,
-            )
-        }
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.SemiBold,
+        )
         Switch(
             checked = darkTheme,
             onCheckedChange = null,
@@ -679,7 +676,7 @@ private fun AutoAcceptRow(
 @Composable
 private fun SettingsTextField(
     title: String,
-    supportingText: String,
+    supportingText: String? = null,
     value: String,
     onValueChange: (String) -> Unit,
     fieldState: SettingsFieldState,
@@ -688,6 +685,7 @@ private fun SettingsTextField(
     isSaved: Boolean,
     onSave: () -> Unit,
     keyboardOptions: KeyboardOptions = KeyboardOptions.Default,
+    suffix: String? = null,
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text(
@@ -704,16 +702,19 @@ private fun SettingsTextField(
             singleLine = true,
             isError = fieldState.errorMessage != null,
             keyboardOptions = keyboardOptions,
+            suffix = suffix?.let { text -> { Text(text) } },
         )
-        Text(
-            text = fieldState.errorMessage ?: supportingText,
-            color = if (fieldState.errorMessage != null) {
-                MaterialTheme.colorScheme.error
-            } else {
-                MaterialTheme.colorScheme.onSurfaceVariant
-            },
-            style = MaterialTheme.typography.bodySmall,
-        )
+        (fieldState.errorMessage ?: supportingText)?.let { text ->
+            Text(
+                text = text,
+                color = if (fieldState.errorMessage != null) {
+                    MaterialTheme.colorScheme.error
+                } else {
+                    MaterialTheme.colorScheme.onSurfaceVariant
+                },
+                style = MaterialTheme.typography.bodySmall,
+            )
+        }
         TonalActionButton(
             label = when {
                 fieldState.isSaving -> "Сохранение…"

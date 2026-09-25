@@ -286,6 +286,7 @@ class HomeViewModel @Inject constructor(
                 status = HomeServerStatus.Running,
                 localAddress = endpoint.url,
                 secureMode = endpoint.secure,
+                localNameNotice = endpoint.localNameNotice(),
                 uptimeSeconds = ((nowMs - startedAtElapsedRealtimeMs) / 1_000)
                     .coerceAtLeast(0),
             )

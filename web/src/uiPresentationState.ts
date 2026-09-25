@@ -24,6 +24,7 @@ export function sessionPresentationState(state: SessionUiState): UiPresentationS
     case "connected":
       return "ready";
     case "offline":
+    case "waiting":
       return "offline";
     case "needsUserAction":
     case "blocked":
