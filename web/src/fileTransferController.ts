@@ -89,6 +89,8 @@ export class FileTransferController {
   private token?: string;
   private state: FileTransferUiState = { kind: "inactive" };
   private draftFiles: DraftFile[] = [];
+  /** Files chosen before the phone went away, restored by the next [activate]. */
+  private keptDraft?: DraftFile[];
   private readonly draftKeys = new WeakMap<File, string>();
   private draftSequence = 0;
   private effectiveFileLimitBytes = HARD_MAX_FILE_BYTES;
@@ -121,18 +123,27 @@ export class FileTransferController {
     this.resetOperations();
     this.generation += 1;
     this.token = token;
-    this.draftFiles = [];
+    this.draftFiles = this.keptDraft ?? [];
+    this.keptDraft = undefined;
     this.sourceFiles.clear();
     this.emit({
       kind: "active",
       connectionAvailable: true,
-      selection: [],
+      selection: this.selectionPreview(),
       transfers: [],
       preparing: false,
     });
   }
 
+  /** Ends the session like [deactivate] but keeps the chosen files for the next session. */
+  suspendSession(): void {
+    const draft = this.draftFiles;
+    this.deactivate();
+    this.keptDraft = draft.length > 0 ? draft : undefined;
+  }
+
   deactivate(): void {
+    this.keptDraft = undefined;
     this.resetOperations();
     this.generation += 1;
     this.token = undefined;

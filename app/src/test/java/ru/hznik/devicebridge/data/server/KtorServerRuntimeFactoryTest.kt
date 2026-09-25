@@ -42,6 +42,18 @@ import ru.hznik.devicebridge.data.tls.ServerTlsMaterial
 import ru.hznik.devicebridge.data.tls.SoftwareTlsKeyStore
 import ru.hznik.devicebridge.data.tls.TlsMaterialException
 import ru.hznik.devicebridge.domain.model.ServerLifecycleError
+import ru.hznik.devicebridge.domain.model.LocalNameStatus
+import ru.hznik.devicebridge.domain.settings.DeviceSettings
+import ru.hznik.devicebridge.domain.settings.NetworkName
+import ru.hznik.devicebridge.data.network.mdns.LocalNameClaim
+import ru.hznik.devicebridge.data.network.mdns.LocalNamePublisher
+import ru.hznik.devicebridge.data.network.mdns.LocalNameSession
+import ru.hznik.devicebridge.data.tls.DEVICEBRIDGE_LOCAL_NAME
+import ru.hznik.devicebridge.data.tls.TlsKeyPurpose
+import ru.hznik.devicebridge.data.tls.X509Profiles
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.withTimeout
 
 class KtorServerRuntimeFactoryTest {
 
@@ -164,7 +176,8 @@ class KtorServerRuntimeFactoryTest {
     fun unusableCertificateFailsTheStartInsteadOfFallingBackToHttp() = runBlocking {
         val broken = object : SecureTransport {
             override fun isEnabled() = true
-            override fun serverMaterial(address: java.net.Inet4Address): ServerTlsMaterial =
+            override fun permitsName(localName: String) = true
+            override fun serverMaterial(address: java.net.Inet4Address, localName: String?): ServerTlsMaterial =
                 throw TlsMaterialException("key is gone")
         }
         val port = findFreePort()
@@ -180,9 +193,193 @@ class KtorServerRuntimeFactoryTest {
         ServerSocket(port).use { assertTrue(it.isBound) }
     }
 
+    @Test
+    fun claimedNameIsPublishedAndAcceptedAsHost() = runBlocking {
+        val names = FakeNamePublisher(LocalNameClaim.Claimed("devicebridge.local", requestedTaken = false))
+        val runtime = factory(localNamePublisher = names).create()
+
+        val endpoint = runtime.start()
+        try {
+            assertEquals(LAN_HOST to "wlan0", names.opened)
+            assertEquals("devicebridge.local", endpoint.localName)
+            assertEquals(LocalNameStatus.Claimed("devicebridge", requestedTaken = false), endpoint.nameStatus)
+            assertEquals("http://devicebridge.local:${endpoint.port}", endpoint.url)
+            val byName = "devicebridge.local:${endpoint.port}"
+            assertTrue(rawGet(endpoint.port, byName, "/").startsWith("HTTP/1.1 200"))
+            // One address only: the page by IP moves to the name, the API by IP is refused.
+            val byIp = rawGet(endpoint.port, endpoint.authority, "/app?x=1")
+            assertTrue(byIp, byIp.startsWith("HTTP/1.1 308"))
+            assertTrue(byIp, byIp.contains("Location: http://$byName/app?x=1"))
+            val apiByIp = rawGet(endpoint.port, endpoint.authority, "/api/v1/status", origin = "http://${endpoint.authority}")
+            assertTrue(apiByIp, apiByIp.startsWith("HTTP/1.1 403"))
+            val status = rawGet(endpoint.port, byName, "/api/v1/status", origin = "http://$byName")
+            assertTrue(status, status.startsWith("HTTP/1.1 401"))
+            assertTrue(rawGet(endpoint.port, "printer.local:${endpoint.port}", "/").startsWith("HTTP/1.1 403"))
+            assertTrue(rawGet(endpoint.port, "devicebridge.local", "/").startsWith("HTTP/1.1 403"))
+            withTimeout(2_000) { while (names.announced == 0) delay(10) }
+        } finally {
+            runtime.stop()
+        }
+        assertEquals(1, names.closed)
+    }
+
+    @Test
+    fun suffixedNameReportsThatTheRequestedOneWasTaken() = runBlocking {
+        val names = FakeNamePublisher(LocalNameClaim.Claimed("devicebridge-2.local", requestedTaken = true))
+        val runtime = factory(localNamePublisher = names).create()
+
+        val endpoint = runtime.start()
+        runtime.stop()
+
+        assertEquals("devicebridge-2.local", endpoint.localName)
+        assertEquals(LocalNameStatus.Claimed("devicebridge", requestedTaken = true), endpoint.nameStatus)
+    }
+
+    @Test
+    fun allNamesTakenFallsBackToTheAddress() = runBlocking {
+        val names = FakeNamePublisher(LocalNameClaim.AllTaken)
+        val runtime = factory(localNamePublisher = names).create()
+
+        val endpoint = runtime.start()
+        runtime.stop()
+
+        assertEquals(null, endpoint.localName)
+        assertEquals(LocalNameStatus.Unavailable(LocalNameStatus.Reason.TAKEN, "devicebridge"), endpoint.nameStatus)
+        assertEquals("http://$LAN_HOST:${endpoint.port}", endpoint.url)
+        assertEquals(1, names.closed)
+    }
+
+    @Test
+    fun missingMdnsKeepsTheServerWorkingByAddress() = runBlocking {
+        val runtime = factory(localNamePublisher = FakeNamePublisher(claim = null)).create()
+
+        val endpoint = runtime.start()
+        try {
+            assertEquals(LocalNameStatus.Unavailable(LocalNameStatus.Reason.NETWORK, "devicebridge"), endpoint.nameStatus)
+            assertTrue(rawGet(endpoint.port, endpoint.authority, "/").startsWith("HTTP/1.1 200"))
+        } finally {
+            runtime.stop()
+        }
+    }
+
+    @Test
+    fun nameLostWhileRunningIsNoLongerAccepted() = runBlocking {
+        val names = FakeNamePublisher(LocalNameClaim.Claimed("devicebridge.local", requestedTaken = false))
+        val runtime = factory(localNamePublisher = names).create()
+        val endpoint = runtime.start()
+        try {
+            names.loseName()
+
+            val changed = withTimeout(2_000) { runtime.endpointChanges.first { it.localName == null } }
+            assertEquals(
+                LocalNameStatus.Unavailable(LocalNameStatus.Reason.CONFLICT, "devicebridge"),
+                changed.nameStatus,
+            )
+            val byName = "devicebridge.local:${endpoint.port}"
+            assertTrue(rawGet(endpoint.port, byName, "/").startsWith("HTTP/1.1 403"))
+            assertTrue(rawGet(endpoint.port, endpoint.authority, "/").startsWith("HTTP/1.1 200"))
+        } finally {
+            runtime.stop()
+        }
+    }
+
+    @Test
+    fun secureModeServesTheNameAndRedirectsToHttpsByName() = runBlocking {
+        val directory = createTempDir()
+        val authority = LocalCertificateAuthority(SoftwareTlsKeyStore(), directory)
+        val names = FakeNamePublisher(LocalNameClaim.Claimed("devicebridge.local", requestedTaken = false))
+        val runtime = factory(
+            secureTransport = LocalCertificateSecureTransport({ true }, authority),
+            localNamePublisher = names,
+        ).create()
+
+        val endpoint = runtime.start()
+        try {
+            assertEquals("devicebridge.local", endpoint.localName)
+            val byName = "devicebridge.local:${endpoint.port}"
+            val app = tlsGet(endpoint.port, byName, "/", authority.rootOrNull()!!)
+            assertTrue(app, app.startsWith("HTTP/1.1 200"))
+            val redirect = rawGet(endpoint.port, byName, "/app")
+            assertTrue(redirect, redirect.contains("Location: https://$byName/app"))
+            val byIp = rawGet(endpoint.port, endpoint.authority, "/")
+            assertTrue(byIp, byIp.contains("Location: http://$byName/"))
+            val tlsByIp = tlsGet(endpoint.port, endpoint.authority, "/", authority.rootOrNull()!!)
+            assertTrue(tlsByIp, tlsByIp.contains("Location: https://$byName/"))
+            val certificate = authority.serverMaterial(
+                java.net.InetAddress.getByName(LAN_HOST) as java.net.Inet4Address,
+                "devicebridge.local",
+            ).certificate
+            assertTrue(certificate.subjectAlternativeNames.any { it.toList() == listOf<Any>(2, "devicebridge.local") })
+        } finally {
+            runtime.stop()
+        }
+    }
+
+    @Test
+    fun secureModeSkipsANameTheRootDoesNotCover() = runBlocking {
+        val directory = createTempDir()
+        val keys = SoftwareTlsKeyStore()
+        val publicKey = keys.generate(LocalCertificateAuthority.ROOT_ALIAS, TlsKeyPurpose.CERTIFICATE_AUTHORITY)
+        val now = java.time.Instant.now()
+        val legacy = X509Profiles.root(
+            publicKey = publicKey,
+            serial = byteArrayOf(0x41, 0x02),
+            commonName = "DeviceBridge Local CA old",
+            notBefore = now.minusSeconds(60),
+            notAfter = now.plus(java.time.Duration.ofDays(3_650)),
+            sign = { keys.signSha256WithEcdsa(LocalCertificateAuthority.ROOT_ALIAS, it) },
+            permittedDnsName = DEVICEBRIDGE_LOCAL_NAME,
+        )
+        java.io.File(directory, "root.der").writeBytes(legacy.encoded)
+        val authority = LocalCertificateAuthority(keys, directory)
+        val names = FakeNamePublisher(LocalNameClaim.Claimed("nikita.local", requestedTaken = false))
+        val runtime = factory(
+            secureTransport = LocalCertificateSecureTransport({ true }, authority),
+            localNamePublisher = names,
+            settings = DeviceSettings.defaults().copy(networkName = NetworkName("nikita")),
+        ).create()
+
+        val endpoint = runtime.start()
+        runtime.stop()
+
+        assertEquals(null, endpoint.localName)
+        assertEquals(LocalNameStatus.Unavailable(LocalNameStatus.Reason.CERTIFICATE, "nikita"), endpoint.nameStatus)
+        assertEquals(null, names.opened)
+    }
+
+    private class FakeNamePublisher(private val claim: LocalNameClaim?) : LocalNamePublisher {
+        var opened: Pair<String, String>? = null
+        var closed = 0
+        @Volatile var announced = 0
+        private var onLost: () -> Unit = {}
+
+        fun loseName() = onLost()
+
+        override fun open(host: String, interfaceName: String, onNameLost: () -> Unit): LocalNameSession? {
+            opened = host to interfaceName
+            val result = claim ?: return null
+            onLost = onNameLost
+            return object : LocalNameSession {
+                override val currentName: String? = (result as? LocalNameClaim.Claimed)?.name
+
+                override suspend fun claim(requestedLabel: String): LocalNameClaim = result
+
+                override suspend fun announce() {
+                    announced++
+                }
+
+                override fun close() {
+                    closed++
+                }
+            }
+        }
+    }
+
     private fun factory(
         preferredPort: Int = findFreePort(),
         secureTransport: SecureTransport = SecureTransport.Disabled,
+        localNamePublisher: LocalNamePublisher = LocalNamePublisher.Disabled,
+        settings: DeviceSettings = DeviceSettings.defaults(),
     ): KtorServerRuntimeFactory {
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
         val browserSessions = BrowserSessionCoordinator(
@@ -241,6 +438,8 @@ class KtorServerRuntimeFactoryTest {
             monotonicClock = MonotonicClock { 1_000 },
             preferredPort = preferredPort,
             secureTransport = secureTransport,
+            localNamePublisher = localNamePublisher,
+            effectiveFileLimitProvider = EffectiveFileLimitProvider.fixed(settings),
         )
     }
 

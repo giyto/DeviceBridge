@@ -1,5 +1,6 @@
 package ru.hznik.devicebridge.server
 
+import android.os.Build
 import javax.inject.Inject
 import ru.hznik.devicebridge.domain.file.FileTransferDirection
 import ru.hznik.devicebridge.domain.file.FileTransferId
@@ -27,6 +28,8 @@ sealed interface EventNotice {
         val requestId: PairingRequestId,
         val browserLabel: String,
         val remainingMs: Long,
+        /** The browser asked to be remembered, so "Разрешить и запомнить" is offered too. */
+        val rememberRequested: Boolean = false,
     ) : EventNotice {
         override val key get() = EventNotificationKey.Pairing(requestId)
     }
@@ -62,13 +65,20 @@ sealed interface EventNotice {
     }
 }
 
-enum class EventNotificationAction(val label: String) {
+enum class EventNotificationAction(
+    val label: String,
+    /** Android asks to unlock the phone before the button acts (Android 12+). */
+    val requiresUnlock: Boolean = false,
+) {
     OPEN("Открыть"),
     ACCEPT_FILES("Принять"),
     DECLINE_FILES("Отклонить"),
     COPY_TEXT("Копировать"),
     OPEN_LINK("Открыть"),
     SHOW_FILES("Показать"),
+    DENY_PAIRING("Отклонить"),
+    ALLOW_PAIRING("Разрешить", requiresUnlock = true),
+    ALLOW_AND_REMEMBER_PAIRING("Разрешить и запомнить", requiresUnlock = true),
 }
 
 /** The screen a tap on the notification opens. */
@@ -90,18 +100,35 @@ data class EventNotificationModel(
     val link: String? = null,
 )
 
-class EventNotificationModelFactory @Inject constructor() {
+/**
+ * [sdkInt] decides the pairing buttons: only Android 12+ can demand an unlock before a button
+ * acts, so older phones allow a connection only in the app.
+ */
+class EventNotificationModelFactory internal constructor(private val sdkInt: Int) {
+
+    @Inject
+    constructor() : this(Build.VERSION.SDK_INT)
+
 
     fun create(notice: EventNotice): EventNotificationModel = when (notice) {
-        is EventNotice.PairingRequest -> EventNotificationModel(
-            title = "Запрос подключения",
-            text = "${notice.browserLabel.safeLabel()} просит доступ к телефону. " +
-                "Откройте DeviceBridge, чтобы разрешить или отклонить.",
-            publicTitle = "Запрос подключения",
-            actions = listOf(EventNotificationAction.OPEN),
-            target = EventNotificationTarget.HOME,
-            timeoutMs = notice.remainingMs.coerceAtLeast(1),
-        )
+        is EventNotice.PairingRequest -> {
+            val canAllow = sdkInt >= Build.VERSION_CODES.S
+            EventNotificationModel(
+                title = "Запрос подключения",
+                text = "${notice.browserLabel.safeLabel()} просит доступ к телефону." +
+                    if (canAllow) "" else " Откройте DeviceBridge, чтобы разрешить.",
+                publicTitle = "Запрос подключения",
+                actions = buildList {
+                    add(EventNotificationAction.DENY_PAIRING)
+                    if (canAllow) {
+                        add(EventNotificationAction.ALLOW_PAIRING)
+                        if (notice.rememberRequested) add(EventNotificationAction.ALLOW_AND_REMEMBER_PAIRING)
+                    }
+                },
+                target = EventNotificationTarget.HOME,
+                timeoutMs = notice.remainingMs.coerceAtLeast(1),
+            )
+        }
 
         is EventNotice.IncomingFiles -> {
             val count = notice.transferIds.size

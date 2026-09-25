@@ -13,6 +13,12 @@ class ObserveSettingsUseCase(
     operator fun invoke() = repository.settings
 }
 
+class UpdateNetworkNameUseCase(
+    private val repository: SettingsRepository,
+) {
+    suspend operator fun invoke(value: String) = repository.updateNetworkName(value)
+}
+
 class UpdateDeviceNameUseCase(
     private val repository: SettingsRepository,
 ) {

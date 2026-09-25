@@ -96,6 +96,7 @@ class EventNotificationPlanner {
                     requestId = request.id,
                     browserLabel = request.browserLabel,
                     remainingMs = request.expiresAtElapsedRealtimeMs - snapshot.nowElapsedMs,
+                    rememberRequested = request.rememberBrowserRequested,
                 ),
                 alert = true,
             )

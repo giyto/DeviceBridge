@@ -13,6 +13,12 @@ sealed interface ServerLifecycleEvent {
         val startedAtElapsedRealtimeMs: Long,
     ) : ServerLifecycleEvent
 
+    /** The running server's endpoint changed, e.g. it lost its local name. */
+    data class EndpointChanged(
+        override val generation: Long,
+        val endpoint: ServerEndpoint,
+    ) : ServerLifecycleEvent
+
     data class StopRequested(
         override val generation: Long,
     ) : ServerLifecycleEvent

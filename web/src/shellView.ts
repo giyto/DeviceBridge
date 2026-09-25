@@ -79,7 +79,7 @@ export function createShellView(
       case "clearPairingForm":
         codeInput.value = "";
         codeInput.setCustomValidity("");
-        rememberBrowser.checked = false;
+        rememberBrowser.checked = true;
         break;
     }
   };
@@ -119,8 +119,13 @@ export function createShellView(
         sessionDetail.textContent = "Проверяем локальный сервер на телефоне.";
         break;
       case "ready":
-        title.textContent = "DeviceBridge доступен";
-        detail.textContent = "Локальный сервер отвечает. Можно подключить этот браузер.";
+        title.textContent = state.notice === "phoneReturned"
+          ? "Телефон снова доступен"
+          : "DeviceBridge доступен";
+        detail.textContent = state.notice === "trustRejected"
+          ? "Этот телефон не узнал браузер. Возможно, браузер удалили из доверенных на телефоне, " +
+            "срок доверия истёк или по этому адресу сейчас отвечает другой телефон."
+          : "Локальный сервер отвечает. Можно подключить этот браузер.";
         sessionTitle.textContent = "Подключите браузер";
         sessionDetail.textContent =
           `Введите код с телефона. Осталось попыток: ${state.challenge.attemptsRemaining}.`;
@@ -215,6 +220,16 @@ export function createShellView(
         detail.textContent = state.message;
         sessionTitle.textContent = "Подключитесь снова";
         sessionDetail.textContent = "Создайте новый запрос и подтвердите его на телефоне.";
+        retryButton.hidden = false;
+        break;
+      case "waiting":
+        title.textContent = "Телефон недоступен";
+        detail.textContent =
+          "Страница подключится сама, когда сервер DeviceBridge на телефоне снова запустится.";
+        sessionTitle.textContent = "Ждём телефон";
+        sessionDetail.textContent =
+          "Черновики сохранены. Телефон и компьютер должны быть в одной локальной сети.";
+        retryButton.textContent = "Проверить сейчас";
         retryButton.hidden = false;
         break;
       case "offline":

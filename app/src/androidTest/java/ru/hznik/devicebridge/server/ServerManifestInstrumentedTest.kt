@@ -29,6 +29,7 @@ class ServerManifestInstrumentedTest {
         assertTrue(permissions.contains("android.permission.ACCESS_LOCAL_NETWORK"))
         assertTrue(permissions.contains("android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE"))
         assertTrue(permissions.contains("android.permission.CHANGE_NETWORK_STATE"))
+        assertTrue(permissions.contains("android.permission.CHANGE_WIFI_MULTICAST_STATE"))
 
         val service = packageInfo.services
             .orEmpty()

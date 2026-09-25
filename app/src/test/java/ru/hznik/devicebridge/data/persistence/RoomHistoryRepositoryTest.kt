@@ -198,5 +198,8 @@ class RoomHistoryRepositoryTest {
 
         override suspend fun updateSecureMode(enabled: Boolean): SettingsUpdateResult =
             SettingsUpdateResult.Updated(current.value)
+
+        override suspend fun updateNetworkName(value: String): SettingsUpdateResult =
+            SettingsUpdateResult.Updated(current.value)
     }
 }

@@ -47,14 +47,31 @@ class LocalCertificateAuthority(
     @Synchronized
     fun ensureRoot(): X509Certificate = rootOrNull() ?: createRoot()
 
+    /**
+     * Whether the root lets the server use [localName]. A root made before custom network names
+     * only permits `devicebridge.local`; a missing root will be created permitting any `.local`.
+     */
     @Synchronized
-    fun serverMaterial(address: Inet4Address): ServerTlsMaterial {
+    fun permits(localName: String): Boolean {
+        val root = rootOrNull() ?: return true
+        return X509Profiles.permitsDnsName(X509Profiles.permittedDnsNames(root), localName)
+    }
+
+    /**
+     * The server certificate for [address] and, when the root permits it, [localName]; the one
+     * on disk is reused while it covers both and is not about to expire.
+     */
+    @Synchronized
+    fun serverMaterial(address: Inet4Address, localName: String? = null): ServerTlsMaterial {
         val root = ensureRoot()
+        val name = localName?.lowercase()?.takeIf {
+            X509Profiles.permitsDnsName(X509Profiles.permittedDnsNames(root), it)
+        }
         val current = loadServerOrNull(root)
-        val certificate = if (current != null && covers(current, address) && !expiresSoon(current)) {
+        val certificate = if (current != null && covers(current, address, name) && !expiresSoon(current)) {
             current
         } else {
-            issueServer(root, address)
+            issueServer(root, address, name)
         }
         val privateKey = keyStore.privateKey(serverAlias)
             ?: throw TlsMaterialException("Server key is missing")
@@ -89,7 +106,7 @@ class LocalCertificateAuthority(
         root
     }
 
-    private fun issueServer(root: X509Certificate, address: Inet4Address): X509Certificate =
+    private fun issueServer(root: X509Certificate, address: Inet4Address, name: String?): X509Certificate =
         wrapFailures("issue the server certificate") {
             val publicKey = keyStore.generate(serverAlias, TlsKeyPurpose.SERVER)
             val issuedAt = now()
@@ -101,6 +118,7 @@ class LocalCertificateAuthority(
                 notBefore = issuedAt.minus(CLOCK_SKEW_ALLOWANCE),
                 notAfter = issuedAt.plus(SERVER_VALIDITY),
                 sign = { keyStore.signSha256WithEcdsa(rootAlias, it) },
+                dnsNames = listOfNotNull(name),
             )
             writeAtomically(serverFile, certificate.encoded)
             certificate
@@ -129,10 +147,13 @@ class LocalCertificateAuthority(
         }.getOrNull()
     }
 
-    private fun covers(certificate: X509Certificate, address: Inet4Address): Boolean =
-        certificate.subjectAlternativeNames.orEmpty().any { name ->
-            name[0] == GENERAL_NAME_IP && name[1] == address.hostAddress
-        }
+    private fun covers(certificate: X509Certificate, address: Inet4Address, name: String?): Boolean {
+        val alternativeNames = certificate.subjectAlternativeNames.orEmpty()
+        val coversAddress = alternativeNames.any { it[0] == GENERAL_NAME_IP && it[1] == address.hostAddress }
+        val coversName = name == null ||
+            alternativeNames.any { it[0] == GENERAL_NAME_DNS && (it[1] as? String)?.lowercase() == name }
+        return coversAddress && coversName
+    }
 
     private fun expiresSoon(certificate: X509Certificate): Boolean =
         certificate.notAfter.toInstant() < now().plus(REISSUE_BEFORE_EXPIRY)
@@ -171,6 +192,7 @@ class LocalCertificateAuthority(
         private const val ROOT_FILE = "root.der"
         private const val SERVER_FILE = "server.der"
         private const val SERIAL_BYTES = 16
+        private const val GENERAL_NAME_DNS = 2
         private const val GENERAL_NAME_IP = 7
 
         val ROOT_VALIDITY: Duration = Duration.ofDays(3_650)

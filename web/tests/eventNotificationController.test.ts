@@ -205,6 +205,17 @@ describe("EventNotificationController", () => {
     expect(fixture.shown.map((it) => it.title)).toEqual(["Связь с телефоном потеряна"]);
   });
 
+  it("waiting for the phone counts as a lost connection", () => {
+    const fixture = setup({ enabled: true });
+    fixture.hide();
+
+    fixture.controller.sessionChanged("connected");
+    fixture.controller.sessionChanged("reconnecting");
+    fixture.controller.sessionChanged("waiting");
+
+    expect(fixture.shown.map((it) => it.title)).toEqual(["Связь с телефоном потеряна"]);
+  });
+
   it("a click returns to the tab and shows the event", () => {
     const fixture = setup({ enabled: true });
     fixture.controller.textSnapshot([]);

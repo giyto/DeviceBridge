@@ -17,6 +17,7 @@ import ru.hznik.devicebridge.domain.repository.SettingsRepository
 import ru.hznik.devicebridge.domain.settings.DestinationTree
 import ru.hznik.devicebridge.domain.settings.DeviceSettings
 import ru.hznik.devicebridge.domain.settings.IdleStopTimeout
+import ru.hznik.devicebridge.domain.settings.NetworkName
 import ru.hznik.devicebridge.domain.settings.SettingsDefaults
 import ru.hznik.devicebridge.domain.settings.SettingsUpdateResult
 import ru.hznik.devicebridge.domain.settings.SettingsValidationError
@@ -29,6 +30,7 @@ internal object SettingsPreferenceKeys {
     val autoAcceptTrustedFiles = booleanPreferencesKey("auto_accept_trusted_files")
     val idleStopTimeout = stringPreferencesKey("idle_stop_timeout")
     val secureModeEnabled = booleanPreferencesKey("secure_mode_enabled")
+    val networkName = stringPreferencesKey("network_name")
 }
 
 class DataStoreSettingsRepository(
@@ -123,6 +125,14 @@ class DataStoreSettingsRepository(
             preferences[SettingsPreferenceKeys.secureModeEnabled] = enabled
         }
 
+    override suspend fun updateNetworkName(value: String): SettingsUpdateResult {
+        val name = NetworkName.parse(value)
+            ?: return SettingsUpdateResult.Invalid(SettingsValidationError.NETWORK_NAME)
+        return update { preferences ->
+            preferences[SettingsPreferenceKeys.networkName] = name.value
+        }
+    }
+
     private suspend fun update(
         transform: suspend (androidx.datastore.preferences.core.MutablePreferences) -> Unit,
     ): SettingsUpdateResult {
@@ -167,6 +177,9 @@ class DataStoreSettingsRepository(
                 allowDebug = allowDebugIdleTimeout,
             ),
             secureModeEnabled = preferences[SettingsPreferenceKeys.secureModeEnabled] ?: false,
+            networkName = preferences[SettingsPreferenceKeys.networkName]
+                ?.let(NetworkName::parse)
+                ?: NetworkName.DEFAULT,
         )
     }
 }

@@ -207,8 +207,8 @@ class SettingsScreenTest {
         composeRule.onNodeWithText("Автоостановка без подключений").performScrollTo().assertIsDisplayed()
         composeRule.onNodeWithTag("idle-stop-30").performScrollTo().assertIsSelected()
         composeRule.onNodeWithTag("idle-stop-off").performScrollTo().assertIsNotSelected()
-        // Instrumentation runs a debuggable build, so the one-minute E2E option is offered too.
-        composeRule.onNodeWithTag("idle-stop-debug_1").performScrollTo().assertIsDisplayed()
+        // The one-minute option is not offered, not even in a debuggable build.
+        composeRule.onNodeWithTag("idle-stop-debug_1").assertDoesNotExist()
 
         composeRule.onNodeWithTag("idle-stop-off").performClick()
         assertEquals(
@@ -553,6 +553,70 @@ class SettingsScreenTest {
         composeRule.onNodeWithText(
             "Все параметры хранятся только на этом телефоне.",
         ).assertDoesNotExist()
+    }
+
+    @Test
+    fun networkNameFieldShowsTheAddressSavesAndExplainsWhenItApplies() {
+        val actions = mutableListOf<SettingsAction>()
+        var state by mutableStateOf(SettingsUiState(loadState = SettingsLoadState.CONTENT))
+        composeRule.setContent {
+            MaterialTheme {
+                SettingsScreen(uiState = state, onAction = { actions += it })
+            }
+        }
+
+        scrollToText("Адрес на компьютере: http://devicebridge.local", substring = true).assertIsDisplayed()
+        scrollToText(".local").assertIsDisplayed()
+        composeRule.onNodeWithContentDescription("Поле имени в сети").performTextReplacement("Nikita")
+        assertEquals(listOf<SettingsAction>(SettingsAction.NetworkNameChanged("Nikita")), actions)
+        actions.clear()
+        composeRule.onNodeWithContentDescription("Сохранить имя в сети").performScrollTo().performClick()
+        assertEquals(listOf<SettingsAction>(SettingsAction.SaveNetworkName), actions)
+
+        state = state.copy(
+            networkNameInput = "никита",
+            networkNameState = SettingsFieldState(errorMessage = "Используйте латинские буквы, цифры и дефис."),
+        )
+        scrollToText("Используйте латинские буквы, цифры и дефис.").assertIsDisplayed()
+        composeRule.onNodeWithTag("network-name-restart-hint").assertDoesNotExist()
+
+        state = state.copy(
+            settings = state.settings.copy(
+                networkName = ru.hznik.devicebridge.domain.settings.NetworkName("nikita"),
+            ),
+            networkNameInput = "nikita",
+            networkNameState = SettingsFieldState(),
+            networkNameAppliesAfterRestart = true,
+        )
+        scrollToTag("network-name-restart-hint").assertTextEquals("Новый адрес заработает после перезапуска сервера.")
+        scrollToText("Адрес на компьютере: http://nikita.local", substring = true).assertIsDisplayed()
+    }
+
+    @Test
+    fun rootThatDoesNotCoverTheNameAsksForAReset() {
+        val ready = ru.hznik.devicebridge.data.tls.RootCertificateStatus.Ready(
+            ru.hznik.devicebridge.data.tls.CertificateFingerprints("AAAA0000 BBBB1111", "AA BB"),
+        )
+        var state by mutableStateOf(
+            SettingsUiState(
+                loadState = SettingsLoadState.CONTENT,
+                settings = SettingsUiState().settings.copy(
+                    secureModeEnabled = true,
+                    networkName = ru.hznik.devicebridge.domain.settings.NetworkName("nikita"),
+                ),
+                rootCertificate = ready,
+                certificateCoversNetworkName = false,
+            ),
+        )
+        composeRule.setContent {
+            MaterialTheme {
+                SettingsScreen(uiState = state, onAction = {})
+            }
+        }
+
+        scrollToTag("certificate-name-hint").assertTextContains("nikita.local", substring = true)
+        state = state.copy(certificateCoversNetworkName = true)
+        composeRule.onNodeWithTag("certificate-name-hint").assertDoesNotExist()
     }
 
     // Settings is a lazy list: cards below the fold are not composed until scrolled to.

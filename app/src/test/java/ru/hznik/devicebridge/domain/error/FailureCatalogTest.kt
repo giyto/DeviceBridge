@@ -289,6 +289,11 @@ class FailureCatalogTest {
                 FailureSeverity.TERMINAL,
                 RecoveryAction.EDIT_SETTING,
             ),
+            SettingsValidationError.NETWORK_NAME to expected(
+                FailureCode.INVALID_DEVICE_NAME,
+                FailureSeverity.TERMINAL,
+                RecoveryAction.EDIT_SETTING,
+            ),
             SettingsValidationError.RETENTION_DAYS to expected(
                 FailureCode.INVALID_RETENTION_DAYS,
                 FailureSeverity.TERMINAL,

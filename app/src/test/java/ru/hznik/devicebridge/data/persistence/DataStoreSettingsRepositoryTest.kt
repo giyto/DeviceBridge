@@ -15,6 +15,7 @@ import ru.hznik.devicebridge.data.persistence.datastore.DataStoreSettingsReposit
 import ru.hznik.devicebridge.domain.settings.DestinationTree
 import ru.hznik.devicebridge.domain.settings.DeviceSettings
 import ru.hznik.devicebridge.domain.settings.IdleStopTimeout
+import ru.hznik.devicebridge.domain.settings.NetworkName
 import ru.hznik.devicebridge.domain.settings.SettingsUpdateResult
 import ru.hznik.devicebridge.domain.settings.SettingsValidationError
 import ru.hznik.devicebridge.domain.file.HARD_MAX_FILE_BYTES
@@ -182,6 +183,31 @@ class DataStoreSettingsRepositoryTest {
         assertEquals(true, DataStoreSettingsRepository(dataStore).settings.first().secureModeEnabled)
         repository.updateSecureMode(false)
         assertEquals(false, DataStoreSettingsRepository(dataStore).settings.first().secureModeEnabled)
+    }
+
+    @Test
+    fun networkNameDefaultsToDeviceBridgeAndPersistsInLowerCase() = runTest {
+        val dataStore = InMemoryPreferencesDataStore()
+        val repository = DataStoreSettingsRepository(dataStore)
+
+        assertEquals(NetworkName.DEFAULT, repository.settings.first().networkName)
+        assertTrue(repository.updateNetworkName(" Nikita ") is SettingsUpdateResult.Updated)
+        assertEquals(NetworkName("nikita"), DataStoreSettingsRepository(dataStore).settings.first().networkName)
+        assertEquals(
+            SettingsUpdateResult.Invalid(SettingsValidationError.NETWORK_NAME),
+            repository.updateNetworkName("никита"),
+        )
+        assertEquals(NetworkName("nikita"), repository.settings.first().networkName)
+    }
+
+    @Test
+    fun storedInvalidNetworkNameFallsBackToTheDefault() = runTest {
+        val dataStore = InMemoryPreferencesDataStore()
+        dataStore.updateData { preferences ->
+            preferences.toMutablePreferences().apply { set(stringPreferencesKey("network_name"), "-bad name-") }
+        }
+
+        assertEquals(NetworkName.DEFAULT, DataStoreSettingsRepository(dataStore).settings.first().networkName)
     }
 
     @Test

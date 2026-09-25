@@ -54,6 +54,29 @@ describe("FileTransferController", () => {
       selection: [{ displayName: "draft.txt" }],
     });
   });
+  it("keeps the chosen files for the session after the phone comes back", () => {
+    const states: unknown[] = [];
+    const controller = createController(
+      fakeApi(),
+      { upload: vi.fn().mockResolvedValue(snapshot("COMPLETED")) },
+      states,
+    );
+    controller.activate("old-token");
+    controller.selectFiles([new File(["draft"], "draft.txt", { type: "text/plain" })]);
+
+    controller.suspendSession();
+    controller.activate("new-token");
+
+    expect(lastActive(states)).toMatchObject({
+      connectionAvailable: true,
+      selection: [{ displayName: "draft.txt" }],
+    });
+
+    controller.deactivate();
+    controller.activate("third-token");
+    expect(lastActive(states).selection).toEqual([]);
+  });
+
   it("appends picker and drop files, deduplicates the same source, and keeps same-name files distinct", () => {
     const states: unknown[] = [];
     const controller = createController(

@@ -154,6 +154,7 @@ const notifyingFileSession: FileSessionLifecycle = {
   activate: (token, effectiveFileLimitBytes) =>
     fileController.activate(token, effectiveFileLimitBytes),
   deactivate: () => fileController.deactivate(),
+  suspendSession: () => fileController.suspendSession(),
   setConnectionAvailable: (available) => fileController.setConnectionAvailable(available),
   receiveOffer: (event) => {
     fileController.receiveOffer(event);

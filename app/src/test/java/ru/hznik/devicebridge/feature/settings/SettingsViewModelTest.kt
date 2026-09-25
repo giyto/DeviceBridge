@@ -109,6 +109,80 @@ class SettingsViewModelTest {
     }
 
     @Test
+    fun networkNameIsSavedInLowerCaseAndWaitsForARunningServerToRestart() = runTest(dispatcher) {
+        val lifecycle = FakeLifecycle().apply { state.value = FakeLifecycle.RUNNING }
+        val viewModel = viewModel(FakeSettingsRepository(), lifecycle = lifecycle)
+        runCurrent()
+        assertEquals("devicebridge", viewModel.uiState.value.networkNameInput)
+
+        viewModel.onAction(SettingsAction.NetworkNameChanged("Nikita"))
+        assertTrue(viewModel.uiState.value.networkNameState.isDirty)
+        viewModel.onAction(SettingsAction.SaveNetworkName)
+        runCurrent()
+
+        val state = viewModel.uiState.value
+        assertEquals("nikita", state.settings.networkName.value)
+        assertEquals("nikita", state.networkNameInput)
+        assertFalse(state.networkNameState.isDirty)
+        assertTrue(state.networkNameAppliesAfterRestart)
+        assertTrue(lifecycle.commands.isEmpty())
+    }
+
+    @Test
+    fun networkNameSavedWhileStoppedNeedsNoRestartHint() = runTest(dispatcher) {
+        val viewModel = viewModel(FakeSettingsRepository())
+        runCurrent()
+
+        viewModel.onAction(SettingsAction.NetworkNameChanged("nikita"))
+        viewModel.onAction(SettingsAction.SaveNetworkName)
+        runCurrent()
+
+        assertFalse(viewModel.uiState.value.networkNameAppliesAfterRestart)
+    }
+
+    @Test
+    fun invalidNetworkNameExplainsTheRulesAndKeepsTheOldName() = runTest(dispatcher) {
+        val viewModel = viewModel(FakeSettingsRepository())
+        runCurrent()
+
+        viewModel.onAction(SettingsAction.NetworkNameChanged("мой телефон"))
+        viewModel.onAction(SettingsAction.SaveNetworkName)
+        runCurrent()
+
+        val state = viewModel.uiState.value
+        assertEquals("devicebridge", state.settings.networkName.value)
+        assertTrue(state.networkNameState.errorMessage!!.contains("латинские буквы"))
+        assertEquals("мой телефон", state.networkNameInput)
+    }
+
+    @Test
+    fun rootFromBeforeCustomNamesIsFlaggedForTheChosenName() = runTest(dispatcher) {
+        val keys = SoftwareTlsKeyStore()
+        val directory = java.nio.file.Files.createTempDirectory("settings-legacy-tls").toFile()
+        val publicKey = keys.generate(LocalCertificateAuthority.ROOT_ALIAS, ru.hznik.devicebridge.data.tls.TlsKeyPurpose.CERTIFICATE_AUTHORITY)
+        val now = java.time.Instant.now()
+        val legacy = ru.hznik.devicebridge.data.tls.X509Profiles.root(
+            publicKey = publicKey,
+            serial = byteArrayOf(0x41, 0x03),
+            commonName = "DeviceBridge Local CA old",
+            notBefore = now,
+            notAfter = now.plusSeconds(3_600),
+            sign = { keys.signSha256WithEcdsa(LocalCertificateAuthority.ROOT_ALIAS, it) },
+            permittedDnsName = ru.hznik.devicebridge.data.tls.DEVICEBRIDGE_LOCAL_NAME,
+        )
+        java.io.File(directory, "root.der").writeBytes(legacy.encoded)
+        val viewModel = viewModel(FakeSettingsRepository(), authority = LocalCertificateAuthority(keys, directory))
+        runCurrent()
+        assertTrue(viewModel.uiState.value.certificateCoversNetworkName)
+
+        viewModel.onAction(SettingsAction.NetworkNameChanged("nikita"))
+        viewModel.onAction(SettingsAction.SaveNetworkName)
+        runCurrent()
+
+        assertFalse(viewModel.uiState.value.certificateCoversNetworkName)
+    }
+
+    @Test
     fun repositoryStateSurvivesViewModelRecreation() = runTest(dispatcher) {
         val repository = FakeSettingsRepository()
         val first = viewModel(repository)
@@ -499,6 +573,10 @@ class SettingsViewModelTest {
         lifecycle: FakeLifecycle = FakeLifecycle(),
         certificateExporter: ru.hznik.devicebridge.data.tls.RootCertificateExporter =
             ru.hznik.devicebridge.data.tls.RootCertificateExporter { SHARED_CERTIFICATE_URI },
+        authority: LocalCertificateAuthority = LocalCertificateAuthority(
+            SoftwareTlsKeyStore(),
+            java.nio.file.Files.createTempDirectory("settings-tls").toFile(),
+        ),
     ) = SettingsViewModel(
         observeSettings = ObserveSettingsUseCase(repository),
         updateDeviceName = UpdateDeviceNameUseCase(repository),
@@ -516,13 +594,11 @@ class SettingsViewModelTest {
             updateSetting = repository::updateSecureMode,
             awaitSettingApplied = {},
             lifecycle = lifecycle,
-            authority = LocalCertificateAuthority(
-                SoftwareTlsKeyStore(),
-                java.nio.file.Files.createTempDirectory("settings-tls").toFile(),
-            ),
+            authority = authority,
             io = dispatcher,
         ),
         certificateExporter = certificateExporter,
+        updateNetworkName = ru.hznik.devicebridge.domain.usecase.UpdateNetworkNameUseCase(repository),
     )
 
     class FakeLifecycle : ServerLifecycleRepository {
@@ -699,6 +775,15 @@ class SettingsViewModelTest {
 
         override suspend fun updateSecureMode(enabled: Boolean): SettingsUpdateResult {
             current.value = current.value.copy(secureModeEnabled = enabled)
+            return SettingsUpdateResult.Updated(current.value)
+        }
+
+        override suspend fun updateNetworkName(value: String): SettingsUpdateResult {
+            val name = ru.hznik.devicebridge.domain.settings.NetworkName.parse(value)
+                ?: return SettingsUpdateResult.Invalid(
+                    ru.hznik.devicebridge.domain.settings.SettingsValidationError.NETWORK_NAME,
+                )
+            current.value = current.value.copy(networkName = name)
             return SettingsUpdateResult.Updated(current.value)
         }
     }

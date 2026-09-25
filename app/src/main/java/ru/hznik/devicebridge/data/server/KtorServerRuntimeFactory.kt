@@ -8,7 +8,13 @@ import javax.inject.Qualifier
 import javax.inject.Singleton
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
@@ -17,7 +23,13 @@ import kotlinx.coroutines.withContext
 import ru.hznik.devicebridge.data.network.LanEndpointResolution
 import ru.hznik.devicebridge.data.network.LanEndpointResolver
 import ru.hznik.devicebridge.data.network.LanNetworkSnapshotProvider
+import ru.hznik.devicebridge.data.network.ServerEndpointCandidate
+import ru.hznik.devicebridge.data.network.mdns.LocalNameClaim
+import ru.hznik.devicebridge.data.network.mdns.LocalNamePublisher
+import ru.hznik.devicebridge.data.network.mdns.LocalNameSession
+import ru.hznik.devicebridge.domain.model.LocalNameStatus
 import ru.hznik.devicebridge.domain.model.ServerEndpoint
+import ru.hznik.devicebridge.domain.settings.NetworkName
 import ru.hznik.devicebridge.data.session.BrowserSessionCoordinator
 import ru.hznik.devicebridge.data.session.SessionEventDispatcher
 import ru.hznik.devicebridge.data.session.SessionGenerationHandle
@@ -42,6 +54,8 @@ import ru.hznik.devicebridge.web.installWebRoutes
 import ru.hznik.devicebridge.web.installFileRoutes
 import ru.hznik.devicebridge.web.FileSessionEventBridge
 import ru.hznik.devicebridge.web.installSecureModeGuard
+import ru.hznik.devicebridge.web.AddressRedirect
+import ru.hznik.devicebridge.web.installAddressRedirect
 import ru.hznik.devicebridge.data.tls.RelayedConnectionRegistry
 import ru.hznik.devicebridge.data.tls.SecureTransport
 import ru.hznik.devicebridge.data.tls.ServerTlsMaterial
@@ -83,6 +97,8 @@ class EffectiveFileLimitProvider private constructor(
 
     fun secureModeEnabled(): Boolean = settingsState.value.secureModeEnabled
 
+    fun currentNetworkName(): String = settingsState.value.networkName.value
+
     /** Suspends until [secureModeEnabled] reports [enabled]. */
     suspend fun awaitSecureMode(enabled: Boolean) {
         settingsState.first { it.secureModeEnabled == enabled }
@@ -91,6 +107,9 @@ class EffectiveFileLimitProvider private constructor(
     companion object {
         internal fun hardLimit(): EffectiveFileLimitProvider =
             EffectiveFileLimitProvider(MutableStateFlow(DeviceSettings.defaults()))
+
+        internal fun fixed(settings: DeviceSettings): EffectiveFileLimitProvider =
+            EffectiveFileLimitProvider(MutableStateFlow(settings))
     }
 }
 
@@ -116,6 +135,7 @@ class KtorServerRuntimeFactory @Inject constructor(
     private val preferredPort: Int = DEFAULT_PRODUCTION_SERVER_PORT,
     private val autoAccept: AutoAcceptLifecycle = AutoAcceptLifecycle.None,
     private val secureTransport: SecureTransport = SecureTransport.Disabled,
+    private val localNamePublisher: LocalNamePublisher = LocalNamePublisher.Disabled,
 ) : ServerRuntimeFactory {
 
     init {
@@ -141,6 +161,8 @@ class KtorServerRuntimeFactory @Inject constructor(
         preferredPort = preferredPort,
         autoAccept = autoAccept,
         secureTransport = secureTransport,
+        localNamePublisher = localNamePublisher,
+        networkName = effectiveFileLimitProvider::currentNetworkName,
     )
 }
 
@@ -163,14 +185,28 @@ private class KtorServerRuntime(
     private val preferredPort: Int,
     private val autoAccept: AutoAcceptLifecycle,
     private val secureTransport: SecureTransport,
+    private val localNamePublisher: LocalNamePublisher,
+    private val networkName: () -> String,
 ) : ServerRuntime {
 
     private var stopServer: (() -> Unit)? = null
     private var startedNetworkFingerprint: String? = null
     private val sessionHandle = AtomicReference<SessionGenerationHandle?>(null)
+    private val allowedAuthorities = AtomicReference<Set<String>>(emptySet())
+    private val addressRedirect = AtomicReference<AddressRedirect?>(null)
+    private val currentEndpoint = MutableStateFlow<ServerEndpoint?>(null)
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+    @Volatile
+    private var nameSession: LocalNameSession? = null
+
+    @Volatile
+    private var nameLostBeforePublish = false
 
     override val networkFingerprint: String?
         get() = startedNetworkFingerprint
+
+    override val endpointChanges: Flow<ServerEndpoint> = currentEndpoint.filterNotNull()
 
     override suspend fun start(): ServerEndpoint {
         check(stopServer == null) { "Server runtime is already started" }
@@ -181,16 +217,35 @@ private class KtorServerRuntime(
             is LanEndpointResolution.Failed ->
                 throw ServerRuntimeStartException(resolution.error)
         }
-        val allowedAuthorities = AtomicReference<Set<String>>(emptySet())
+        val secure = secureTransport.isEnabled()
+        // The name is claimed first: the server certificate has to carry it.
+        val name = claimLocalName(candidate, secure)
+        nameSession = name.session
         // In secure mode the server only listens on loopback; browsers reach it through the
         // TLS front door on the published port, which records who each connection came from.
-        val tls = if (secureTransport.isEnabled()) prepareTls(candidate.host) else null
+        val tls = try {
+            if (secure) prepareTls(candidate.host, name.localName) else null
+        } catch (failure: Throwable) {
+            closeName()
+            throw failure
+        }
         val relayed = RelayedConnectionRegistry()
         val engine = embeddedServer(
             factory = CIO,
             host = if (tls != null) TlsFrontDoor.BACKEND_HOST.hostAddress!! else ALL_LOCAL_INTERFACES,
             port = if (tls != null) 0 else preferredPort,
             module = {
+                // First of all: a request by IP while the name works goes to the name.
+                installAddressRedirect(
+                    redirect = { addressRedirect.get() },
+                    schemeFor = { call ->
+                        if (tls == null) {
+                            "http"
+                        } else {
+                            relayed.peerFor(call.request.local.remotePort)?.let { if (it.secure) "https" else "http" }
+                        }
+                    },
+                )
                 if (tls != null) {
                     installSecureModeGuard(
                         peerFor = relayed::peerFor,
@@ -254,14 +309,22 @@ private class KtorServerRuntime(
             } else {
                 connector.port
             }
-            val endpoint = ServerEndpoint(
+            val claimed = ServerEndpoint(
                 host = candidate.host,
                 port = publishedPort,
                 secure = tls != null,
+                localName = name.localName,
+                nameStatus = name.status,
             )
-            allowedAuthorities.set(setOf(endpoint.host + ":" + endpoint.port))
+            val endpoint = if (nameLostBeforePublish && claimed.localName != null) claimed.withNameLost() else claimed
+            allowedAuthorities.set(endpoint.authorities)
+            addressRedirect.set(endpoint.redirectFromIp())
+            currentEndpoint.value = endpoint
             startedNetworkFingerprint = candidate.networkFingerprint
+            name.session?.let { session -> scope.launch { session.announce() } }
             stopServer = {
+                // Goodbye first, so computers stop using the name before the port closes.
+                closeName()
                 frontDoor?.close()
                 engine.stop(
                     gracePeriodMillis = STOP_GRACE_PERIOD_MILLIS,
@@ -270,6 +333,7 @@ private class KtorServerRuntime(
             }
             endpoint
         } catch (throwable: Throwable) {
+            closeName()
             frontDoor?.close()
             engine.stop(
                 gracePeriodMillis = 0,
@@ -279,10 +343,69 @@ private class KtorServerRuntime(
         }
     }
 
-    private fun prepareTls(host: String): ServerTlsMaterial = try {
-        secureTransport.serverMaterial(InetAddress.getByName(host) as Inet4Address)
+    private fun prepareTls(host: String, localName: String?): ServerTlsMaterial = try {
+        secureTransport.serverMaterial(InetAddress.getByName(host) as Inet4Address, localName)
     } catch (failure: TlsMaterialException) {
         throw ServerRuntimeStartException(ServerLifecycleError.SecureCertificateUnavailable)
+    }
+
+    private class NameOutcome(
+        val session: LocalNameSession?,
+        val localName: String?,
+        val status: LocalNameStatus,
+    )
+
+    /** Claims the name from the settings; any failure leaves the server working by IP. */
+    private suspend fun claimLocalName(candidate: ServerEndpointCandidate, secure: Boolean): NameOutcome {
+        if (localNamePublisher === LocalNamePublisher.Disabled) {
+            return NameOutcome(null, null, LocalNameStatus.NotUsed)
+        }
+        val label = NetworkName.parse(networkName())?.value ?: NetworkName.DEFAULT.value
+        fun unavailable(reason: LocalNameStatus.Reason) = NameOutcome(null, null, LocalNameStatus.Unavailable(reason, label))
+        // An address by name that the certificate does not cover would end on an error page.
+        if (secure && !secureTransport.permitsName("$label.local")) {
+            return unavailable(LocalNameStatus.Reason.CERTIFICATE)
+        }
+        val interfaceName = candidate.networkFingerprint.substringBefore('|')
+        val session = localNamePublisher.open(candidate.host, interfaceName, ::onNameLost)
+            ?: return unavailable(LocalNameStatus.Reason.NETWORK)
+        return when (val claim = session.claim(label)) {
+            is LocalNameClaim.Claimed ->
+                if (secure && !secureTransport.permitsName(claim.name)) {
+                    session.close()
+                    unavailable(LocalNameStatus.Reason.CERTIFICATE)
+                } else {
+                    NameOutcome(session, claim.name, LocalNameStatus.Claimed(label, claim.requestedTaken))
+                }
+
+            LocalNameClaim.AllTaken -> {
+                session.close()
+                unavailable(LocalNameStatus.Reason.TAKEN)
+            }
+        }
+    }
+
+    /** Another device answers to our name: stop using it until the next start. */
+    private fun onNameLost() {
+        val endpoint = currentEndpoint.value
+        if (endpoint == null) {
+            nameLostBeforePublish = true
+            return
+        }
+        if (endpoint.localName == null) return
+        val lost = endpoint.withNameLost()
+        // Without the name the IP is the way in again.
+        addressRedirect.set(null)
+        allowedAuthorities.set(lost.authorities)
+        currentEndpoint.value = lost
+    }
+
+    private fun ServerEndpoint.redirectFromIp(): AddressRedirect? =
+        localName?.let { name -> AddressRedirect(ipAuthority, "$name:$port") }
+
+    private fun closeName() {
+        nameSession?.close()
+        nameSession = null
     }
 
     override suspend fun activateSessionGeneration(generation: Long) {
@@ -315,6 +438,7 @@ private class KtorServerRuntime(
         withContext(NonCancellable) {
             stop()
         }
+        scope.cancel()
     }
 
     private companion object {

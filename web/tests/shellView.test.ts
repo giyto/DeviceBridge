@@ -37,6 +37,7 @@ describe("DeviceBridge shell markup", () => {
     expect(warning).toContain("не шифрует");
     expect(warning).toContain("доверенной");
     expect(warning).toContain("публичном Wi-Fi");
+    expect(warning.replace(/\s+/g, " ")).toContain("другое устройство может выдать себя за телефон");
   });
 
   it("exposes an accessible pairing form while transfer sections wait for a session", () => {
@@ -81,6 +82,38 @@ describe("DeviceBridge shell markup", () => {
 });
 
 describe("createShellView", () => {
+  it("shows the wait for the phone and why the form is back", () => {
+    const onRetry = vi.fn();
+    const view = createShellView(document, { ...actions(), onRetry });
+    const title = document.querySelector('[data-role="status-title"]')!;
+    const detail = document.querySelector('[data-role="status-detail"]')!;
+    const retry = document.querySelector<HTMLButtonElement>('[data-action="retry"]')!;
+    const manifest = { protocolVersion: 1, webAssetVersion: "sha256-abcd" };
+    const challenge = {
+      protocolVersion: 1,
+      challengeId: "challenge-notice",
+      expiresAtEpochMillis: 10_000,
+      confirmTimeoutSeconds: 60,
+      attemptsRemaining: 5,
+    };
+
+    view.render({ kind: "waiting" });
+    expect(title.textContent).toBe("Телефон недоступен");
+    expect(detail.textContent).toContain("подключится сама");
+    expect(retry.hidden).toBe(false);
+    expect(retry.textContent).toBe("Проверить сейчас");
+    retry.click();
+    expect(onRetry).toHaveBeenCalledOnce();
+
+    view.render({ kind: "ready", manifest, challenge, notice: "phoneReturned" });
+    expect(title.textContent).toBe("Телефон снова доступен");
+
+    view.render({ kind: "ready", manifest, challenge, notice: "trustRejected" });
+    expect(detail.textContent).toContain("Этот телефон не узнал браузер");
+    expect(detail.textContent).toContain("удалили из доверенных");
+    expect(detail.textContent).toContain("другой телефон");
+  });
+
   it("renders compatible availability and exact version data", () => {
     const view = createShellView(document, actions());
 
@@ -169,7 +202,12 @@ describe("createShellView", () => {
     input.value = "123456";
     document.querySelector<HTMLFormElement>('[data-role="pairing-form"]')
       ?.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
-    expect(onSubmitCode).toHaveBeenCalledWith("123456", false);
+    // "Запомнить этот браузер" is on unless the person turns it off.
+    expect(onSubmitCode).toHaveBeenCalledWith("123456", true);
+    document.querySelector<HTMLInputElement>("#remember-browser")!.checked = false;
+    document.querySelector<HTMLFormElement>('[data-role="pairing-form"]')
+      ?.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    expect(onSubmitCode).toHaveBeenLastCalledWith("123456", false);
 
     view.render({ kind: "submitting", manifest });
     expect(document.querySelector<HTMLButtonElement>('[data-action="pair"]')?.textContent)
@@ -367,19 +405,21 @@ describe("createShellView", () => {
     expect(sessionPanel.dataset.state).toBe("ready");
     expect(sessionPanel.dataset.viewState).toBe("ready");
 
+    // Checked from the start, and a reset turns it back on.
+    expect(remember.checked).toBe(true);
     input.value = "123456";
-    remember.checked = true;
+    remember.checked = false;
     view.consume({ id: "clear-pairing-form:session-effect-1", kind: "clearPairingForm" });
     view.render(connected);
     expect(input.value).toBe("");
-    expect(remember.checked).toBe(false);
+    expect(remember.checked).toBe(true);
 
     input.value = "654321";
-    remember.checked = true;
+    remember.checked = false;
     view.render(connected);
     view.consume({ id: "clear-pairing-form:session-effect-1", kind: "clearPairingForm" });
     expect(input.value).toBe("654321");
-    expect(remember.checked).toBe(true);
+    expect(remember.checked).toBe(false);
 
     view.render({ kind: "offline", message: "Нет связи" });
     expect(status.dataset.viewState).toBe("offline");

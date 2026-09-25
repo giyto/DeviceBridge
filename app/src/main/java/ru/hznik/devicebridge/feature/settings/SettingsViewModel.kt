@@ -16,6 +16,7 @@ import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.distinctUntilChanged
 import ru.hznik.devicebridge.domain.file.HARD_MAX_FILE_BYTES
 import ru.hznik.devicebridge.domain.repository.ThemePreferenceRepository
 import ru.hznik.devicebridge.domain.settings.DestinationTree
@@ -26,6 +27,7 @@ import ru.hznik.devicebridge.domain.usecase.UpdateAutoAcceptTrustedFilesUseCase
 import ru.hznik.devicebridge.domain.usecase.UpdateIdleStopTimeoutUseCase
 import ru.hznik.devicebridge.domain.usecase.UpdateDestinationTreeUseCase
 import ru.hznik.devicebridge.domain.usecase.UpdateDeviceNameUseCase
+import ru.hznik.devicebridge.domain.usecase.UpdateNetworkNameUseCase
 import ru.hznik.devicebridge.domain.usecase.UpdateFileLimitUseCase
 import ru.hznik.devicebridge.domain.usecase.UpdateRetentionDaysUseCase
 import ru.hznik.devicebridge.domain.usecase.ObserveTrustedBrowsersUseCase
@@ -52,6 +54,7 @@ class SettingsViewModel @Inject constructor(
     private val partialUploads: PartialUploadStore,
     private val secureMode: SecureModeController,
     private val certificateExporter: ru.hznik.devicebridge.data.tls.RootCertificateExporter,
+    private val updateNetworkName: UpdateNetworkNameUseCase,
 ) : ViewModel() {
     private sealed interface LoadResult {
         data object Loading : LoadResult
@@ -84,6 +87,12 @@ class SettingsViewModel @Inject constructor(
                 .collect { summary -> mutableUiState.update { it.copy(partialUploads = summary) } }
         }
         refreshRootCertificate()
+        viewModelScope.launch {
+            mutableUiState
+                .map { it.settings.networkName }
+                .distinctUntilChanged()
+                .collect { refreshCertificateCoverage() }
+        }
         viewModelScope.launch {
             themePreferenceRepository.themePreference.collect { preference ->
                 mutableUiState.update { it.copy(themePreference = preference) }
@@ -132,6 +141,11 @@ class SettingsViewModel @Inject constructor(
                         } else {
                             settings.deviceName
                         },
+                        networkNameInput = if (current.networkNameState.isDirty) {
+                            current.networkNameInput
+                        } else {
+                            settings.networkName.value
+                        },
                         retentionInput = if (current.retentionState.isDirty) {
                             current.retentionInput
                         } else {
@@ -165,6 +179,16 @@ class SettingsViewModel @Inject constructor(
                 )
             }
             SettingsAction.SaveDeviceName -> saveDeviceName()
+            is SettingsAction.NetworkNameChanged -> mutableUiState.update {
+                it.copy(
+                    networkNameInput = action.value,
+                    networkNameState = it.networkNameState.copy(
+                        errorMessage = null,
+                        isDirty = action.value.trim().lowercase() != it.settings.networkName.value,
+                    ),
+                )
+            }
+            SettingsAction.SaveNetworkName -> saveNetworkName()
             is SettingsAction.ThemeSelected -> {
                 mutableUiState.update { it.copy(themePreference = action.value) }
                 viewModelScope.launch {
@@ -298,7 +322,31 @@ class SettingsViewModel @Inject constructor(
             val status = runCatching { secureMode.rootStatus() }
                 .getOrDefault(ru.hznik.devicebridge.data.tls.RootCertificateStatus.Unusable)
             mutableUiState.update { it.copy(rootCertificate = status) }
+            refreshCertificateCoverage()
         }
+    }
+
+    private suspend fun refreshCertificateCoverage() {
+        val name = mutableUiState.value.settings.networkName.value + ".local"
+        val covers = runCatching { secureMode.rootPermits(name) }.getOrDefault(true)
+        mutableUiState.update { it.copy(certificateCoversNetworkName = covers) }
+    }
+
+    private fun saveNetworkName() {
+        val draft = mutableUiState.value.networkNameInput
+        val before = mutableUiState.value.settings.networkName
+        val serverRunning = secureMode.changeRestartsServer()
+        updateField(
+            field = SettingField.NETWORK_NAME,
+            submittedDraft = draft,
+            operation = { updateNetworkName(draft) },
+            onSuccess = { settings ->
+                if (settings.networkName != before) {
+                    mutableUiState.update { it.copy(networkNameAppliesAfterRestart = serverRunning) }
+                    refreshCertificateCoverage()
+                }
+            },
+        )
     }
 
 
@@ -473,17 +521,21 @@ class SettingsViewModel @Inject constructor(
         field: SettingField,
         submittedDraft: String? = null,
         availabilityOnSuccess: DestinationAvailability? = null,
+        onSuccess: suspend (ru.hznik.devicebridge.domain.settings.DeviceSettings) -> Unit = {},
         operation: suspend () -> SettingsUpdateResult,
     ) {
         updateFieldState(field) { it.copy(isSaving = true, errorMessage = null) }
         viewModelScope.launch {
             when (val result = runCatching { operation() }.getOrNull()) {
-                is SettingsUpdateResult.Updated -> applySuccessfulFieldUpdate(
-                    field = field,
-                    settings = result.settings,
-                    submittedDraft = submittedDraft,
-                    availabilityOnSuccess = availabilityOnSuccess,
-                )
+                is SettingsUpdateResult.Updated -> {
+                    applySuccessfulFieldUpdate(
+                        field = field,
+                        settings = result.settings,
+                        submittedDraft = submittedDraft,
+                        availabilityOnSuccess = availabilityOnSuccess,
+                    )
+                    onSuccess(result.settings)
+                }
                 is SettingsUpdateResult.Invalid ->
                     setFieldError(field, result.reason.message())
                 null -> setFieldError(field, "Не удалось сохранить настройку.")
@@ -500,6 +552,7 @@ class SettingsViewModel @Inject constructor(
         mutableUiState.update { current ->
             val currentDraft = when (field) {
                 SettingField.DEVICE_NAME -> current.deviceNameInput
+                SettingField.NETWORK_NAME -> current.networkNameInput
                 SettingField.RETENTION -> current.retentionInput
                 SettingField.FILE_LIMIT -> current.fileLimitMiBInput
                 SettingField.DESTINATION,
@@ -522,6 +575,14 @@ class SettingsViewModel @Inject constructor(
                         settings.deviceName
                     },
                     deviceNameState = SettingsFieldState(isDirty = hasNewerDraft),
+                )
+                SettingField.NETWORK_NAME -> base.copy(
+                    networkNameInput = if (hasNewerDraft) {
+                        current.networkNameInput
+                    } else {
+                        settings.networkName.value
+                    },
+                    networkNameState = SettingsFieldState(isDirty = hasNewerDraft),
                 )
                 SettingField.RETENTION -> base.copy(
                     retentionInput = if (hasNewerDraft) {
@@ -569,6 +630,8 @@ class SettingsViewModel @Inject constructor(
             when (field) {
                 SettingField.DEVICE_NAME ->
                     current.copy(deviceNameState = transform(current.deviceNameState))
+                SettingField.NETWORK_NAME ->
+                    current.copy(networkNameState = transform(current.networkNameState))
                 SettingField.RETENTION ->
                     current.copy(retentionState = transform(current.retentionState))
                 SettingField.DESTINATION ->
@@ -588,6 +651,7 @@ class SettingsViewModel @Inject constructor(
 
 private enum class SettingField {
     DEVICE_NAME,
+    NETWORK_NAME,
     RETENTION,
     DESTINATION,
     FILE_LIMIT,
@@ -602,4 +666,6 @@ private fun SettingsValidationError.message(): String = when (this) {
     SettingsValidationError.FILE_LIMIT -> "Введите размер от 1 до 1024 МиБ."
     SettingsValidationError.AUTO_ACCEPT_DESTINATION -> "Сначала выберите папку для входящих файлов."
     SettingsValidationError.IDLE_STOP_TIMEOUT -> "Выберите время автоостановки из списка."
+    SettingsValidationError.NETWORK_NAME ->
+        "Используйте латинские буквы, цифры и дефис, до 40 символов, без дефиса в начале и в конце."
 }

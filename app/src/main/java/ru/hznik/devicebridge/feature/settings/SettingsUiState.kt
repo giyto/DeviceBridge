@@ -42,6 +42,15 @@ data class SettingsUiState(
     val fileLimitMiBInput: String =
         (DeviceSettings.defaults().effectiveFileLimitBytes / (1024 * 1024)).toString(),
     val deviceNameState: SettingsFieldState = SettingsFieldState(),
+    val networkNameInput: String = DeviceSettings.defaults().networkName.value,
+    val networkNameState: SettingsFieldState = SettingsFieldState(),
+    /** The saved name waits for the next server start. */
+    val networkNameAppliesAfterRestart: Boolean = false,
+    /**
+     * False when secure mode is on and the phone's root, made before custom names, does not
+     * cover the chosen name: only a reset lets HTTPS work by that name.
+     */
+    val certificateCoversNetworkName: Boolean = true,
     val retentionState: SettingsFieldState = SettingsFieldState(),
     val destinationState: SettingsFieldState = SettingsFieldState(),
     val fileLimitState: SettingsFieldState = SettingsFieldState(),
@@ -89,6 +98,8 @@ data class TrustedBrowserUiState(
 sealed interface SettingsAction {
     data class DeviceNameChanged(val value: String) : SettingsAction
     data object SaveDeviceName : SettingsAction
+    data class NetworkNameChanged(val value: String) : SettingsAction
+    data object SaveNetworkName : SettingsAction
     data object RetryLoad : SettingsAction
     data class RetentionChanged(val value: String) : SettingsAction
     data object SaveRetention : SettingsAction

@@ -321,6 +321,18 @@ test("file cards keep metadata, stages and applicable actions inside their bound
   await expect(fileSection).toHaveScreenshot("file-cards-long-name.png");
 });
 
+test("waiting for the phone keeps a clear status and a check-now action", async ({ page }) => {
+  await page.route("**/web-manifest.json", (route) => route.abort("connectionrefused"));
+
+  await page.goto("/");
+  await expect(page.getByRole("heading", { name: "Телефон недоступен" }))
+    .toBeVisible({ timeout: 15_000 });
+  const retry = page.getByRole("button", { name: "Проверить сейчас" });
+  await expect(retry).toBeVisible();
+  await expect(page.locator('[data-role="status"]')).toHaveAttribute("data-state", "waiting");
+  await expect(page.locator('[data-role="status"]')).toHaveScreenshot("waiting-status.png");
+});
+
 test("pairing error restores focus through a keyboard-only flow", async ({ page }) => {
   await page.route("**/web-manifest.json", (route) => route.fulfill({
     contentType: "application/json",
@@ -372,6 +384,10 @@ test("pairing error restores focus through a keyboard-only flow", async ({ page 
   await page.keyboard.type("123456");
   await page.keyboard.press("Tab");
   await expect(remember).toBeFocused();
+  // Checked by default: Space turns it off and back on.
+  await expect(remember).toBeChecked();
+  await page.keyboard.press("Space");
+  await expect(remember).not.toBeChecked();
   await page.keyboard.press("Space");
   await expect(remember).toBeChecked();
   await page.keyboard.press("Shift+Tab");

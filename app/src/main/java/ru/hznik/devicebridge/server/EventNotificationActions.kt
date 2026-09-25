@@ -11,6 +11,9 @@ import dagger.hilt.android.EntryPointAccessors
 import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.components.SingletonComponent
 import javax.inject.Inject
+import ru.hznik.devicebridge.domain.session.BrowserApprovalDecision
+import ru.hznik.devicebridge.domain.usecase.ApproveBrowserRequestUseCase
+import ru.hznik.devicebridge.domain.usecase.DenyBrowserRequestUseCase
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -49,6 +52,8 @@ class EventNotificationActionHandler @Inject constructor(
     private val files: FileTransferRepository,
     private val notificationAccepted: NotificationAcceptedTransfers,
     private val clipboard: TextClipboard,
+    private val approveRequest: ApproveBrowserRequestUseCase,
+    private val denyRequest: DenyBrowserRequestUseCase,
 ) {
     suspend fun handle(action: EventNotificationAction, notificationId: Int) {
         val notice = registry.notice(notificationId) ?: return
@@ -71,6 +76,24 @@ class EventNotificationActionHandler @Inject constructor(
             EventNotificationAction.DECLINE_FILES -> {
                 if (notice !is EventNotice.IncomingFiles) return
                 files.state.value.awaiting(notice.sessionId).forEach { files.cancel(it) }
+            }
+
+            // Same calls as the buttons on the home screen; a request that is no longer pending
+            // stays as it is, and the notification goes away either way.
+            EventNotificationAction.DENY_PAIRING,
+            EventNotificationAction.ALLOW_PAIRING,
+            EventNotificationAction.ALLOW_AND_REMEMBER_PAIRING,
+            -> {
+                if (notice !is EventNotice.PairingRequest) return
+                runCatching {
+                    when (action) {
+                        EventNotificationAction.DENY_PAIRING -> denyRequest(notice.requestId)
+                        EventNotificationAction.ALLOW_AND_REMEMBER_PAIRING ->
+                            approveRequest(notice.requestId, BrowserApprovalDecision.ALLOW_AND_REMEMBER)
+                        else -> approveRequest(notice.requestId, BrowserApprovalDecision.ALLOW_ONCE)
+                    }
+                }
+                publisher.cancel(notice.key)
             }
 
             EventNotificationAction.OPEN,

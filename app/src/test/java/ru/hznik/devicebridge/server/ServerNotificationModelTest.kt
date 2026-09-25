@@ -7,6 +7,7 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import ru.hznik.devicebridge.domain.model.LocalNameStatus
 import ru.hznik.devicebridge.domain.model.ServerEndpoint
 import ru.hznik.devicebridge.domain.model.ServerLifecycleError
 import ru.hznik.devicebridge.domain.model.ServerLifecycleState
@@ -47,6 +48,27 @@ class ServerNotificationModelTest {
         assertFalse(stopping.showStopAction)
     }
 
+
+    @Test
+    fun runningServerShowsTheAddressByName() {
+        val running = requireNotNull(
+            factory.create(
+                ServerLifecycleState.Running(
+                    generation = 1,
+                    endpoint = ServerEndpoint(
+                        host = "192.168.1.24",
+                        port = 8_787,
+                        localName = "devicebridge.local",
+                        nameStatus = LocalNameStatus.Claimed("devicebridge", requestedTaken = false),
+                    ),
+                    startedAtElapsedRealtimeMs = 10,
+                ),
+            ),
+        )
+
+        assertTrue(running.text, running.text.startsWith("http://devicebridge.local:8787"))
+        assertFalse(running.text.contains("192.168.1.24"))
+    }
 
     @Test
     fun secureServerShowsThePlainEntryAddress() {

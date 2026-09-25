@@ -14,6 +14,8 @@ import ru.hznik.devicebridge.data.network.DefaultLanNetworkObserver
 import ru.hznik.devicebridge.data.network.LanNetworkObserver
 import ru.hznik.devicebridge.data.network.LanNetworkSnapshotProvider
 import ru.hznik.devicebridge.data.network.NetworkCallbackRegistrar
+import ru.hznik.devicebridge.data.network.mdns.AndroidLocalNamePublisher
+import ru.hznik.devicebridge.data.network.mdns.LocalNamePublisher
 import ru.hznik.devicebridge.data.server.KtorServerRuntimeFactory
 import ru.hznik.devicebridge.data.server.DEFAULT_PRODUCTION_SERVER_PORT
 import ru.hznik.devicebridge.data.server.ProductionServerPort
@@ -42,6 +44,12 @@ abstract class ServerNetworkModule {
     abstract fun bindLanNetworkObserver(
         implementation: DefaultLanNetworkObserver,
     ): LanNetworkObserver
+
+    @Binds
+    @Singleton
+    abstract fun bindLocalNamePublisher(
+        implementation: AndroidLocalNamePublisher,
+    ): LocalNamePublisher
 
     @Binds
     @Singleton

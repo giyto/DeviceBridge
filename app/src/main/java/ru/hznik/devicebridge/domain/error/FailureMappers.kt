@@ -232,7 +232,10 @@ fun HistoryPersistenceEvent.toUserFacingFailure(): UserFacingFailure = when (thi
 }
 
 fun SettingsValidationError.toUserFacingFailure(): UserFacingFailure = when (this) {
-    SettingsValidationError.DEVICE_NAME -> failure(
+    // The network name is the phone's name on the network; the device name failure fits it.
+    SettingsValidationError.DEVICE_NAME,
+    SettingsValidationError.NETWORK_NAME,
+    -> failure(
         FailureCode.INVALID_DEVICE_NAME,
         FailureSeverity.TERMINAL,
         RecoveryAction.EDIT_SETTING,

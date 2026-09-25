@@ -71,8 +71,62 @@ class LocalCertificateAuthorityTest {
         assertNotEquals(first.certificate, moved.certificate)
         assertEquals(first.root, moved.root)
         assertEquals(
-            listOf(listOf<Any>(7, "10.0.0.7"), listOf<Any>(2, "devicebridge.local")),
+            listOf(listOf<Any>(7, "10.0.0.7")),
             moved.certificate.subjectAlternativeNames.map { it.toList() },
+        )
+    }
+
+    @Test
+    fun serverCertificateCarriesTheLocalNameAndFollowsItsChanges() {
+        val first = authority.serverMaterial(ip("192.168.1.24"), "devicebridge.local")
+
+        assertEquals(first.certificate, authority.serverMaterial(ip("192.168.1.24"), "devicebridge.local").certificate)
+        assertEquals(
+            setOf(listOf<Any>(7, "192.168.1.24"), listOf<Any>(2, "devicebridge.local")),
+            first.certificate.subjectAlternativeNames.map { it.toList() }.toSet(),
+        )
+        assertEquals("CN=devicebridge.local,O=DeviceBridge", first.certificate.subjectX500Principal.name)
+
+        val renamed = authority.serverMaterial(ip("192.168.1.24"), "nikita.local")
+
+        assertNotEquals(first.certificate, renamed.certificate)
+        assertTrue(renamed.certificate.subjectAlternativeNames.any { it.toList() == listOf<Any>(2, "nikita.local") })
+        // Without a name the current certificate still covers the address.
+        assertEquals(renamed.certificate, authority.serverMaterial(ip("192.168.1.24")).certificate)
+    }
+
+    @Test
+    fun newRootPermitsAnyLocalName() {
+        assertTrue(authority.permits("nikita.local"))
+        authority.ensureRoot()
+
+        assertTrue(authority.permits("nikita.local"))
+        assertTrue(authority.permits("devicebridge-2.local"))
+        assertFalse(authority.permits("example.com"))
+    }
+
+    @Test
+    fun rootFromBeforeCustomNamesKeepsWorkingForDeviceBridgeLocalOnly() {
+        val publicKey = keys.generate(LocalCertificateAuthority.ROOT_ALIAS, TlsKeyPurpose.CERTIFICATE_AUTHORITY)
+        val legacy = X509Profiles.root(
+            publicKey = publicKey,
+            serial = byteArrayOf(0x41, 0x01),
+            commonName = "DeviceBridge Local CA old",
+            notBefore = now,
+            notAfter = now.plus(Duration.ofDays(3_650)),
+            sign = { keys.signSha256WithEcdsa(LocalCertificateAuthority.ROOT_ALIAS, it) },
+            permittedDnsName = DEVICEBRIDGE_LOCAL_NAME,
+        )
+        directory.mkdirs()
+        File(directory, "root.der").writeBytes(legacy.encoded)
+
+        assertTrue(authority.permits("devicebridge.local"))
+        assertFalse(authority.permits("nikita.local"))
+        val material = authority.serverMaterial(ip("192.168.1.24"), "nikita.local")
+        assertArrayEquals(legacy.encoded, material.root.encoded)
+        assertEquals(
+            listOf(listOf<Any>(7, "192.168.1.24")),
+            material.certificate.subjectAlternativeNames.map { it.toList() },
         )
     }
 

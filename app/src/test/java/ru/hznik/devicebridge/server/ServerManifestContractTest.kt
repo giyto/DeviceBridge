@@ -23,6 +23,8 @@ class ServerManifestContractTest {
             "android.permission.FOREGROUND_SERVICE",
             "android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE",
             "android.permission.CHANGE_NETWORK_STATE",
+            // The multicast lock that lets the phone hear questions about its local name.
+            "android.permission.CHANGE_WIFI_MULTICAST_STATE",
         )
 
         permissions.forEach { permission ->

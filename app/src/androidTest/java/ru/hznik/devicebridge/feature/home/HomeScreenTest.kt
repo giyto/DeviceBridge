@@ -34,6 +34,8 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import ru.hznik.devicebridge.ui.theme.DeviceBridgeTheme
 import ru.hznik.devicebridge.domain.session.BrowserSessionId
+import ru.hznik.devicebridge.domain.model.LocalNameStatus
+import ru.hznik.devicebridge.domain.model.ServerEndpoint
 import ru.hznik.devicebridge.domain.session.PairingRequestId
 
 @RunWith(AndroidJUnit4::class)
@@ -702,6 +704,66 @@ class HomeScreenTest {
             assertEquals(listOf(HomeAction.StartClicked), actions)
         }
     }
+    @Test
+    fun addressByNameIsTheOnlyAddressShown() {
+        val clipboard = RecordingClipboard()
+        setScreen(
+            ServerSessionUiState(
+                status = HomeServerStatus.Running,
+                localAddress = "http://devicebridge.local:8787",
+            ),
+            clipboard = clipboard,
+        )
+
+        composeRule.onNodeWithText("http://devicebridge.local:8787").assertIsDisplayed()
+        composeRule.onNodeWithText("Если не открывается", substring = true).assertDoesNotExist()
+        composeRule.onNodeWithContentDescription("Скопировать адрес по IP").assertDoesNotExist()
+        composeRule.onNodeWithTag("local-name-notice").assertDoesNotExist()
+        composeRule.onNodeWithContentDescription("Скопировать адрес DeviceBridge").performScrollTo().performClick()
+
+        composeRule.waitUntil(timeoutMillis = 5_000) {
+            clipboard.clipEntry?.clipData?.getItemAt(0)?.text?.toString() == "http://devicebridge.local:8787"
+        }
+    }
+
+    @Test
+    fun eachNameProblemIsExplainedAndSettingsOpenWhenTheyCanHelp() {
+        val statuses = listOf(
+            ServerEndpoint(
+                "192.168.1.24",
+                8787,
+                localName = "devicebridge-2.local",
+                nameStatus = LocalNameStatus.Claimed("devicebridge", requestedTaken = true),
+            ),
+        ) + LocalNameStatus.Reason.entries.map { reason ->
+            ServerEndpoint("192.168.1.24", 8787, nameStatus = LocalNameStatus.Unavailable(reason, "devicebridge"))
+        }
+        var state by mutableStateOf(ServerSessionUiState())
+        var settingsOpened = 0
+        composeRule.setContent {
+            DeviceBridgeTheme {
+                HomeScreen(uiState = state, onAction = {}, onOpenSettings = { settingsOpened++ })
+            }
+        }
+
+        statuses.forEach { endpoint ->
+            val notice = endpoint.localNameNotice()!!
+            state = ServerSessionUiState(
+                status = HomeServerStatus.Running,
+                localAddress = endpoint.url,
+                localNameNotice = notice,
+            )
+            composeRule.onNodeWithTag("local-name-notice").performScrollTo().assertTextContains(notice.text)
+            if (notice.opensSettings) {
+                val before = settingsOpened
+                composeRule.onNodeWithText("Открыть настройки").performScrollTo().performClick()
+                composeRule.runOnIdle { assertEquals(before + 1, settingsOpened) }
+            } else {
+                composeRule.onNodeWithText("Открыть настройки").assertDoesNotExist()
+            }
+        }
+    }
+
     private fun setScreen(
         state: ServerSessionUiState,
         clipboard: Clipboard? = null,
