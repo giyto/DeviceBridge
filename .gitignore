@@ -7,6 +7,11 @@
 /.idea/workspace.xml
 /.idea/navEditor.xml
 /.idea/assetWizardSettings.xml
+# Per-developer IDE state: chosen device, device manager, plugins
+/.idea/deploymentTargetSelector.xml
+/.idea/deviceManager.xml
+/.idea/appInsightsSettings.xml
+/.idea/material_theme_project_new.xml
 .DS_Store
 /build
 /captures
@@ -22,6 +27,11 @@ local.properties
 /web/playwright-report/
 /app/src/main/assets/web/*
 !/app/src/main/assets/web/.gitkeep
+
+# Local state of coding agents and test tools
+/.agents/
+/.claude/
+/.playwright/
 
 # JVM crash reports
 hs_err_pid*.log
