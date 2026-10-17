@@ -10,7 +10,7 @@
 - Android lint baseline: 0 errors and 36 warnings.
 - Debug APK: 37,776,467 bytes; SHA-256 `571BA5281F0DF983DA1952701C143C0632919A1C771E1490F3357CE1C062CF4F`.
 - Release unsigned APK: 29,277,523 bytes; SHA-256 `E15A94A8014D7D47D5975E35C26ED0BB25F01D6FF1222FEEFDB60B9DCE305456`.
-- Connected baseline was attempted on physical `22081212UG`, serial `905640a3`, API 35. Gradle built both APKs, but Android rejected installation of the test APK with `INSTALL_FAILED_USER_RESTRICTED: Install canceled by user`; therefore 0 connected tests executed in this baseline run. This is a device installation-policy prerequisite and will be retried in the acceptance matrix after USB installation is allowed.
+- Connected baseline was attempted on a physical phone, API 35. Gradle built both APKs, but Android rejected installation of the test APK with `INSTALL_FAILED_USER_RESTRICTED: Install canceled by user`; therefore 0 connected tests executed in this baseline run. This is a device installation-policy prerequisite and will be retried in the acceptance matrix after USB installation is allowed.
 - The completed previous change retains recorded green connected baselines of 27/27 on API 29 and 27/27 on API 37.1 in `docs/verification/server-lifecycle.md`.
 
 ## Implementation verification

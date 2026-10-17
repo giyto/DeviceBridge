@@ -31,10 +31,10 @@ Emulator in plain HTTP mode, headless Chrome through the adb forward, the page o
 
 ## Manual checks on the real phone and computer (2026-09-25)
 
-Phone on the home Wi-Fi at 192.168.0.90, Windows 11 on 192.168.0.11 with the network profile «Общедоступная».
+Phone on the home Wi-Fi at 192.168.1.37, Windows 11 on 192.168.1.20 with the network profile «Общедоступная».
 
 - Windows resolves `devicebridge.local` and opens the page by name; the address by IP leads to the name. With a system proxy on (here a VPN client), `*.local` has to be in its exceptions, otherwise the browser sends the name to the proxy and gets 503.
-- HTTPS by name with the root created before custom names: `https://devicebridge.local:8787` serves a certificate for `devicebridge.local` and 192.168.0.90, and Windows builds a valid chain to the installed root.
+- HTTPS by name with the root created before custom names: `https://devicebridge.local:8787` serves a certificate for `devicebridge.local` and 192.168.1.37, and Windows builds a valid chain to the installed root.
 - A second device with the same name, played by this computer answering `devicebridge.local` over mDNS:
   - the running phone gave the name up at once and switched to the address by IP with the notice on its home screen;
   - after a restart the phone probed `devicebridge.local`, got the answer, claimed `devicebridge-2.local` and announced it twice;

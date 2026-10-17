@@ -14,3 +14,7 @@
 - [Проверка текста и ссылок](verification/text-and-link-transfer.md)
 - [Проверка файлов](verification/file-transfer.md)
 - [Проверка истории и настроек](verification/local-history-and-settings.md)
+- [Проверка уведомлений о событиях](verification/event-notifications.md)
+- [Проверка адреса по имени и быстрого входа](verification/local-name-and-quick-entry.md)
+- [Прототип: встроенный сервер Ktor](spikes/embedded-ktor-server.md)
+- [Прототип: встроенная веб-страница](spikes/bundled-browser-web-interface.md)

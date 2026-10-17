@@ -22,11 +22,7 @@ The automated matrix covers Room/DataStore persistence, retention, safe history 
 - The API 37.1 launcher `Minimal` icon style was then selected and applied. The installed DeviceBridge icon switched to the monochrome layer and preserved the two-device/bridge silhouette.
 - Resource tests and Android lint also confirm the standard, round and monochrome declarations and the absence of template WebP launcher assets.
 
-Evidence:
-
-- [API 29 launcher](./devicebridge-icon-api29.png)
-- [API 37.1 launcher](./devicebridge-icon-api37.png)
-- [API 37.1 Minimal/themed launcher](./devicebridge-icon-api37-themed.png)
+The screenshots of this first icon were removed after the icon was replaced on 2026-09-25 (phone, laptop and arrows both ways); see the commit "feat: new app icon for the phone, the browser tab and the page shortcut".
 
 ## User manual acceptance — 2026-09-18
 
