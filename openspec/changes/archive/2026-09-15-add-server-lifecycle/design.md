@@ -1,8 +1,8 @@
 ## Context
 
-См. `proposal.md` — Ktor 3.5.2/CIO принят техническим spike, а web shell уже собирается в APK и раздаётся debug composition root. Production release пока не содержит server runtime, основной `HomeViewModel` показывает только статическое состояние `Stopped`, а permission flow существует лишь в экспортируемом debug diagnostics screen.
+См. `proposal.md` - Ktor 3.5.2/CIO принят техническим spike, а web shell уже собирается в APK и раздаётся debug composition root. Production release пока не содержит server runtime, основной `HomeViewModel` показывает только статическое состояние `Stopped`, а permission flow существует лишь в экспортируемом debug diagnostics screen.
 
-Change пересекает Android lifecycle, foreground service, сеть, разрешения, Hilt, Ktor source sets, Compose state и уведомления. Он следует `docs/technical-specification.md` 2.0 и этапу 4 `openspec/roadmap.md`: одно Android-приложение, Clean Architecture/MVVM/SOLID, API 29–37.1, локальный HTTP только в доверенной сети и отсутствие production pairing/API до следующего change.
+Change пересекает Android lifecycle, foreground service, сеть, разрешения, Hilt, Ktor source sets, Compose state и уведомления. Он следует `docs/technical-specification.md` 2.0 и этапу 4 `openspec/roadmap.md`: одно Android-приложение, Clean Architecture/MVVM/SOLID, API 29-37.1, локальный HTTP только в доверенной сети и отсутствие production pairing/API до следующего change.
 
 Проверенный стек: Kotlin 2.2.10, AGP 9.3.2, Compose BOM 2026.02.01, Lifecycle 2.11.0, Navigation 2.10.0, Ktor 3.5.2 и Kotlinx Serialization 1.9.0. Hilt добавляется впервые.
 
@@ -47,11 +47,11 @@ Compose -> HomeViewModel -> Start/Stop use cases -> ServerLifecycleRepository
 
 Permission dialog остаётся UI-операцией: ViewModel выдаёт одноразовый UI effect с продуктовыми требованиями разрешений, Compose запускает Activity Result API и возвращает результат action-ом. Android permission names и API level не попадают в domain.
 
-Альтернатива — Activity напрямую запускает service и хранит его state. Она отклонена: при пересоздании Activity появляются два источника истины, ViewModel начинает зависеть от Android lifecycle, а notification action не может согласованно обновить UI.
+Альтернатива - Activity напрямую запускает service и хранит его state. Она отклонена: при пересоздании Activity появляются два источника истины, ViewModel начинает зависеть от Android lifecycle, а notification action не может согласованно обновить UI.
 
 ### 2. Ввести Hilt как production composition root
 
-`DeviceBridgeApplication` становится Hilt application, `MainActivity` и foreground service — Android entry points. Constructor injection используется для собственных классов, `@Binds` — для domain interfaces, `@Provides` — только для Android/Ktor объектов, которыми проект не владеет. Process state и runtime coordinator получают application scope; Activity не владеет socket.
+`DeviceBridgeApplication` становится Hilt application, `MainActivity` и foreground service - Android entry points. Constructor injection используется для собственных классов, `@Binds` - для domain interfaces, `@Provides` - только для Android/Ktor объектов, которыми проект не владеет. Process state и runtime coordinator получают application scope; Activity не владеет socket.
 
 Version catalog фиксирует совместимые версии Hilt и compile-time processor. Java/Kotlin target обновляется до 17, как требует актуальное руководство Hilt. Совместимость выбранных Hilt/KSP версий с Kotlin 2.2.10 и AGP 9.3.2 проверяется отдельной чистой Gradle-сборкой до функциональных изменений.
 
@@ -101,7 +101,7 @@ Stop action вызывает тот же coordinator, что и UI: сначал
 
 Во время работы Android adapter следит за изменением permissions для UID приложения и повторно проверяет доступ перед сетевыми операциями. Отзыв LAN permission вызывает одну stop-команду с причиной `PermissionRevoked`. `SecurityException` от сетевого API является дополнительным fail-closed сигналом.
 
-Альтернатива — просить все разрешения при первом запуске приложения. Она отклонена: Android требует контекстного runtime request, а DeviceBridge должен объяснять LAN-доступ непосредственно перед явным запуском.
+Альтернатива - просить все разрешения при первом запуске приложения. Она отклонена: Android требует контекстного runtime request, а DeviceBridge должен объяснять LAN-доступ непосредственно перед явным запуском.
 
 Официальное основание: https://developer.android.com/privacy-and-security/local-network-permission
 

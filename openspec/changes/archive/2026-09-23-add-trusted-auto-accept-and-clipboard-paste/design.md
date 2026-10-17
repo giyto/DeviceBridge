@@ -1,6 +1,6 @@
 ## Context
 
-Мотивация — в `proposal.md`, требования — в delta specs.
+Мотивация - в `proposal.md`, требования - в delta specs.
 
 Текущее подтверждение входящего файла выполняется в Compose-слое: `FileViewModel` отправляет `FileEffect.UseDefaultDestination`, а `DeviceBridgeApp` открывает persisted SAF-папку через `PersistedDestinationPermissionController.openPersisted`, регистрирует lease в `FileDestinationLeaseRegistry` и вызывает `FileTransferCoordinator.approve(transferId, destinationId)`. Поэтому без экрана «Файлы» подтверждение невозможно. Очередь (`FileTransferScheduler`) держит не более одного активного item на направление и переводит следующий item из `QUEUED` в `CONNECTING`, где он ждёт решения. Session хранит `trustedBrowserId`, если создана из trusted credential; отзыв доверия закрывает производные sessions. Настройки лежат в `DeviceSettings` и DataStore.
 
@@ -22,9 +22,9 @@
 
 ## Decisions
 
-### 1. Автоприём — service-level компонент, а не ViewModel
+### 1. Автоприём - service-level компонент, а не ViewModel
 
-Добавляется singleton `TrustedAutoAcceptController` в `data/file`, который запускается и останавливается вместе с server runtime текущего generation. Он наблюдает snapshot coordinator, sessions и settings и для каждого `BROWSER_TO_ANDROID` item в фазе `CONNECTING` проверяет условия: владелец — действующая session с `trustedBrowserId`, автоприём включён, default destination задана. При выполнении условий он открывает persisted destination, регистрирует lease и вызывает `approve`.
+Добавляется singleton `TrustedAutoAcceptController` в `data/file`, который запускается и останавливается вместе с server runtime текущего generation. Он наблюдает snapshot coordinator, sessions и settings и для каждого `BROWSER_TO_ANDROID` item в фазе `CONNECTING` проверяет условия: владелец - действующая session с `trustedBrowserId`, автоприём включён, default destination задана. При выполнении условий он открывает persisted destination, регистрирует lease и вызывает `approve`.
 
 Альтернативы: логика в `FileViewModel` не работает без открытого экрана; логика внутри `FileTransferCoordinator` смешала бы протокольный координатор с Android SAF. Отдельный компонент тестируется на JVM с фейковыми gateway.
 
@@ -36,20 +36,20 @@
 
 Контроллер обрабатывает каждый transferId не более одного раза за generation и считает результат `InvalidState` от `approve` нормальным исходом (item уже принят вручную, отменён или завершён). При неудаче открытия папки lease не регистрируется, а item остаётся в `CONNECTING` для ручного решения; контроллер публикует причину «Автоприём приостановлен: папка недоступна». Lease освобождается тем же механизмом, что и при ручном подтверждении.
 
-### 4. Признак «принят автоматически» — в памяти
+### 4. Признак «принят автоматически» - в памяти
 
 Контроллер публикует `StateFlow` с множеством transferId, принятых автоматически в текущем generation. `FileViewModel` и главный экран дополняют им отображение item и имя браузера-отправителя. Остановка сервера очищает множество вместе с очередью. История не меняется: запись terminal результата идентична ручному приёму.
 
 ### 5. Настройка хранится как флаг, эффективность вычисляется
 
-`DeviceSettings` получает `autoAcceptTrustedFiles: Boolean` (по умолчанию `false`) и новый ключ DataStore. Включение отклоняется ViewModel, если destination отсутствует. Эффективное состояние — `флаг && destination доступна`; при потере доступа флаг не сбрасывается, а Settings показывает «приостановлен», поэтому после выбора новой папки автоприём продолжает работать без повторного включения.
+`DeviceSettings` получает `autoAcceptTrustedFiles: Boolean` (по умолчанию `false`) и новый ключ DataStore. Включение отклоняется ViewModel, если destination отсутствует. Эффективное состояние - `флаг && destination доступна`; при потере доступа флаг не сбрасывается, а Settings показывает «приостановлен», поэтому после выбора новой папки автоприём продолжает работать без повторного включения.
 
 ### 6. Вставка из буфера через событие `paste`
 
 Web view подписывается на `paste` на уровне документа только пока file section активна. Правила:
 
 - вне поля текста: если `clipboardData.files` непуст, файлы передаются в `addFiles`, событие отменяется; иначе ничего не происходит;
-- в поле текста: если есть непустой `text/plain`, событие не трогается и текст вставляется штатно; если текста нет, а есть изображение — оно уходит в draft, событие отменяется, announcer и видимая подсказка сообщают «Картинка добавлена в файлы»;
+- в поле текста: если есть непустой `text/plain`, событие не трогается и текст вставляется штатно; если текста нет, а есть изображение - оно уходит в draft, событие отменяется, announcer и видимая подсказка сообщают «Картинка добавлена в файлы»;
 - без активной session событие игнорируется.
 
 Изображению без осмысленного имени (браузеры дают `image.png`) присваивается имя `Скриншот ГГГГ-ММ-ДД ЧЧ-ММ-СС` по локальному времени и расширение по MIME (`png`, `jpg`, `gif`, `webp`, `bmp`; иначе исходное). Каждая вставка создаёт новый `File`, поэтому повторные вставки не считаются дубликатами. В зоне файлов добавляется строка подсказки про `Ctrl+V`.

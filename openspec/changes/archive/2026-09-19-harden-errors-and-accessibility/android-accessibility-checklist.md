@@ -34,7 +34,7 @@
 
 ## Автоматические подтверждения
 
-- [x] `DeviceBridgeNavigationTest#visibleClickTargetsAcrossAllScreensHaveNamesRolesAndMinimumTouchSize` — успешно.
-- [x] Новые semantics regression tests для QuickAction, Text, Files и History — 6/6 успешно.
-- [x] `:app:connectedDebugAndroidTest` на Pixel 4 / Android 10 / API 29 — 106/106, 0 skipped, 0 failed.
-- [x] `:app:connectedDebugAndroidTest` на Pixel 8 / Android 17 / API 37.1 — 106/106, 0 skipped, 0 failed.
+- [x] `DeviceBridgeNavigationTest#visibleClickTargetsAcrossAllScreensHaveNamesRolesAndMinimumTouchSize` - успешно.
+- [x] Новые semantics regression tests для QuickAction, Text, Files и History - 6/6 успешно.
+- [x] `:app:connectedDebugAndroidTest` на Pixel 4 / Android 10 / API 29 - 106/106, 0 skipped, 0 failed.
+- [x] `:app:connectedDebugAndroidTest` на Pixel 8 / Android 17 / API 37.1 - 106/106, 0 skipped, 0 failed.

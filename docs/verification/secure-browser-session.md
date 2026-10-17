@@ -4,8 +4,8 @@
 
 - Date: 2026-09-15.
 - Planning commit: `b61a659` (`spec: plan secure browser sessions`).
-- `npm.cmd test` from `web/` — successful: Vite production prebuild completed, 7 test files and 26 tests passed.
-- `.\gradlew.bat :app:testDebugUnitTest :app:lintDebug :app:assembleDebug :app:assembleRelease` — successful: 112 actionable tasks, 11 executed and 101 up-to-date.
+- `npm.cmd test` from `web/` - successful: Vite production prebuild completed, 7 test files and 26 tests passed.
+- `.\gradlew.bat :app:testDebugUnitTest :app:lintDebug :app:assembleDebug :app:assembleRelease` - successful: 112 actionable tasks, 11 executed and 101 up-to-date.
 - JUnit XML baseline: 40 suites, 101 tests, 0 failures, 0 errors, 0 skipped.
 - Android lint baseline: 0 errors and 36 warnings.
 - Debug APK: 37,776,467 bytes; SHA-256 `571BA5281F0DF983DA1952701C143C0632919A1C771E1490F3357CE1C062CF4F`.

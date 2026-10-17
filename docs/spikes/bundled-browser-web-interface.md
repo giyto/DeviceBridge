@@ -110,8 +110,8 @@ npm run browser:matrix
 
 | Браузер | Версия | Viewport и темы | Время до `available` |
 | --- | --- | --- | ---: |
-| Google Chrome | 153.0.8010.36 | 360/768/1920, light/dark | 97–289 мс |
-| Microsoft Edge | 150.0.4078.105 | 360/768/1920, light/dark | 108–240 мс |
+| Google Chrome | 153.0.8010.36 | 360/768/1920, light/dark | 97-289 мс |
+| Microsoft Edge | 150.0.4078.105 | 360/768/1920, light/dark | 108-240 мс |
 
 Во всех 12 сценариях:
 

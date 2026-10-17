@@ -49,7 +49,7 @@
 | Cancellation + recovery | PASS: health доступен после обеих отмен | PASS: health доступен после обеих отмен |
 | Host health через adb forward | PASS: HTTP 200, sdkInt=29 | PASS: HTTP 200, sdkInt=37 |
 
-На каждом AVD команда `./gradlew.bat :app:connectedDebugAndroidTest` завершила 17 из 17 тестов без ошибок и пропусков. На API 29 прогон занял 2 мин 13 с, на API 37.1 — 3 мин 16 с.
+На каждом AVD команда `./gradlew.bat :app:connectedDebugAndroidTest` завершила 17 из 17 тестов без ошибок и пропусков. На API 29 прогон занял 2 мин 13 с, на API 37.1 - 3 мин 16 с.
 
 ## Метрики памяти
 

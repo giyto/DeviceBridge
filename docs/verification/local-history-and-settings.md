@@ -1,6 +1,6 @@
 # Local history, settings and editable drafts verification
 
-## Automated acceptance — 2026-09-18
+## Automated acceptance - 2026-09-18
 
 - Change: `add-local-history-and-settings`.
 - Android JVM: 130 suites, 419 tests, 0 failures, 0 errors and 0 skipped.
@@ -13,7 +13,7 @@
 
 The automated matrix covers Room/DataStore persistence, retention, safe history previews, filters/details/delete/clear, settings validation and SAF destination recovery, trusted-browser exchange/revoke/expiry, Android and browser editable file drafts, staged-source cleanup, production-route privacy, backup exclusions, failure isolation, light/dark UI and large font behavior.
 
-## Launcher icon acceptance — 2026-09-18
+## Launcher icon acceptance - 2026-09-18
 
 - The debug APK was installed independently on API 29 and API 37.1 after the connected tests.
 - Pixel Launcher exposed the exact app label `DeviceBridge` on both devices.
@@ -24,7 +24,7 @@ The automated matrix covers Room/DataStore persistence, retention, safe history 
 
 The screenshots of this first icon were removed after the icon was replaced on 2026-09-25 (phone, laptop and arrows both ways); see the commit "feat: new app icon for the phone, the browser tab and the page shortcut".
 
-## User manual acceptance — 2026-09-18
+## User manual acceptance - 2026-09-18
 
 The user confirmed the combined physical Android ↔ desktop browser matrix:
 

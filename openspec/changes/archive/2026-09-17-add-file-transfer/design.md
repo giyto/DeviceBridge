@@ -1,6 +1,6 @@
 ## Context
 
-См. proposal.md — Why. Текущий production stack уже имеет Ktor 3.5.2/CIO, foreground service, active browser sessions, защищённые HTTP/WebSocket routes и двусторонний text protocol. Диагностический spike подтвердил на API 29 и API 37.1 потоковые upload/download по 500 МБ, cancellation, SHA-256 и запас по памяти; production file routes пока намеренно возвращают 404.
+См. proposal.md - Why. Текущий production stack уже имеет Ktor 3.5.2/CIO, foreground service, active browser sessions, защищённые HTTP/WebSocket routes и двусторонний text protocol. Диагностический spike подтвердил на API 29 и API 37.1 потоковые upload/download по 500 МБ, cancellation, SHA-256 и запас по памяти; production file routes пока намеренно возвращают 404.
 
 ТЗ 2.0 требует одно Android-приложение, LAN HTTP/WebSocket, отсутствие desktop companion и service worker, передачу в обе стороны, одну активную сетевую операцию каждого направления, SAF, progress и cancellation. Browser → Android payload проверяется по SHA-256; Android → Browser завершается после успешной потоковой отдачи заявленного количества байтов без повторного выбора скачанного файла. Для текущего change зафиксирован диапазон одного файла от 0 байт до 1 ГиБ включительно и обязательная 500 МБ проверка потоковой передачи. История, постоянная папка назначения, уменьшаемая пользователем file-size setting и trusted browsers относятся к следующему change.
 
@@ -52,7 +52,7 @@ DELETE /api/v1/transfers/{transferId} отменяет queued или active oper
 
 POST /api/v1/transfers/{transferId}/retry выполняет только явный повтор принадлежащего session terminal item. Команда возвращает тот же item в очередь с обнулённым progress; payload не запускается автоматически. Для Android → Browser повтор доступен, пока Android сохраняет исходный content URI или private staged source текущего server generation.
 
-Альтернатива — multipart batch. Она отклонена: один большой multipart усложняет независимую очередь, progress, cancellation и cleanup отдельных файлов.
+Альтернатива - multipart batch. Она отклонена: один большой multipart усложняет независимую очередь, progress, cancellation и cleanup отдельных файлов.
 
 ### 2. Очередь принадлежит server generation
 
@@ -66,7 +66,7 @@ queued → connecting → transferring → completed
 
 Из любого non-terminal state разрешены cancelled или failed. Terminal state неизменяем внутри reducer; только отдельная явная retry-команда scheduler создаёт новую попытку того же item из сохранённых metadata и сбрасывает progress. Reducer проверяет монотонность bytes, допустимые переходы и ownership. Queue и terminal metadata ограничены по количеству, очищаются при server stop и не записываются в Room.
 
-Альтернатива — отдельная очередь на browser session. Она отклонена, поскольку несколько sessions смогли бы параллельно перегрузить один телефон и нарушить FR-06.
+Альтернатива - отдельная очередь на browser session. Она отклонена, поскольку несколько sessions смогли бы параллельно перегрузить один телефон и нарушить FR-06.
 
 ### 3. Один per-session outbound event actor
 
@@ -92,7 +92,7 @@ Coordinator делает первый потоковый pass по source URI д
 
 Ktor отдаёт ContentResolver InputStream через respondOutputStream/ByteWriteChannel с content length и считает фактически записанные bytes. Ktor 3.5 поддерживает incremental request/response I/O, не требующее полного payload: [Ktor I/O interoperability](https://ktor.io/docs/io-interoperability.html), [respondOutputStream API](https://api.ktor.io/ktor-server-core/io.ktor.server.response/respond-output-stream.html).
 
-После server-side stream completion item сразу становится completed. Критерий успеха — source stream закончился ровно на заявленном размере, response не был прерван и все байты были переданы в native download response. Web UI не просит повторно выбирать сохранённый файл и не удерживает очередь в verifying.
+После server-side stream completion item сразу становится completed. Критерий успеха - source stream закончился ровно на заявленном размере, response не был прерван и все байты были переданы в native download response. Web UI не просит повторно выбирать сохранённый файл и не удерживает очередь в verifying.
 
 При пользовательской отмене или сетевой ошибке source URI/private staged source не удаляется немедленно: он остаётся привязанным к terminal item для explicit retry в текущем server generation. Источник удаляется после completed, при revoke владельца или общем server stop. Retry снова ставит тот же item в FIFO и требует нового действия «Скачать», поэтому отмена не теряет файл и не запускает скрытый повтор.
 

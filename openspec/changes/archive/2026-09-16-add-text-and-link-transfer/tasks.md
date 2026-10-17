@@ -46,7 +46,7 @@
 - [x] 6.3 Выводить пользовательское содержимое только через `textContent`/form value; проверить XSS regression-тестами HTML/script-like payload без появления исполняемых DOM nodes.
 - [x] 6.4 Реализовать явное копирование с Clipboard API только в разрешённом secure context и selectable fallback; проверить Vitest-тестами success, insecure context и rejected permission без ложного success.
 - [x] 6.5 Добавить явное открытие только server-classified `http`/`https` ссылок без auto-open; проверить DOM-тестами отсутствие navigation при получении и отсутствие open action для обычного/опасного текста.
-- [x] 6.6 Обновить стили светлой/тёмной темы и viewport 360–1920 px для формы и карточек; проверить contract-тестами отсутствие горизонтального overflow и видимый `:focus-visible`.
+- [x] 6.6 Обновить стили светлой/тёмной темы и viewport 360-1920 px для формы и карточек; проверить contract-тестами отсутствие горизонтального overflow и видимый `:focus-visible`.
 
 ## 7. Сквозная автоматическая проверка
 

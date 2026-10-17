@@ -13,7 +13,7 @@
   - совпадения внутри одной папки без учёта регистра и после очистки получают « (2)».
 
   Проверка: JVM-тесты на поддельном провайдере (новая папка, совпадение имени, провайдер сам переименовал, `Отчёт.pdf` и `отчёт.pdf`, повторный файл в уже созданной подпапке не создаёт её снова) и instrumented-тест на эмуляторе API 37 с настоящим деревом SAF в `Download`
-- [ ] 1.4 Ключ продолжения для файла папки: `displayName` — относительный путь, `treeUri` — URI верхней папки. При `INTERRUPTED` незавершённая часть текущего файла удаляется. Проверка: `ResumableUploadPreparerTest` на продолжение файла из подпапки и на удаление части при прерывании папки
+- [ ] 1.4 Ключ продолжения для файла папки: `displayName` - относительный путь, `treeUri` - URI верхней папки. При `INTERRUPTED` незавершённая часть текущего файла удаляется. Проверка: `ResumableUploadPreparerTest` на продолжение файла из подпапки и на удаление части при прерывании папки
 
 ## 2. Android: состояние папки и очередь
 
@@ -68,7 +68,7 @@
 
 ## 6. Web: передача папки
 
-- [ ] 6.1 В `fileApiClient` добавить `offerFolder`, `finishFolder`, `cancelFolder`, `retryFolder`, а в разбор событий — `folder.progress` и `folders` в снимке. Проверка: vitest `fileApiClient` и `sessionEventFile`
+- [ ] 6.1 В `fileApiClient` добавить `offerFolder`, `finishFolder`, `cancelFolder`, `retryFolder`, а в разбор событий - `folder.progress` и `folders` в снимке. Проверка: vitest `fileApiClient` и `sessionEventFile`
 - [ ] 6.2 Очередь папки в `fileTransferController`:
   - заявка, ожидание принятия;
   - по каждому файлу хеш прямо перед отправкой, предложение, `upload-offset`, загрузка;

@@ -4,11 +4,11 @@
 
 DeviceBridge создаётся как одно Android-приложение. Телефон поднимает локальный HTTP/WebSocket-сервер, раздаёт встроенный веб-интерфейс и хранит данные. На компьютере пользователь открывает браузер; отдельное Windows-приложение, внешний backend, аренда сервера и обязательная покупка инфраструктуры не входят в текущую версию.
 
-Основной источник требований — docs/technical-specification.md версии 2.0. Каждый change должен сохранять Clean Architecture, MVVM и SOLID, а инфраструктурные детали Ktor, Room и Android API не должны проникать во ViewModel и domain.
+Основной источник требований - docs/technical-specification.md версии 2.0. Каждый change должен сохранять Clean Architecture, MVVM и SOLID, а инфраструктурные детали Ktor, Room и Android API не должны проникать во ViewModel и domain.
 
 ## Порядок изменений
 
-### 1. establish-android-foundation — завершён и архивирован
+### 1. establish-android-foundation - завершён и архивирован
 
 Цель: создать проверяемую основу одного Android-приложения.
 
@@ -16,7 +16,7 @@ DeviceBridge создаётся как одно Android-приложение. Т
 
 Архив: openspec/changes/archive/2026-09-14-establish-android-foundation.
 
-### 2. validate-embedded-ktor-server — завершён и архивирован
+### 2. validate-embedded-ktor-server - завершён и архивирован
 
 Цель: снять главный технический риск одноприложенной архитектуры до разработки функций.
 
@@ -28,7 +28,7 @@ DeviceBridge создаётся как одно Android-приложение. Т
 
 Архив: openspec/changes/archive/2026-09-14-validate-embedded-ktor-server.
 
-### 3. bundle-browser-web-interface — завершён и архивирован
+### 3. bundle-browser-web-interface - завершён и архивирован
 
 Цель: встроить в APK минимальную статическую веб-страницу и воспроизводимый Vite build pipeline.
 
@@ -38,17 +38,17 @@ DeviceBridge создаётся как одно Android-приложение. Т
 
 Архив: openspec/changes/archive/2026-09-14-bundle-browser-web-interface.
 
-### 4. add-server-lifecycle — завершён и архивирован
+### 4. add-server-lifecycle - завершён и архивирован
 
 Цель: превратить принятый spike в production lifecycle локального сервера.
 
 Результат: foreground service, запуск/остановка из приложения, уведомление, LAN address/port, permission flow API 37, обработка смены сети и восстановление состояния. На этом этапе вводится Hilt для production-компонентов.
 
-Зависимость: этапы 2–3.
+Зависимость: этапы 2-3.
 
 Архив: openspec/changes/archive/2026-09-15-add-server-lifecycle.
 
-### 5. add-secure-browser-session — завершён и архивирован
+### 5. add-secure-browser-session - завершён и архивирован
 
 Цель: разрешать доступ только подтверждённому браузеру в локальной сети.
 
@@ -58,7 +58,7 @@ DeviceBridge создаётся как одно Android-приложение. Т
 
 Архив: openspec/changes/archive/2026-09-16-add-secure-browser-session.
 
-### 6. add-text-and-link-transfer — завершён и архивирован
+### 6. add-text-and-link-transfer - завершён и архивирован
 
 Цель: реализовать ежедневный обмен текстом и ссылками между телефоном и браузером.
 
@@ -68,7 +68,7 @@ DeviceBridge создаётся как одно Android-приложение. Т
 
 Архив: openspec/changes/archive/2026-09-16-add-text-and-link-transfer.
 
-### 7. add-file-transfer — завершён и архивирован
+### 7. add-file-transfer - завершён и архивирован
 
 Цель: реализовать двустороннюю передачу файлов без внешнего сервера.
 
@@ -78,17 +78,17 @@ DeviceBridge создаётся как одно Android-приложение. Т
 
 Архив: openspec/changes/archive/2026-09-17-add-file-transfer.
 
-### 8. add-local-history-and-settings — завершён и архивирован
+### 8. add-local-history-and-settings - завершён и архивирован
 
 Цель: сделать приложение удобным для постоянного личного использования.
 
-Результат: локальная история операций в Room, очистка и ограничения хранения, настройки приложения и список доверенных браузеров. Дополнительно Android и web получают редактируемый черновик выбранных файлов до отправки, а Android-приложение — собственную adaptive launcher icon. Domain работает через repository-интерфейсы.
+Результат: локальная история операций в Room, очистка и ограничения хранения, настройки приложения и список доверенных браузеров. Дополнительно Android и web получают редактируемый черновик выбранных файлов до отправки, а Android-приложение - собственную adaptive launcher icon. Domain работает через repository-интерфейсы.
 
-Зависимость: этапы 5–7.
+Зависимость: этапы 5-7.
 
 Архив: openspec/changes/archive/2026-09-18-add-local-history-and-settings.
 
-### 9. harden-errors-and-accessibility — завершён и архивирован
+### 9. harden-errors-and-accessibility - завершён и архивирован
 
 Цель: довести основные сценарии до устойчивого пользовательского качества.
 
@@ -96,7 +96,7 @@ DeviceBridge создаётся как одно Android-приложение. Т
 
 Архив: openspec/changes/archive/2026-09-19-harden-errors-and-accessibility.
 
-### 10. redesign-midnight-bridge-interface — завершён и архивирован
+### 10. redesign-midnight-bridge-interface - завершён и архивирован
 
 Цель: сделать Android и web цельным узнаваемым продуктом.
 
@@ -104,7 +104,7 @@ DeviceBridge создаётся как одно Android-приложение. Т
 
 Архив: openspec/changes/archive/2026-09-19-redesign-midnight-bridge-interface.
 
-### 11. add-server-quick-tile-and-idle-stop — завершён и архивирован
+### 11. add-server-quick-tile-and-idle-stop - завершён и архивирован
 
 Цель: запускать и останавливать сервер без открытия приложения и не забывать его включённым.
 
@@ -112,7 +112,7 @@ DeviceBridge создаётся как одно Android-приложение. Т
 
 Архив: openspec/changes/archive/2026-09-23-add-server-quick-tile-and-idle-stop.
 
-### 12. add-trusted-auto-accept-and-clipboard-paste — завершён и архивирован
+### 12. add-trusted-auto-accept-and-clipboard-paste - завершён и архивирован
 
 Цель: убрать лишние действия в самых частых сценариях.
 
@@ -120,7 +120,7 @@ DeviceBridge создаётся как одно Android-приложение. Т
 
 Архив: openspec/changes/archive/2026-09-23-add-trusted-auto-accept-and-clipboard-paste.
 
-### 13. prepare-mvp-security-release — завершён и архивирован
+### 13. prepare-mvp-security-release - завершён и архивирован
 
 Цель: подтвердить безопасность и готовность локальной версии 1.0.
 
@@ -128,7 +128,7 @@ DeviceBridge создаётся как одно Android-приложение. Т
 
 Архив: openspec/changes/archive/2026-09-23-prepare-mvp-security-release.
 
-### 14. add-event-notifications — завершён и архивирован
+### 14. add-event-notifications - завершён и архивирован
 
 Цель: сообщать о событиях, когда приложение или страница не на экране.
 
@@ -136,7 +136,7 @@ DeviceBridge создаётся как одно Android-приложение. Т
 
 Архив: openspec/changes/archive/2026-09-24-add-event-notifications.
 
-### 15. add-https-secure-mode — завершён и архивирован
+### 15. add-https-secure-mode - завершён и архивирован
 
 Цель: шифровать трафик в локальной сети.
 
@@ -144,7 +144,7 @@ DeviceBridge создаётся как одно Android-приложение. Т
 
 Архив: openspec/changes/archive/2026-09-24-add-https-secure-mode.
 
-### 16. add-resumable-file-transfer — завершён и архивирован
+### 16. add-resumable-file-transfer - завершён и архивирован
 
 Цель: не терять уже переданное при обрыве.
 
@@ -152,7 +152,7 @@ DeviceBridge создаётся как одно Android-приложение. Т
 
 Архив: openspec/changes/archive/2026-09-24-add-resumable-file-transfer.
 
-### 17. add-local-name-and-quick-entry — завершён и архивирован
+### 17. add-local-name-and-quick-entry - завершён и архивирован
 
 Цель: постоянный адрес и быстрый повторный вход.
 
@@ -160,7 +160,7 @@ DeviceBridge создаётся как одно Android-приложение. Т
 
 Архив: openspec/changes/archive/2026-09-25-add-local-name-and-quick-entry.
 
-### 18. add-folder-upload — предложение, не начат
+### 18. add-folder-upload - предложение, не начат
 
 Цель: отправлять папку целиком с компьютера на телефон.
 

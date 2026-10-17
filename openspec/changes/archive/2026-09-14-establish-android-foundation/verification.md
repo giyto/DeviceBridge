@@ -2,14 +2,14 @@
 
 ## Automated checks
 
-Проверено 13–14 сентября 2026 года:
+Проверено 13-14 сентября 2026 года:
 
-- `:app:testDebugUnitTest` — `BUILD SUCCESSFUL`;
-- `:app:lintDebug :app:assembleDebug` — `BUILD SUCCESSFUL`;
+- `:app:testDebugUnitTest` - `BUILD SUCCESSFUL`;
+- `:app:lintDebug :app:assembleDebug` - `BUILD SUCCESSFUL`;
 - `:app:connectedDebugAndroidTest` на
-  `Pixel_8_API_37_1_DeviceBridge (AVD), Android 17` — 9/9 тестов прошли.
+  `Pixel_8_API_37_1_DeviceBridge (AVD), Android 17` - 9/9 тестов прошли.
 - `:app:connectedDebugAndroidTest` на
-  `Pixel_4_API_29_DeviceBridge (AVD), Android 10 / API 29` — тесты прошли.
+  `Pixel_4_API_29_DeviceBridge (AVD), Android 10 / API 29` - тесты прошли.
 
 Автоматические проверки выполнены на обеих целевых границах API.
 

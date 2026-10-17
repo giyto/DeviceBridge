@@ -30,7 +30,7 @@
 
 Android и web разделяют semantic tokens и визуальный характер, но не общий сгенерированный theme-файл. Compose продолжает использовать Material 3 color scheme, typography и shapes; web использует CSS custom properties и semantic HTML. Это сохраняет platform conventions и не связывает два build pipeline.
 
-Альтернатива — генерировать обе темы из общего JSON. Она отклонена: для текущего размера проекта добавит tooling и риск рассинхронизации build без достаточной пользы.
+Альтернатива - генерировать обе темы из общего JSON. Она отклонена: для текущего размера проекта добавит tooling и риск рассинхронизации build без достаточной пользы.
 
 ### 2. Палитры Midnight и Porcelain
 
@@ -70,11 +70,11 @@ Web использует только тип `light | dark` и browser-local х�
 
 Минимальный bootstrap в `<head>` читает только допустимое значение до загрузки stylesheet/module и выставляет initial theme, чтобы исключить flash. Недоступный storage, неизвестное значение или исключение дают безопасный fallback `dark`. `storage` event обновляет другие вкладки того же origin; `matchMedia` больше не участвует в выборе темы.
 
-Theme control — одна нативная icon button справа в connection/device area. Солнце показывает активную светлую тему, луна — активную тёмную; accessible name и title описывают действие переключения на противоположную тему. Выбор не вызывает reload и не меняет session/drafts.
+Theme control - одна нативная icon button справа в connection/device area. Солнце показывает активную светлую тему, луна - активную тёмную; accessible name и title описывают действие переключения на противоположную тему. Выбор не вызывает reload и не меняет session/drafts.
 
 ### 6. Web-шапка удаляется, branding остаётся в содержании
 
-Элемент `header.site-header`, его отдельная высота, brand link и badge «Только локально» удаляются. Первый meaningful block страницы становится connection/device context. Доступный page title сохраняется в документе и connection area; favicon и browser title остаются. Дополнительная eyebrow-подпись «Телефон и компьютер — рядом» и цветная верхняя signal-line удаляются как декоративный шум. Метка локальности не переносится в новую постоянную полосу: локальная природа объясняется в connection/help content и security warning.
+Элемент `header.site-header`, его отдельная высота, brand link и badge «Только локально» удаляются. Первый meaningful block страницы становится connection/device context. Доступный page title сохраняется в документе и connection area; favicon и browser title остаются. Дополнительная eyebrow-подпись «Телефон и компьютер - рядом» и цветная верхняя signal-line удаляются как декоративный шум. Метка локальности не переносится в новую постоянную полосу: локальная природа объясняется в connection/help content и security warning.
 
 ### 7. Device identity берётся из Android settings
 
@@ -94,7 +94,7 @@ Theme control — одна нативная icon button справа в connecti
 
 Все controls имеют default, hover/pressed, focused, disabled и loading states. Theme и warning controls используют native semantics, работают Tab/Shift+Tab/Enter/Space и имеют видимый focus в обеих темах. Status не кодируется только цветом. Layout проверяется при 360/768/1920 px, zoom/font scale 200 процентов, long URL/filename и reduced motion.
 
-Playwright visual baselines покрывают обе темы и отсутствие site header. Android Compose screenshots/layout assertions покрывают phone/large-screen и обе системные темы. OS-level screenshot skill используется только для ручной финальной проверки эмулятора, а browser screenshots — через Playwright.
+Playwright visual baselines покрывают обе темы и отсутствие site header. Android Compose screenshots/layout assertions покрывают phone/large-screen и обе системные темы. OS-level screenshot skill используется только для ручной финальной проверки эмулятора, а browser screenshots - через Playwright.
 
 ### 10. Android top-level headers остаются краткими
 
@@ -106,7 +106,7 @@ Home, History и Settings показывают только основной з�
 
 ### 12. History использует последовательные карточки и modal filter list
 
-History остаётся `LazyColumn` и показывает ровно одну запись на строку. Для history применяется специализированная скруглённая card surface вместо плоского `OperationalItem`: верхняя строка содержит тип и semantic status, основной уровень — имя файла либо text/link preview, нижняя metadata — размер файла при наличии, время, browser и направление. Карточка занимает всю доступную ширину, допускает перенос длинного filename, сохраняет общий radius/tokens Midnight/Porcelain и не вводит квадратную либо двухколоночную grid-композицию. Открытие деталей остаётся действием всей карточки, удаление — отдельным различимым destructive action.
+History остаётся `LazyColumn` и показывает ровно одну запись на строку. Для history применяется специализированная скруглённая card surface вместо плоского `OperationalItem`: верхняя строка содержит тип и semantic status, основной уровень - имя файла либо text/link preview, нижняя metadata - размер файла при наличии, время, browser и направление. Карточка занимает всю доступную ширину, допускает перенос длинного filename, сохраняет общий radius/tokens Midnight/Porcelain и не вводит квадратную либо двухколоночную grid-композицию. Открытие деталей остаётся действием всей карточки, удаление - отдельным различимым destructive action.
 
 Три горизонтальных ряда `FilterChip` удаляются с основного экрана. Вместо них используется одна компактная outlined surface «Фильтры» с badge количества активных значений и кратким summary. Она открывает Material 3 `ModalBottomSheet`. Внутри располагаются вертикальные группы «Направление», «Тип» и «Результат»; каждая строка имеет label, checkbox/selected semantics и touch target не менее 48 dp. Выбор сразу отправляет существующие `ToggleDirection`, `ToggleKind` и `ToggleStatus`, поэтому `SavedStateHandle` и repository query продолжают быть единственным source of truth. Новое действие `ResetFilters` атомарно очищает три набора; «Готово» только закрывает sheet и не создаёт отдельный draft фильтра.
 

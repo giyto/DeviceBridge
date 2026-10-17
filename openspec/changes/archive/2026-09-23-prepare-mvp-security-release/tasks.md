@@ -2,7 +2,7 @@
 
 - [x] 1.1 Зафиксировать текущий release baseline: build types, versionName/versionCode, signing source, packaged web assets, manifest permissions, route graph и runtime network destinations; проверить отчёт командами сборки/inspection и убедиться, что он не содержит секретов.
 - [x] 1.2 Создать threat/control/evidence matrix для каждой обязательной меры раздела 12.2 ТЗ и LAN-only residual risks; проверить, что у каждой строки есть owner, автоматический или ручной gate и blocking severity.
-- [x] 1.3 Зафиксировать ADR о выборе варианта №4 — одно Android-приложение и LAN-only HTTP/WebSocket — с отклонёнными TLS/WebRTC/desktop alternatives; проверить согласованность с proposal, delta spec и ТЗ без обещания шифрования транспорта.
+- [x] 1.3 Зафиксировать ADR о выборе варианта №4 - одно Android-приложение и LAN-only HTTP/WebSocket - с отклонёнными TLS/WebRTC/desktop alternatives; проверить согласованность с proposal, delta spec и ТЗ без обещания шифрования транспорта.
 
 ## 2. Release build и идентичность artifact
 

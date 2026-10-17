@@ -24,7 +24,7 @@ Web shell MUST понятным языком сообщать, что локал
 
 ### Requirement: Интерфейс адаптируется к браузерному окну и выбранной теме
 
-Web shell MUST сохранять читаемость и основные действия при ширине viewport от 360 до 1920 пикселей и MUST предоставлять только темы `Светлая` и `Тёмная`. Тема MUST переключаться одной icon button справа в connection area: солнце обозначает активную светлую тему, луна — активную тёмную. По умолчанию SHALL использоваться тёмная схема. Выбор MUST сохраняться локально в browser profile, применяться до первой видимой отрисовки, синхронизироваться между вкладками одного origin и не зависеть от server session или trusted credential. Ранее сохранённое значение `system`, неизвестное значение и недоступное storage MUST давать безопасный fallback `dark`.
+Web shell MUST сохранять читаемость и основные действия при ширине viewport от 360 до 1920 пикселей и MUST предоставлять только темы `Светлая` и `Тёмная`. Тема MUST переключаться одной icon button справа в connection area: солнце обозначает активную светлую тему, луна - активную тёмную. По умолчанию SHALL использоваться тёмная схема. Выбор MUST сохраняться локально в browser profile, применяться до первой видимой отрисовки, синхронизироваться между вкладками одного origin и не зависеть от server session или trusted credential. Ранее сохранённое значение `system`, неизвестное значение и недоступное storage MUST давать безопасный fallback `dark`.
 
 #### Scenario: Узкое и широкое окно
 
@@ -52,7 +52,7 @@ Web shell MUST сохранять читаемость и основные де�
 
 ### Requirement: Web shell разделяет визуальный язык DeviceBridge с Android
 
-Web UI MUST использовать согласованный с Android визуальный язык `Midnight Bridge / Porcelain Bridge`: одинаковый смысл semantic status colors, typography hierarchy, spacing rhythm, shape и action hierarchy при сохранении browser conventions и semantic HTML. Тёмная тема MUST использовать спокойную near-black/graphite layered foundation с ограниченным accent, а светлая — холодный светло-серый page background и белые рабочие surfaces; обе темы MUST иметь различимые default, hover, pressed, focused, disabled, loading, error и success states без внешних fonts, CDN или styling runtime.
+Web UI MUST использовать согласованный с Android визуальный язык `Midnight Bridge / Porcelain Bridge`: одинаковый смысл semantic status colors, typography hierarchy, spacing rhythm, shape и action hierarchy при сохранении browser conventions и semantic HTML. Тёмная тема MUST использовать спокойную near-black/graphite layered foundation с ограниченным accent, а светлая - холодный светло-серый page background и белые рабочие surfaces; обе темы MUST иметь различимые default, hover, pressed, focused, disabled, loading, error и success states без внешних fonts, CDN или styling runtime.
 
 #### Scenario: Пользователь меняет системную тему
 
@@ -68,7 +68,7 @@ Web UI MUST использовать согласованный с Android ви�
 
 ### Requirement: Web shell адаптирует рабочую область без потери контекста
 
-При достаточной ширине web shell SHALL показывать две согласованные области: connection/device context и text/files/activity workspace. Постоянная глобальная верхняя шапка с отдельными branding и locality badges MUST отсутствовать; branding, icon theme toggle и локальный connection context SHALL находиться внутри содержательных областей и не занимать отдельную полосу viewport. Декоративная подпись «Телефон и компьютер — рядом» и цветная верхняя линия состояния MUST отсутствовать. После авторизации connection status MUST показывать эффективное имя Android-устройства, полученное из защищённого session status, вместо технической версии web assets; до авторизации это поле MUST NOT раскрывать device name. На narrow viewport layout MUST переходить в одну колонку без horizontal page overflow, сохраняя connection status и текущую operation. Text/link feed и file cards MUST использовать те же directions, stages, terminal statuses и применимые actions, что Android UI.
+При достаточной ширине web shell SHALL показывать две согласованные области: connection/device context и text/files/activity workspace. Постоянная глобальная верхняя шапка с отдельными branding и locality badges MUST отсутствовать; branding, icon theme toggle и локальный connection context SHALL находиться внутри содержательных областей и не занимать отдельную полосу viewport. Декоративная подпись «Телефон и компьютер - рядом» и цветная верхняя линия состояния MUST отсутствовать. После авторизации connection status MUST показывать эффективное имя Android-устройства, полученное из защищённого session status, вместо технической версии web assets; до авторизации это поле MUST NOT раскрывать device name. На narrow viewport layout MUST переходить в одну колонку без horizontal page overflow, сохраняя connection status и текущую operation. Text/link feed и file cards MUST использовать те же directions, stages, terminal statuses и применимые actions, что Android UI.
 
 #### Scenario: Wide desktop viewport
 
