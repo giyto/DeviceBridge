@@ -14,7 +14,7 @@ class RemoteClientAddressTest {
 
     @Test
     fun preservesLanIpv4AndLeavesUnsupportedAddressesForValidation() {
-        assertEquals("192.168.0.90", RemoteClientAddress.canonicalIpv4("192.168.0.90"))
+        assertEquals("192.168.1.37", RemoteClientAddress.canonicalIpv4("192.168.1.37"))
         assertEquals("device.local", RemoteClientAddress.canonicalIpv4("device.local"))
     }
 }
