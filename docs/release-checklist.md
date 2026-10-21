@@ -4,7 +4,7 @@
 `FAIL` и `BLOCKED` никогда не считаются успехом.
 
 Текущий candidate: `4/1.0.3`, commit `79cd4f5`, SHA-256 `cdedaccb…834b`
-(полные значения — в `docs/verification/mvp-security-release.md`).
+(полные значения - в `docs/verification/mvp-security-release.md`).
 
 ## Идентичность кандидата
 
@@ -61,7 +61,7 @@ Web gates выполнены на commit `b885044`; commit `79cd4f5` не мен
 | API 37.1 clean install и полный smoke | `PASS`, включая deny/retry/allow local-network permission и Share Target файлов |
 | Update поверх предыдущей совместимо подписанной версии | `PASS`: `3/1.0.2` → `4/1.0.3` на API 29 и API 37.1 |
 | Chrome + Edge, Windows 11 | `PASS` |
-| Реальная передача 500 MiB в обе стороны, cancel и network interruption | `PASS`; расхождения статусов после cancel/interruption — F2 (Medium) |
+| Реальная передача 500 MiB в обе стороны, cancel и network interruption | `PASS`; расхождения статусов после cancel/interruption - F2 (Medium) |
 | Отсутствие внешнего egress (наблюдение) | `PASS` |
 | Работа без Интернета | `PASS`: ручная проверка владельцем продукта 2026-09-22 |
 
@@ -71,5 +71,5 @@ Windows 10 исключена из целевой матрицы MVP 1.0 реш�
 
 `READY` разрешён только при release-подписи, чистой идентичности artifact,
 отсутствии unresolved Critical/High findings и `PASS` во всех обязательных ячейках.
-Текущий verdict: `READY` для `4/1.0.3`. Открытые F2 (Medium) и F3–F7 (Low) не блокируют.
+Текущий verdict: `READY` для `4/1.0.3`. Открытые F2 (Medium) и F3-F7 (Low) не блокируют.
 Перед публикацией повторить dependency advisory review.

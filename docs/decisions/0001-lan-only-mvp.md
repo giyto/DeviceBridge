@@ -1,52 +1,54 @@
-# ADR-0001: LAN-only transport for MVP 1.0
+# ADR-0001: только локальная сеть в MVP 1.0
 
-- Status: accepted
-- Date: 2026-09-20
-- Decision owner: DeviceBridge maintainer
-- Related specification: `docs/technical-specification.md`, sections 12.2, 12.3 and 20
-- Related change: `prepare-mvp-security-release`
+- Статус: принято
+- Дата: 2026-09-20
+- Кто принял: сопровождающий DeviceBridge
+- Связанное ТЗ: `docs/technical-specification.md`, разделы 12.2, 12.3 и 20
+- Связанный change: `prepare-mvp-security-release`
 
-## Context
+## Контекст
 
-DeviceBridge is one Android application that exposes a bundled browser client over the phone's local network. The MVP must work without a cloud relay or a separately installed desktop application. A dynamic private IPv4 address cannot use an ordinary publicly trusted TLS certificate without another service, a domain, or explicit certificate installation on the computer.
+DeviceBridge - одно Android-приложение, которое отдаёт встроенный браузерный клиент по локальной сети телефона. MVP должен работать без облачного ретранслятора и без отдельной программы на компьютере. Для динамического частного IPv4-адреса нельзя получить обычный публично доверенный TLS-сертификат без дополнительного сервиса, своего домена или ручной установки сертификата на компьютер.
 
-HTTP/WebSocket session authorization prevents unapproved API use, but it does not encrypt traffic from another participant on the same network. This transport limitation must remain visible and must not be described as end-to-end or transport encryption.
+Авторизация сессии по HTTP/WebSocket не даёт пользоваться API без разрешения, но не шифрует трафик от других участников той же сети. Это ограничение транспорта должно оставаться на виду, и его нельзя описывать как сквозное или транспортное шифрование.
 
-## Decision
+## Решение
 
-MVP 1.0 uses option 4 from the technical specification: one Android application with LAN-only HTTP/WebSocket transport in a trusted private network.
+MVP 1.0 использует вариант 4 из ТЗ: одно Android-приложение с транспортом HTTP/WebSocket только в локальной сети, в доверенной частной сети.
 
-The release contract therefore requires:
+Поэтому для релиза обязательны:
 
-- an explicit trusted-network warning before transfer;
-- short-lived pairing plus phone approval and bearer authorization;
-- exact Host/Origin checks and no permissive CORS;
-- no external backend, analytics, CDN, cloud relay, or desktop companion;
-- immediate listener/session shutdown after stop, network loss, or local-network permission revocation;
-- a fail-closed release verdict when security or distribution evidence is missing.
+- явное предупреждение о доверенной сети до передачи;
+- короткоживущий код подключения, подтверждение на телефоне и авторизация по токену (bearer);
+- точная проверка Host и Origin и никакого разрешающего CORS;
+- никакого внешнего сервера, аналитики, CDN, облачного ретранслятора или программы для компьютера;
+- немедленная остановка сервера и сессий после остановки, потери сети или отзыва разрешения на локальную сеть;
+- отказ в релизе по умолчанию, если доказательств безопасности или готовности к распространению нет.
 
-The session token is an authorization credential only. It is not a claim of transport confidentiality.
+Токен сессии - только средство авторизации. Он не означает, что трафик конфиденциален.
 
-## Rejected alternatives
+## Отклонённые варианты
 
-### Local HTTPS with user-managed trust
+### Локальный HTTPS с доверием, которое настраивает пользователь
 
-Rejected for MVP because certificate provisioning and trust onboarding materially change installation and recovery flows. It may be reconsidered in a separate change.
+Отклонён для MVP: выпуск сертификата и настройка доверия к нему заметно усложняют установку и восстановление. Может быть рассмотрен отдельным change.
+
+> Дополнение: позже реализован как необязательный защищённый режим в change `add-https-secure-mode` (архив от 2026-09-24). По умолчанию DeviceBridge по-прежнему работает по HTTP в локальной сети.
 
 ### WebRTC/DTLS
 
-Rejected for MVP because it changes transport negotiation, browser compatibility, protocol implementation, and acceptance scope. It requires a dedicated design and threat review.
+Отклонён для MVP: меняет согласование транспорта, совместимость с браузерами, реализацию протокола и объём приёмки. Требует отдельного проектирования и разбора угроз.
 
-### Desktop companion
+### Программа для компьютера
 
-Rejected for MVP because it creates a second distributed application and contradicts the one-Android-app product decision. It remains a future option if the browser-only model proves insufficient.
+Отклонена для MVP: это второе распространяемое приложение, что противоречит решению «одно Android-приложение». Остаётся вариантом на будущее, если модели «только браузер» окажется недостаточно.
 
-### Cloud relay or account service
+### Облачный ретранслятор или сервис аккаунтов
 
-Rejected because offline-first local operation and absence of external runtime infrastructure are product constraints.
+Отклонены: работа без интернета в локальной сети и отсутствие внешней инфраструктуры - ограничения продукта.
 
-## Consequences
+## Последствия
 
-Positive consequences are a small distribution surface, offline operation, and no computer-side installation. Residual risk is that text, file contents, and session credentials are readable to a capable observer on the same LAN. The user must use a trusted private network and avoid sensitive transfers on public or unknown Wi-Fi.
+Плюсы: маленькая поверхность распространения, работа без интернета и ничего не нужно ставить на компьютер. Остаточный риск: текст, содержимое файлов и учётные данные сессии может прочитать подготовленный наблюдатель в той же локальной сети. Пользователь должен работать в доверенной частной сети и не передавать чувствительные данные в публичном или незнакомом Wi-Fi.
 
-This ADR does not authorize weakening pairing, request validation, credential storage, logging, file validation, or lifecycle controls. A future encrypted transport must be proposed as a separate OpenSpec change and must preserve existing authorization guarantees.
+Это решение не разрешает ослаблять подключение по коду, проверку запросов, хранение учётных данных, журналирование, проверку файлов или управление жизненным циклом сервера. Будущий шифрованный транспорт должен предлагаться отдельным change в OpenSpec и сохранять существующие гарантии авторизации.

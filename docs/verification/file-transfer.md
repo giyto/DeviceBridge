@@ -53,7 +53,7 @@ Observed results:
 
 ### Scope boundary
 
-This gate validates the browser mechanism and the bundled digest adapter only. It does not publish production file routes, create Android storage output or claim end-to-end file transfer completion. Those parts remain in sections 2–10 of the OpenSpec task list.
+This gate validates the browser mechanism and the bundled digest adapter only. It does not publish production file routes, create Android storage output or claim end-to-end file transfer completion. Those parts remain in sections 2-10 of the OpenSpec task list.
 
 ## Production automated verification
 
@@ -91,7 +91,7 @@ All peak deltas stayed below 128 MiB and all retained deltas stayed below 32 MiB
 - `DownloadGrantRegistryTest` confirms random 128-bit grants, exact generation/session/transfer scope, 30-second TTL, single use, revoke and stop invalidation.
 - Static and runtime privacy checks found no token, path or content logging, no external endpoints, no service worker and no credential persistence. The trusted-network LAN HTTP warning remains visible and covered by a DOM contract test.
 
-### Manual acceptance — 2026-09-17
+### Manual acceptance - 2026-09-17
 
 Пользователь подтвердил успешную проверку на физическом телефоне и компьютере:
 
