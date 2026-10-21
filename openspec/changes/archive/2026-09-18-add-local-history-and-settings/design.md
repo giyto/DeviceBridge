@@ -30,9 +30,9 @@
 
 В domain добавляются модели и небольшие интерфейсы `HistoryRepository`, `SettingsRepository` и `TrustedBrowserRepository`, а также use cases наблюдения, изменения, фильтрации и удаления. Compose-экраны получают только `UiState` и отправляют actions во ViewModel. Transfer/session coordinators взаимодействуют с persistence через отдельные application-scoped use cases.
 
-Это сохраняет текущую прагматичную Clean Architecture и позволяет тестировать reducers/coordinators с fake repositories. Альтернатива — передать DAO/DataStore прямо во ViewModel и coordinators — отклонена, потому что смешивает Android storage, security и presentation lifecycle.
+Это сохраняет текущую прагматичную Clean Architecture и позволяет тестировать reducers/coordinators с fake repositories. Альтернатива - передать DAO/DataStore прямо во ViewModel и coordinators - отклонена, потому что смешивает Android storage, security и presentation lifecycle.
 
-### 2. Room хранит terminal history и trusted metadata, Preferences DataStore — обычные settings
+### 2. Room хранит terminal history и trusted metadata, Preferences DataStore - обычные settings
 
 Создаётся одна локальная Room database версии 1 с двумя независимыми таблицами:
 
@@ -89,7 +89,7 @@ Android `FileSelectionItem` разделяется на draft model без `tran
 
 ### 8. Launcher icon остаётся repo-native Android resource
 
-Template icon заменяется оригинальным простым знаком DeviceBridge: два устройства, соединённые коротким bridge/link, с крупными формами и safe-zone для системных масок. Foreground и monochrome создаются как VectorDrawable, background — локальный color resource; adaptive XML используется на поддерживаемых API, а raster/vector fallback проверяется на API 29. App label остаётся `DeviceBridge`.
+Template icon заменяется оригинальным простым знаком DeviceBridge: два устройства, соединённые коротким bridge/link, с крупными формами и safe-zone для системных масок. Foreground и monochrome создаются как VectorDrawable, background - локальный color resource; adaptive XML используется на поддерживаемых API, а raster/vector fallback проверяется на API 29. App label остаётся `DeviceBridge`.
 
 Выбирается repo-native vector вместо удалённого изображения или bitmap-only набора: он детерминирован, не требует сети, масштабируется и позволяет отдельный monochrome layer. Проверка включает resource linking, preview разных masks и фактический launcher на API 29 и API 37.1.
 

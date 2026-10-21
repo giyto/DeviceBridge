@@ -84,5 +84,5 @@
 
 - [x] 10.1 На физическом телефоне и компьютере проверить в Chrome и Edge single/multiple uploads/downloads без повторного выбора скачанного файла, drag-and-drop, Android picker, ACTION_SEND/ACTION_SEND_MULTIPLE, progress, speed, cancel, retry и open file.
 - [x] 10.2 Проверить при активной file transfer двусторонний text flow, несколько browser sessions, refresh текущей вкладки, revoke, остановку/перезапуск server и отсутствие доступа из чужой session.
-- [x] 10.3 Проверить keyboard-only, screen reader announcements, light/dark theme, viewport 360–1920 и крупный системный шрифт; записать результаты и известные ограничения в docs/verification/file-transfer.md.
+- [x] 10.3 Проверить keyboard-only, screen reader announcements, light/dark theme, viewport 360-1920 и крупный системный шрифт; записать результаты и известные ограничения в docs/verification/file-transfer.md.
 - [x] 10.4 После подтверждённой ручной приёмки отметить выполненные tasks, запустить openspec validate add-file-transfer --strict, синхронизировать main specs и архивировать change через OpenSpec archive workflow.

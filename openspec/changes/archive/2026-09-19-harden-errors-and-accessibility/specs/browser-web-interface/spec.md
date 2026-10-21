@@ -46,7 +46,7 @@ Web shell MUST иметь один краткий live status для важны�
 
 ### Requirement: Web shell разделяет визуальный язык DeviceBridge с Android
 
-Web UI MUST использовать согласованные с Android semantic status colors, typography hierarchy, spacing rhythm, shape и action hierarchy, сохраняя browser conventions и semantic HTML. Тёмная тема MUST использовать спокойную near-black/graphite основу и layered surfaces, светлая тема — соответствующую читаемую палитру; обе темы MUST иметь видимые default, hover, pressed, focused, disabled, loading, error и success states без внешних fonts, CDN или styling runtime.
+Web UI MUST использовать согласованные с Android semantic status colors, typography hierarchy, spacing rhythm, shape и action hierarchy, сохраняя browser conventions и semantic HTML. Тёмная тема MUST использовать спокойную near-black/graphite основу и layered surfaces, светлая тема - соответствующую читаемую палитру; обе темы MUST иметь видимые default, hover, pressed, focused, disabled, loading, error и success states без внешних fonts, CDN или styling runtime.
 
 #### Scenario: Пользователь меняет системную тему
 

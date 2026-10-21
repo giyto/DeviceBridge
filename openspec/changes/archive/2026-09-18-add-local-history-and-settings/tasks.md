@@ -14,7 +14,7 @@
 - [x] 2.3 Подключить text/link terminal results к history recorder и проверить delivered/failed records без полного payload и без повторной отправки при storage error.
 - [x] 2.4 Подключить file completed/cancelled/failed results к history recorder и проверить сохранение metadata/checksum без URI, path, grant и file bytes.
 - [x] 2.5 Изолировать history write failure от фактического transfer result и показать отдельный безопасный persistence event; проверить fake repository failure tests.
-- [x] 2.6 Реализовать retention cleanup при старте repository и после insert для диапазона 1–365 дней, проверить UTC boundary и сохранение новых records.
+- [x] 2.6 Реализовать retention cleanup при старте repository и после insert для диапазона 1-365 дней, проверить UTC boundary и сохранение новых records.
 - [x] 2.7 Реализовать delete-one и clear-all так, чтобы они не вызывали file/storage operations и не отменяли active transfers; проверить repository integration tests.
 
 ## 3. Android history UI

@@ -1,12 +1,12 @@
 ## Context
 
-Мотивация — в proposal.md. Как устроено сейчас:
+Мотивация - в proposal.md. Как устроено сейчас:
 
 - **Запуск.** `AndroidServerLifecycleRepository.start()` вызывает `startForegroundService(ACTION_START)`. `ServerForegroundService` выполняет `startForeground(..., CONNECTED_DEVICE)` и `ServerLifecycleCoordinator.start()`. Ошибку `ForegroundServiceStartNotAllowedException` сервис уже отображает в `ServerLifecycleError.ForegroundStartNotAllowed`.
 - **Проверки перед запуском.** Разрешение локальной сети на API 37+ и уведомления на API 33+ проверяются только в `HomeViewModel` через `ServerPermissionPolicy`. Service и coordinator разрешения не проверяют.
-- **Состояние.** `ServerLifecycleCoordinator.state` — singleton `StateFlow` со значениями Stopped, Starting, Running, Stopping и Error. Уведомление уже содержит действие «Остановить» (`ACTION_STOP`).
+- **Состояние.** `ServerLifecycleCoordinator.state` - singleton `StateFlow` со значениями Stopped, Starting, Running, Stopping и Error. Уведомление уже содержит действие «Остановить» (`ACTION_STOP`).
 - **Браузеры.** Число подключённых браузеров равно `BrowserSessionState.sessions.size`, а session удаляется только при revoke или закрытии generation. Живые WebSocket-подключения `BrowserSessionCoordinator` хранит в приватном `connections`. Тот, кто закрыл вкладку, продолжает считаться подключённым.
-- **Таймеры.** Таймеров простоя сервера нет. Ping WebSocket — 15 с, timeout — 30 с.
+- **Таймеры.** Таймеров простоя сервера нет. Ping WebSocket - 15 с, timeout - 30 с.
 - **Платформа.** minSdk 29, targetSdk 37.
 
 ## Goals / Non-Goals
@@ -22,7 +22,7 @@
 
 ## Decisions
 
-### D1. Плитка — тонкий клиент существующего lifecycle
+### D1. Плитка - тонкий клиент существующего lifecycle
 
 `DeviceBridgeTileService` наблюдает `ServerLifecycleRepository.state` и `BrowserSessionState` только в `onStartListening`/`onStopListening`. Команды проходят через те же use cases `StartServerUseCase` и `StopServerUseCase`. Изменения состояния вызывают `TileService.requestListeningState`, чтобы плитка обновлялась и при закрытой шторке.
 
@@ -68,11 +68,11 @@
 
 *Альтернатива:* `AlarmManager`. Отклонена: точное пробуждение ради остановки не нужно, а для exact alarms нужны лишние разрешения.
 
-### D6. Причина `IdleTimeout` — Stopped, а не Error
+### D6. Причина `IdleTimeout` - Stopped, а не Error
 
 `ServerStopReason.IdleTimeout(minutes)` публикуется координатором в отдельном `lastStopReason: StateFlow`. Координатор записывает его раньше, чем публикует `Stopped`, и сбрасывает при следующем запуске. Тип `Stopped` не меняется, потому что его сопоставляют во многих местах. Значение живёт в памяти singleton, поэтому Home показывает его и после пересоздания Activity. После гибели процесса сервер показывается просто остановленным, как и сейчас. Error не используется, потому что это не сбой.
 
-### D7. Настройка — enum с четырьмя значениями
+### D7. Настройка - enum с четырьмя значениями
 
 `IdleStopTimeout { OFF, MIN_15, MIN_30, MIN_60 }` хранится в DataStore строкой, по умолчанию `MIN_30`. Неизвестное значение читается как default. Для E2E в debug-сборке, определяемой по `ApplicationInfo.FLAG_DEBUGGABLE`, доступно дополнительное значение 1 минута. В release-сборке репозиторий отклоняет запись этого значения и читает его как default. Это проверяется JVM-тестом. В Settings настройка находится в новой карточке «Сервер» вместе с кнопкой «Добавить плитку» (API 33+, `StatusBarManager.requestAddTileService`).
 
@@ -83,7 +83,7 @@
 ## Risks / Trade-offs
 
 - **[Android запрещает фоновый старт foreground service из плитки на части версий]** → fallback через `startActivityAndCollapse` (D2). Поведение фиксируется на API 29 и 37.1.
-- **[Счётчик «Подключённые браузеры» на Home не совпадает с живыми подключениями]** → в спеке автоостановки прямо указаны живые подключения. Приведение счётчика к единому смыслу — возможный отдельный change.
+- **[Счётчик «Подключённые браузеры» на Home не совпадает с живыми подключениями]** → в спеке автоостановки прямо указаны живые подключения. Приведение счётчика к единому смыслу - возможный отдельный change.
 - **[Браузер в фоне без подключения держит сервер открытым]** → невозможно: вкладка без WebSocket не считается активной, отсчёт идёт.
 - **[Пользователь недоволен остановкой по умолчанию после обновления]** → в руководстве и Settings видно значение, одно касание выключает автоостановку. На Home после остановки показана причина.
 - **[Плитка на заблокированном экране]** → запуск только после `unlockAndRun`.

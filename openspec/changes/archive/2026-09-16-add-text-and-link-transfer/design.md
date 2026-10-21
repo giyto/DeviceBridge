@@ -30,7 +30,7 @@
 
 Связь с browser session выполняется по `BrowserSessionId` и через узкий gateway отправки session events. Авторизация, выдача token и закрытие WebSocket остаются ответственностью существующего session coordinator; text coordinator получает только уже авторизованный session context. Закрытие server generation сначала прекращает text operations, затем закрывает sessions и listener в существующем lifecycle порядке.
 
-Альтернатива — добавить text state прямо в `BrowserSessionCoordinator`. Она отвергнута, потому что смешивает аутентификацию, пользовательские данные и последующие file transfers в один крупный компонент.
+Альтернатива - добавить text state прямо в `BrowserSessionCoordinator`. Она отвергнута, потому что смешивает аутентификацию, пользовательские данные и последующие file transfers в один крупный компонент.
 
 ### 2. Один канонический протокол поверх защищённого HTTP и WebSocket
 
@@ -38,24 +38,24 @@ Browser → Android использует `POST /api/v1/text` с bearer token. An
 
 Типы сообщений:
 
-- `text.send` — HTTP command browser → Android с `content`;
-- `text.accepted` — HTTP response с server timestamp, вычисленным `contentKind` и текущим status;
-- `text.received` — адресное событие Android → конкретная browser session;
-- `text.ack` — подтверждение помещения входящего элемента в browser feed;
-- `text.snapshot` — ограниченный набор элементов этой session после WebSocket re-authentication;
-- `text.error` — протокольная ошибка, которую можно соотнести с `messageId`.
+- `text.send` - HTTP command browser → Android с `content`;
+- `text.accepted` - HTTP response с server timestamp, вычисленным `contentKind` и текущим status;
+- `text.received` - адресное событие Android → конкретная browser session;
+- `text.ack` - подтверждение помещения входящего элемента в browser feed;
+- `text.snapshot` - ограниченный набор элементов этой session после WebSocket re-authentication;
+- `text.error` - протокольная ошибка, которую можно соотнести с `messageId`.
 
 Server сам вычисляет `contentKind` и server timestamp; присланное клиентом время не используется как доказательство порядка или безопасности. HTTP contract использует `200` для нового или идемпотентно повторённого принятия, `400` для некорректной схемы/версии, `401` для session authorization, `409` для повторного `messageId` с другим payload и `413` для превышения 100 КБ. Request body ограничивается до десериализации с небольшим фиксированным запасом на JSON envelope.
 
-Альтернатива — передавать команды обоих направлений только по WebSocket. Она отвергнута для Browser → Android: защищённый POST проще повторять, тестировать и связывать с определённым HTTP-результатом, тогда как WebSocket уже нужен для server-push.
+Альтернатива - передавать команды обоих направлений только по WebSocket. Она отвергнута для Browser → Android: защищённый POST проще повторять, тестировать и связывать с определённым HTTP-результатом, тогда как WebSocket уже нужен для server-push.
 
 ### 3. Идемпотентность и текущая лента живут только в server generation
 
-Ключ операции — `(generationId, sessionId, messageId)`. Registry хранит fingerprint канонического payload и итог первого принятия. Повтор с тем же fingerprint возвращает тот же результат, а другое содержимое с тем же ID даёт conflict. Android → Browser остаётся `sending` до `text.ack`; при закрытии соединения или bounded timeout операция становится `failed`, и только пользователь запускает повтор.
+Ключ операции - `(generationId, sessionId, messageId)`. Registry хранит fingerprint канонического payload и итог первого принятия. Повтор с тем же fingerprint возвращает тот же результат, а другое содержимое с тем же ID даёт conflict. Android → Browser остаётся `sending` до `text.ack`; при закрытии соединения или bounded timeout операция становится `failed`, и только пользователь запускает повтор.
 
 Coordinator хранит не более 100 text items суммарно на generation и вытесняет самые старые завершённые элементы; pending operations не вытесняются до результата. При WebSocket re-authentication он отдаёт snapshot только элементов, доступных этой session. Web client также дедуплицирует snapshot/events по `messageId` и ограничивает DOM feed. Никакой full-text state не записывается в Room, DataStore, файл, backup или Android saved-state bundle.
 
-Альтернатива — сразу внедрить Room history. Она отложена до отдельного change: ТЗ требует иной retention contract и безопасный короткий preview, а текущему этапу достаточно generation-scoped state.
+Альтернатива - сразу внедрить Room history. Она отложена до отдельного change: ТЗ требует иной retention contract и безопасный короткий preview, а текущему этапу достаточно generation-scoped state.
 
 ### 4. Классификация ссылок одинакова на Android и server
 
@@ -71,11 +71,11 @@ Domain validator принимает непустой текст до 102400 UTF-
 
 Главный экран и foreground notification наблюдают тот же repository state: уведомление показывает только факт ожидающей text operation, не её содержимое, и возвращается к обычному server status после acknowledgement или ошибки.
 
-Альтернатива — читать clipboard при открытии экрана или отправлять share intent сразу. Оба варианта нарушают явное пользовательское действие из ТЗ.
+Альтернатива - читать clipboard при открытии экрана или отправлять share intent сразу. Оба варианта нарушают явное пользовательское действие из ТЗ.
 
 ### 6. Web text state отделяется от session state
 
-Чистый `TextTransferController` получает авторизованный API client и event channel, а view отображает form/feed. Существующий `SessionController` остаётся владельцем pairing и token; при переходе в connected он активирует text controller, а при `401`, revoke или исчерпании reconnect — деактивирует его. DOM получает пользовательское содержимое только через `textContent`/value, никогда через `innerHTML`.
+Чистый `TextTransferController` получает авторизованный API client и event channel, а view отображает form/feed. Существующий `SessionController` остаётся владельцем pairing и token; при переходе в connected он активирует text controller, а при `401`, revoke или исчерпании reconnect - деактивирует его. DOM получает пользовательское содержимое только через `textContent`/value, никогда через `innerHTML`.
 
 Copy helper сначала проверяет secure context и `navigator.clipboard`, перехватывает отказ permission и переключает карточку на выделяемое поле с инструкцией. Это важно для LAN HTTP, где Clipboard API обычно недоступен. Новые runtime dependencies и service worker не добавляются.
 
@@ -85,7 +85,7 @@ Copy helper сначала проверяет secure context и `navigator.clipb
 
 Server применяет существующую нормализацию: trim, непустое значение, максимум 64 символа, отсутствие ISO control characters. Compose и web выводят label как plain text. Метка остаётся client-provided подсказкой и не влияет на pairing, token или права.
 
-Альтернатива — определять browser только на Android по HTTP User-Agent. Она не даёт свойства подлинности, дублирует parser на двух языках и хуже работает с сокращёнными UA hints; для информационной подписи достаточно tested web classifier плюс server bounds.
+Альтернатива - определять browser только на Android по HTTP User-Agent. Она не даёт свойства подлинности, дублирует parser на двух языках и хуже работает с сокращёнными UA hints; для информационной подписи достаточно tested web classifier плюс server bounds.
 
 ### 8. Production route policy расширяется минимально
 

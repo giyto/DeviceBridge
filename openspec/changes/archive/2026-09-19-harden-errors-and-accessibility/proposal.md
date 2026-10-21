@@ -8,7 +8,7 @@
 - Android и web получают согласованные состояния loading, empty, disabled, success, cancellation, offline и error без ложного успеха и без потери уже введённых или выбранных данных там, где повтор допустим.
 - Ограниченное восстановление соединения отделяется от повторного выполнения пользовательской операции: WebSocket может переподключаться в заданных пределах, а повтор text/file transfer после неопределённого результата запускается только пользователем и сохраняет идемпотентный идентификатор.
 - Добавляются понятные инструкции первого запуска и подключения: одна локальная сеть, актуальный адрес, подтверждение на телефоне, доверенная сеть и действия при смене IP или недоступности сервера.
-- Android UI и web shell укрепляются для TalkBack/screen reader, клавиатуры, видимого фокуса, live status, увеличенного шрифта, светлой/тёмной темы, phone/large-screen layout и browser viewport 360–1920 px.
+- Android UI и web shell укрепляются для TalkBack/screen reader, клавиатуры, видимого фокуса, live status, увеличенного шрифта, светлой/тёмной темы, phone/large-screen layout и browser viewport 360-1920 px.
 - Android и web получают единый спокойный визуальный язык DeviceBridge: design tokens, согласованные surfaces, типографику, status colors, primary/secondary action hierarchy и все обязательные interaction states.
 - Android Home становится компактным dashboard со status surface, блоком подключения, sessions, quick actions и active transfers; Text и Files получают устойчивые ленты/карточки, а phone bottom navigation адаптируется в navigation rail на large screen.
 - Web shell получает двухколоночный desktop layout, одноколоночный narrow layout и согласованные text/file/status surfaces без overflow при zoom 200% и длинном содержимом.

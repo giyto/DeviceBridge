@@ -31,7 +31,7 @@ Pairing пересекает Android UI, Ktor HTTP/WebSocket, web state, кри�
 
 Каждый запуск runtime активирует новый opaque generation handle в session coordinator. Ktor routes захватывают этот handle, а любое обращение со старым handle отклоняется. `ServerRuntime.stop()` сначала закрывает generation и ожидающие requests/WebSockets, затем освобождает CIO listener. Это сохраняет единственный источник истины и не позволяет позднему callback прошлого запуска создать session в новом.
 
-Альтернатива — хранить sessions в Ktor route objects и отдельно копировать их в ViewModel — отклонена из-за двух источников истины, сложного revoke и риска переживших stop callbacks.
+Альтернатива - хранить sessions в Ktor route objects и отдельно копировать их в ViewModel - отклонена из-за двух источников истины, сложного revoke и риска переживших stop callbacks.
 
 ### 2. Короткий код и подтверждение моделируются разными барьерами
 
@@ -39,13 +39,13 @@ Pairing пересекает Android UI, Ktor HTTP/WebSocket, web state, кри�
 
 `POST /api/v1/session/challenge` создаёт bounded opaque `challengeId`. `POST /api/v1/session/confirm` принимает `challengeId`, code и нормализованный client label, валидирует их и suspend-ожидает решение Android host не более 60 секунд. Правильный code создаёт только `PendingBrowserRequest`; token возвращается тем же confirm response исключительно после approve. Deny, timeout, expiry и lifecycle stop завершают ожидающий response без token.
 
-Альтернатива — выдать token сразу после code — отклонена, потому что нарушает обязательное подтверждение на телефоне. Отдельный polling endpoint не добавляется: он расширяет публичную поверхность и усложняет cleanup; bounded long-poll соответствует минимальному API ТЗ.
+Альтернатива - выдать token сразу после code - отклонена, потому что нарушает обязательное подтверждение на телефоне. Отдельный polling endpoint не добавляется: он расширяет публичную поверхность и усложняет cleanup; bounded long-poll соответствует минимальному API ТЗ.
 
 ### 3. Rate limit привязан к source IPv4 и ограничен по памяти
 
 Неверные подтверждения учитываются по нормализованному remote IPv4 внутри текущего generation. После пяти ошибок источник блокируется на 60 секунд; успешная проверка не переносит счётчик в другую generation. Registry имеет фиксированный предел записей и удаляет истёкшие oldest entries, чтобы запросы не создавали неограниченный рост памяти. Дополнительный небольшой global concurrency limit ограничивает число pending long-poll requests.
 
-Альтернатива — один глобальный счётчик — позволила бы одному соседу заблокировать владельца. Только browser fingerprint отклонён: label и User-Agent контролируются клиентом и не являются идентичностью.
+Альтернатива - один глобальный счётчик - позволила бы одному соседу заблокировать владельца. Только browser fingerprint отклонён: label и User-Agent контролируются клиентом и не являются идентичностью.
 
 ### 4. Raw token выдаётся один раз, server хранит только digest
 
@@ -53,7 +53,7 @@ Pairing пересекает Android UI, Ktor HTTP/WebSocket, web state, кри�
 
 HTTP использует `Authorization: Bearer`; WebSocket принимает token только в первом JSON message `session.auth`, после чего raw token не повторяется. Auth frame должен прийти за короткий timeout до любых private events. Browser сохраняет raw token в `sessionStorage` текущей вкладки, не в URL, cookie или `localStorage`, и удаляет его при 401, revoke, stop либо несовместимой версии.
 
-Альтернатива — cookie — требует отдельной CSRF-модели и не даёт преимущества для локального bearer API. Token в query string отклонён из-за browser history, access logs и referrer leakage. Полностью memory-only browser token отклонён как слишком неудобный при обычном refresh, хотя server-side срок всё равно ограничен lifecycle.
+Альтернатива - cookie - требует отдельной CSRF-модели и не даёт преимущества для локального bearer API. Token в query string отклонён из-за browser history, access logs и referrer leakage. Полностью memory-only browser token отклонён как слишком неудобный при обычном refresh, хотя server-side срок всё равно ограничен lifecycle.
 
 ### 5. Host allowlist и same-origin guard применяются ко всему session API
 
@@ -61,7 +61,7 @@ HTTP использует `Authorization: Bearer`; WebSocket принимает 
 
 Публичная поверхность: `/`, `/assets/*`, `/web-manifest.json`, `POST /api/v1/session/challenge`, `POST /api/v1/session/confirm`. Защищённая поверхность этого change: `GET /api/v1/status`, `DELETE /api/v1/session`, `WS /api/v1/events`. Unfinished text/file/transfer routes и `/diagnostics/*` сохраняют 404 в production независимо от token.
 
-Альтернатива — разрешить API-запросы без `Origin` только по bearer token — отклонена: продуктом является встроенная browser page, поэтому более узкий browser-only contract предпочтительнее универсального LAN API.
+Альтернатива - разрешить API-запросы без `Origin` только по bearer token - отклонена: продуктом является встроенная browser page, поэтому более узкий browser-only contract предпочтительнее универсального LAN API.
 
 ### 6. Протокол имеет явные DTO и стабильные ошибки
 
@@ -69,7 +69,7 @@ Session HTTP DTO используют JSON, `protocolVersion`, bounded стро�
 
 Каждое WebSocket message содержит `protocolVersion`, `messageId`, `type`, `timestamp`; unknown major version закрывает socket до регистрации session connection. Повторный `messageId` auth/control message не создаёт вторую операцию. Payload limits применяются до десериализации больших значений.
 
-Альтернатива — свободные maps и текстовые ошибки — отклонена: следующий transfer change должен опираться на версионированную и тестируемую protocol boundary.
+Альтернатива - свободные maps и текстовые ошибки - отклонена: следующий transfer change должен опираться на версионированную и тестируемую protocol boundary.
 
 ### 7. Android и web используют независимые presentation state machines
 
@@ -77,7 +77,7 @@ Session HTTP DTO используют JSON, `protocolVersion`, bounded стро�
 
 Web controller имеет состояния `checking`, `readyForPairing`, `submitting`, `awaitingPhone`, `connected`, `blocked`, `expired`, `denied`, `sessionLost`, `offline`. DOM adapter остаётся отдельно тестируемым, все элементы доступны с клавиатуры, а transfer controls остаются disabled после подключения.
 
-Альтернатива — встроить fetch/WebSocket логику непосредственно в DOM handlers или Ktor callbacks во ViewModel — отклонена как нарушение существующих Clean Architecture/MVVM границ.
+Альтернатива - встроить fetch/WebSocket логику непосредственно в DOM handlers или Ktor callbacks во ViewModel - отклонена как нарушение существующих Clean Architecture/MVVM границ.
 
 ### 8. Никакой persistent trust в текущем change
 

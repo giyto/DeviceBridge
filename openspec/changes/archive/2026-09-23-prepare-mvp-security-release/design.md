@@ -1,6 +1,6 @@
 ## Context
 
-Существующие capabilities уже реализуют server lifecycle, browser authorization, text/file transfer, history/settings и recovery. Этот change не меняет продуктовую архитектуру: он переводит собранный функциональный MVP в проверяемый release candidate и закрывает обязательный security spike из ТЗ. Основное ограничение — HTTP/WebSocket внутри LAN не обеспечивает конфиденциальность от другого участника той же сети.
+Существующие capabilities уже реализуют server lifecycle, browser authorization, text/file transfer, history/settings и recovery. Этот change не меняет продуктовую архитектуру: он переводит собранный функциональный MVP в проверяемый release candidate и закрывает обязательный security spike из ТЗ. Основное ограничение - HTTP/WebSocket внутри LAN не обеспечивает конфиденциальность от другого участника той же сети.
 
 ## Goals / Non-Goals
 

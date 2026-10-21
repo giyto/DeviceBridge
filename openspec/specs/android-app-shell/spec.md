@@ -346,7 +346,7 @@ Home, Text, Files, History и Settings MUST показывать согласо�
 
 ### Requirement: Android shell использует единую визуальную систему DeviceBridge
 
-Android UI MUST использовать согласованную систему `Midnight Bridge / Porcelain Bridge`: semantic design tokens для light/dark colors, typography, spacing по сетке 4/8, shape, border, elevation и status meanings. Тёмная тема MUST использовать спокойную near-black/graphite основу с ограниченным сине-фиолетовым accent, а светлая — холодный нейтральный фон и белые рабочие surfaces без чисто белого page background. Primary, secondary и destructive actions MUST иметь стабильную иерархию и состояния default, pressed, focused, disabled, loading, error и success. Визуальная система MUST сохранять Material platform conventions, MUST NOT зависеть от внешних ресурсов и MUST NOT использовать glow, blur или motion как единственный признак состояния.
+Android UI MUST использовать согласованную систему `Midnight Bridge / Porcelain Bridge`: semantic design tokens для light/dark colors, typography, spacing по сетке 4/8, shape, border, elevation и status meanings. Тёмная тема MUST использовать спокойную near-black/graphite основу с ограниченным сине-фиолетовым accent, а светлая - холодный нейтральный фон и белые рабочие surfaces без чисто белого page background. Primary, secondary и destructive actions MUST иметь стабильную иерархию и состояния default, pressed, focused, disabled, loading, error и success. Визуальная система MUST сохранять Material platform conventions, MUST NOT зависеть от внешних ресурсов и MUST NOT использовать glow, blur или motion как единственный признак состояния.
 
 #### Scenario: Пользователь переключает системную тему
 

@@ -1,6 +1,6 @@
 ## Context
 
-См. `proposal.md` — Ktor 3.5.2 / CIO уже принят по итогам spike, но сейчас сервер и маршруты существуют только в debug source set, а web-проекта и встроенных ресурсов нет. Согласно `docs/technical-specification.md`, браузерный клиент должен поставляться в единственном Android APK, работать без интернета, использовать TypeScript/Vite без обязательного runtime-фреймворка и предшествовать production lifecycle и pairing.
+См. `proposal.md` - Ktor 3.5.2 / CIO уже принят по итогам spike, но сейчас сервер и маршруты существуют только в debug source set, а web-проекта и встроенных ресурсов нет. Согласно `docs/technical-specification.md`, браузерный клиент должен поставляться в единственном Android APK, работать без интернета, использовать TypeScript/Vite без обязательного runtime-фреймворка и предшествовать production lifecycle и pairing.
 
 Этот change пересекает web toolchain, Gradle packaging, Android AssetManager и debug Ktor adapter. Поэтому статическая раздача проверяется на принятом debug-сервере, но Ktor не переносится в release classpath: release пока содержит только web assets, а production server lifecycle появится в change `add-server-lifecycle`.
 
@@ -29,7 +29,7 @@
 
 ### 1. Vanilla TypeScript и Vite без runtime-фреймворка
 
-Исходники располагаются в `web/` и состоят из семантического HTML, CSS и небольших TypeScript-модулей. Vite отвечает только за dev/build pipeline, а Vitest — за unit-тесты. Поддерживаемая LTS-версия Node.js фиксируется в `web/.nvmrc` и `package.json#engines`; точные зависимости фиксируются `package-lock.json`, а воспроизводимая установка выполняется через `npm ci`.
+Исходники располагаются в `web/` и состоят из семантического HTML, CSS и небольших TypeScript-модулей. Vite отвечает только за dev/build pipeline, а Vitest - за unit-тесты. Поддерживаемая LTS-версия Node.js фиксируется в `web/.nvmrc` и `package.json#engines`; точные зависимости фиксируются `package-lock.json`, а воспроизводимая установка выполняется через `npm ci`.
 
 React/Vue отклонены: текущий shell содержит одну страницу, конечный автомат состояния и одно действие retry, поэтому runtime-фреймворк увеличил бы bundle и поверхность обновлений без измеримой пользы. Пересмотр допустим отдельным design-решением, если будущие transfer flows сделают ручной DOM-rendering сложнее.
 
@@ -39,7 +39,7 @@ Vite создаёт очищаемый каталог `app/src/main/assets/web`:
 
 `node_modules` и созданные web assets исключаются из Git; в репозитории хранятся исходники, конфигурация, lock-файл и пустой маркер каталога назначения. На чистом checkout Gradle сообщает понятную ошибку при отсутствии Node/npm и не подменяет web bundle старой копией.
 
-Альтернатива — коммитить `dist` и обновлять его вручную. Она отклонена из-за риска рассинхронизации исходников и APK. Выделять web в отдельный Gradle-модуль также преждевременно: это build-time input одного `app`.
+Альтернатива - коммитить `dist` и обновлять его вручную. Она отклонена из-за риска рассинхронизации исходников и APK. Выделять web в отдельный Gradle-модуль также преждевременно: это build-time input одного `app`.
 
 ### 3. Android asset provider отделён от Ktor routes
 
@@ -68,7 +68,7 @@ Debug server предоставляет same-origin `GET /web-manifest.json` и 
 
 Файл создаётся вместе с bundle, получает `Cache-Control: no-store` и не содержит имени устройства, Android API, IP, uptime, диагностического токена или пользовательских данных. Успешная загрузка подтверждает только достижимость статической страницы и совместимость shell. `/api/v1/status` не регистрируется публично; защищённый endpoint и остальные `/api/v1` маршруты остаются change `add-secure-browser-session`.
 
-Использовать `/diagnostics/health` отклонено: браузеру пришлось бы получать spike-токен, а временный контракт проник бы в production web code. Создавать WebSocket `/api/v1/events` сейчас также рано — его lifecycle и авторизация ещё не определены.
+Использовать `/diagnostics/health` отклонено: браузеру пришлось бы получать spike-токен, а временный контракт проник бы в production web code. Создавать WebSocket `/api/v1/events` сейчас также рано - его lifecycle и авторизация ещё не определены.
 
 ### 6. Соединение моделируется конечным автоматом в web-слое
 
@@ -98,7 +98,7 @@ Web routes получают allowlist допустимых host-значений
 
 ## Risks / Trade-offs
 
-- **Риск:** Node/npm увеличат время обычной Android-сборки. → Gradle tasks используют inputs/outputs, `npm ci` повторяется только при изменении lock-файла, а Vite build — при изменении web inputs.
+- **Риск:** Node/npm увеличат время обычной Android-сборки. → Gradle tasks используют inputs/outputs, `npm ci` повторяется только при изменении lock-файла, а Vite build - при изменении web inputs.
 - **Риск:** generated assets могут загрязнять worktree или остаться устаревшими. → Каталог очищается перед сборкой, исключается из Git и всегда создаётся как зависимость Android packaging.
 - **Риск:** browser cache смешает разные версии. → HTML и web manifest не кэшируются, а остальные URL содержат content hash и считаются immutable.
 - **Риск:** динамический asset path откроет traversal. → Provider принимает только allowlist из build manifest и никогда не обращается к произвольному пути устройства.
